@@ -58,6 +58,14 @@ jobs:
             exit 1
           fi
 
+      # 지침 예제 시험(GuideExamplesTests)이 make_template.py·check_template.py를 실제로 돌린다 — 없으면 그 시험만 건너뛴다
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 지침 예제 시험 준비(openpyxl)
+        run: pip install openpyxl
+
       - name: 테스트
         run: dotnet test tests/MyPlugin.Tests -c Release --nologo
 

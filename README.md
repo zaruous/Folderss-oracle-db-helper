@@ -29,6 +29,7 @@
 | 트랜잭션 | 자동 커밋 끔. DML은 커밋 전까지 "커밋 대기"로 표시하고 [커밋]·[롤백]으로 끝냄. 연결을 끊거나 창을 닫을 때 커밋 대기가 있으면 물어봄 |
 | 안전장치 | WHERE 없는 UPDATE·DELETE, DROP·TRUNCATE·ALTER 등은 확인 체크 후 실행. 커밋 대기 중 DDL 실행(자동 커밋됨) 경고. 컴파일 오류가 있는 PL/SQL은 메시지 탭에 오류 목록 표시 |
 | 결과 | NULL·숫자 구분, 열 머리에 Oracle 형식, 열 머리를 눌러 정렬(오름차순 → 내림차순 → 해제, 숫자 열은 수로, NULL은 Oracle 기본처럼 오름차순 맨 뒤), TSV 복사(`Ctrl+C`·[복사], 화면 순서), 메시지·실행 기록 |
+| 테이블 정의서 (PoC) | 트리에서 테이블을 `Ctrl`·`Shift`+클릭으로 여러 개 고르거나 스키마·DB를 고른 뒤 오른쪽 메뉴(또는 `도구 > 테이블 정의서 만들기…`). 대상 선택 창에서 스키마별로 **정규식**(대소문자 무시·주석도 찾기)이나 여러 줄 선택 + `Space`로 체크하고, 문서 정보(제목·프로젝트·작성자·버전·작성일)를 넣으면 **엑셀 템플릿**에 Velocity 변수를 채운 .xlsx를 만듦. 고친 양식은 **사용자 양식 폴더**(팝업의 [양식 폴더])에 넣으면 목록에 "내 양식"으로 보이고, [복사해서 고치기]로 기본 양식을 꺼내 엑셀에서 고칠 수 있음. LLM으로 양식을 만들 때는 [LLM 지침 복사] — 지침: https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/ . [만들기…] 때 입력한 문서 정보(제목·프로젝트·시스템/모듈·작성자·버전·작성일·설명)와 고른 양식·저장 폴더는 플러그인 설정에 저장해 다음에 창을 열 때 불러옴. 기본 양식은 2종: **기본**(표지 · 목록(시트 링크) · 테이블마다 열·인덱스·제약 조건)과 **명세서형**(워크스코브 테이블 명세서 양식 구성 — 논리명·키 PK/FK/UK/IX·외래키 삭제 규칙·인덱스 유형·공통 코드·개정 이력). |
 
 ## 알아 둘 점
 
@@ -41,8 +42,30 @@
 - **여러 문장 실행**에서는 문장 안에 빈 줄이 있어도 됩니다: 빈 줄 다음이 `FROM`·`WHERE`·`SET`·`AND`처럼 문장을 잇는 말이면 같은 문장으로 봅니다(`;`·`/` 줄은 언제나 문장 끝). 한 번에 결과는 20개까지 남깁니다.
 - **문장 구분**: `;`, 빈 줄, `/`만 있는 줄. PL/SQL 블록(BEGIN·DECLARE·CREATE PROCEDURE 등)은 `/` 줄로 끝내세요.
 - **접속 방식**: 호스트·포트·서비스명(EZConnect)만 지원합니다. TNS 별칭과 Wallet(mTLS)은 아직 지원하지 않습니다.
-- **확인 상태**: 문장 분석·조회 SQL·세션·트리 로직은 단위 테스트(900여 개, Linux·Windows)로, 접속·트리 조회·SQL 실행·트랜잭션·취소는 실제 Oracle 12.1(Docker)에 붙는 시험(`tests/MyPlugin.OracleIT`)으로 확인했습니다. Windows 화면은 Folderss 테마를 입힌 시험 창에서 편집기 정렬·SQL 임시 저장·트리 메뉴(다시 연결)·결과 정렬·메뉴 막대·SQL 파일 열기/저장·여러 문장 결과·빠른 조회(F1)·테이블 정보(F4)를 확인했습니다(Folderss 본체 안에서 띄워 본 것은 아님).
+- **확인 상태**: 문장 분석·조회 SQL·세션·트리 로직·템플릿 엔진·엑셀 렌더러·LLM용 양식 지침은 단위 테스트(1,200여 개, Linux·Windows)로, 접속·트리 조회·SQL 실행·트랜잭션·취소·테이블 정의서 조회는 실제 Oracle 12.1(Docker)에 붙는 시험(`tests/MyPlugin.OracleIT`)으로 확인했습니다. Windows 화면은 Folderss 테마를 입힌 시험 창에서 편집기 정렬·SQL 임시 저장·트리 메뉴(다시 연결)·결과 정렬·메뉴 막대·SQL 파일 열기/저장·여러 문장 결과·빠른 조회(F1)·테이블 정보(F4)를, 테이블 정의서(트리 여러 줄 선택·오른쪽 메뉴·도구 메뉴·대상 선택 팝업·내 양식·만들기)는 Folderss 본체 안에서 확인했습니다.
 - **취소**: [취소]는 in-band break로 보냅니다. 기본값(OOB, TCP 긴급 데이터)은 Docker Desktop·일부 방화벽·NAT를 지나지 못해 서버가 취소를 받지 못합니다.
+
+### 테이블 정의서 템플릿
+
+템플릿은 엑셀 파일(.xlsx)입니다. 기본 양식은 코드가 만듭니다(`Doc/TableSpecTemplate.cs` 기본, `Doc/TableSpecSheetTemplate.cs` 명세서형, 목록은 `Doc/TableSpecTemplates.cs`). 대상 선택 창의 [복사해서 고치기]로 **사용자 양식 폴더**(`%LOCALAPPDATA%\Folderss\plugin-data\zaruous.folderss-db-helper\templates\`)에 꺼내 엑셀에서 고치면 [양식] 목록에 "내 양식"으로 보입니다. 다른 위치의 파일은 [템플릿 파일]로 고릅니다.
+
+**LLM으로 양식 만들기**: 작성 지침을 GitHub Pages에 올려 두었습니다 — [사람용](https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/) · [Markdown 원문](https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/guide.md) · [variables.json](https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/variables.json) · [llms.txt](https://zaruous.github.io/Folderss-oracle-db-helper/llms.txt). 팝업의 [LLM 지침 복사]를 누르면 지침 주소와 양식 폴더가 든 요청 글이 복사되니, 원하는 모양을 덧붙여 LLM(Claude Code 등)에게 보내면 됩니다. LLM은 지침의 `check_template.py`로 결과를 스스로 검사합니다. 지침 원본은 `docs/table-spec-templates/`(바꾸면 `gh-pages` 브랜치에 다시 올림). 쓸 수 있는 변수와 문법은 템플릿의 `_변수 설명` 시트에 있습니다(이름이 `_`로 시작하는 시트는 결과에서 빠짐).
+
+| 쓰는 곳 | 문법 | 예 |
+|---|---|---|
+| 셀 안 | `${…}`·`$…` 참조, `$!{…}`(값이 없으면 빈 칸). 셀 전체가 참조 하나면 숫자는 숫자 셀로 | `${table.name}`, `${col.no}` |
+| 셀 안 | `#if(식)…#{else}…#end`, `#set($x = 식)` | `#if($col.isFk)→ ${col.fkRef}#end` |
+| 줄 지시문 | 한 줄에 그 셀 하나만 있으면 줄 단위로 동작하고 결과에서는 지워짐: `#foreach($x in $목록)` ~ `#end`(사이 줄을 항목마다 되풀이), `#if`·`#elseif`·`#else`·`#end`, `#set` | `#foreach($col in $table.columns)` |
+| 시트 지시문 | 시트 맨 위 `#sheet($table in $tables)`: 항목마다 시트를 복사. 탭 이름도 템플릿 | 탭 이름 `${table.sheetName}` |
+| 수식 | `${`가 든 수식만 채움(`$A$1` 같은 절대 참조는 그대로) | `=HYPERLINK("#'${t.sheetName}'!A1","${t.name}")` |
+
+변수: `$doc`(title·project·system·author·version·date·schemas·tableCount), `$db`(name·user·address·version), `$tables` → `$table`(owner·name·logicalName·description·comment·type·numRows·tablespace·pkName·pkColumns·columns·indexes·constraints·foreignKeys·checks…) → `$col`(no·name·logicalName·description·dataType·length·typeLabel·nullable·key·pk·fk·fkRef·default), `$idx`(name·columns·kind·unique·type·status), `$con`(name·typeLabel·columns·target·deleteRule·condition·status), `$codes` → `$code`(group·code·usage), `$foreach.count`.
+
+논리명은 Oracle에 따로 없어 **주석을 나눠** 씁니다: 여러 줄이면 첫 줄, 한 줄이면 첫 `:`·`|`·` - ` 앞, `이름(설명)`이면 이름 — 나머지가 설명.
+
+- Velocity 문법 일부만 직접 구현했습니다(`#macro`·`#parse`·인자 있는 메서드 호출은 없음). 엑셀은 ClosedXML로 읽고 씁니다.
+- 데이터는 스키마마다 이름 500개씩 묶어 4번(요약·열·인덱스·제약 조건) 조회합니다. 기본값(`DATA_DEFAULT`)·검사 조건도 읽습니다.
+- 조건부 서식·데이터 유효성·그림은 줄을 되풀이해도 따라 움직이지 않습니다.
 
 ### 실제 Oracle로 시험
 

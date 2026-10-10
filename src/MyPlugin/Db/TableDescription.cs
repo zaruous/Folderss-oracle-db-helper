@@ -24,6 +24,8 @@ namespace MyPlugin
         public DateTime? LastAnalyzed { get; set; }
         public DateTime? Created { get; set; }
         public DateTime? LastDdl { get; set; }
+        /// <summary>테이블스페이스(ALL_TABLES.TABLESPACE_NAME). 정의서만 읽는다(F4는 null).</summary>
+        public string Tablespace { get; set; }
         public List<DescribedColumn> Columns { get; } = new List<DescribedColumn>();
         public List<IndexDescription> Indexes { get; } = new List<IndexDescription>();
         public List<ConstraintDescription> Constraints { get; } = new List<ConstraintDescription>();
@@ -33,6 +35,8 @@ namespace MyPlugin
     {
         public ColumnInfo Column { get; set; }
         public string Comment { get; set; }
+        /// <summary>기본값(ALL_TAB_COLUMNS.DATA_DEFAULT, 앞뒤 공백 뺌). 정의서만 읽는다(F4는 null).</summary>
+        public string Default { get; set; }
     }
 
     internal sealed class IndexDescription
@@ -43,6 +47,8 @@ namespace MyPlugin
         public string Status { get; set; }
         /// <summary>열 목록("A, B DESC").</summary>
         public string Columns { get; set; }
+        /// <summary>열 하나씩(순서대로). 정의서만 채운다.</summary>
+        public List<string> ColumnNames { get; } = new List<string>();
     }
 
     internal sealed class ConstraintDescription
@@ -54,6 +60,16 @@ namespace MyPlugin
         public string Columns { get; set; }
         /// <summary>외래 키가 가리키는 테이블("OWNER.TABLE"). 아니면 null.</summary>
         public string Reference { get; set; }
+        /// <summary>열 하나씩(순서대로). 정의서만 채운다.</summary>
+        public List<string> ColumnNames { get; } = new List<string>();
+        /// <summary>외래 키가 가리키는 열(순서대로). 정의서만 채운다.</summary>
+        public List<string> ReferenceColumns { get; } = new List<string>();
+        /// <summary>검사 조건(ALL_CONSTRAINTS.SEARCH_CONDITION). 정의서만 읽는다.</summary>
+        public string Condition { get; set; }
+        /// <summary>외래 키의 삭제 규칙(NO ACTION·CASCADE·SET NULL). 정의서만 읽는다.</summary>
+        public string DeleteRule { get; set; }
+        /// <summary>기본 키·고유 제약이 쓰는 인덱스 이름(ALL_CONSTRAINTS.INDEX_NAME). 정의서만 읽는다.</summary>
+        public string IndexName { get; set; }
     }
 
     /// <summary>F4 대상 후보 한 줄(ResolveTable 결과).</summary>

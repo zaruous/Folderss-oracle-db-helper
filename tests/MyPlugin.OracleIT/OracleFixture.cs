@@ -159,6 +159,13 @@ namespace MyPlugin.OracleIT
                 Exec(c, "CREATE FUNCTION " + s + "F_DOUBLE(x NUMBER) RETURN NUMBER AS BEGIN RETURN x * 2; END;");
                 Exec(c, "CREATE PACKAGE " + s + "PKG_UTIL AS FUNCTION ver RETURN VARCHAR2; END;");
                 Exec(c, "CREATE PACKAGE BODY " + s + "PKG_UTIL AS FUNCTION ver RETURN VARCHAR2 IS BEGIN RETURN '1.0'; END; END;");
+                // 테이블 정의서(F4): 주석·기본값·검사 조건·보조 인덱스
+                Exec(c, "COMMENT ON TABLE " + s + "ORDERS IS '주문'");
+                Exec(c, "COMMENT ON COLUMN " + s + "ORDERS.ORDER_ID IS '주문 번호'");
+                Exec(c, "COMMENT ON COLUMN " + s + "ORDERS.CUSTOMER_NAME IS '고객 이름'");
+                Exec(c, "ALTER TABLE " + s + "ORDERS MODIFY CREATED_AT DEFAULT SYSDATE");
+                Exec(c, "ALTER TABLE " + s + "ORDER_ITEMS ADD CONSTRAINT CK_ORDER_ITEMS_QTY CHECK (QTY > 0)");
+                Exec(c, "CREATE INDEX " + s + "IX_ORDERS_NAME ON " + s + "ORDERS(CUSTOMER_NAME, CREATED_AT)");
                 Exec(c, "BEGIN DBMS_STATS.GATHER_TABLE_STATS('" + User + "', 'ORDERS'); END;");
             }
         }

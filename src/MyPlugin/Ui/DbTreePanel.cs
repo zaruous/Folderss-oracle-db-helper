@@ -72,6 +72,9 @@ namespace MyPlugin
 
         void InsertSelect(string dbId, string owner, string objectName);
 
+        /// <summary>트리 메뉴·도구 메뉴 [테이블 정의서 만들기…]: 대상 선택 창(필요하면 연결한다).</summary>
+        void CreateTableSpec(TableSpecRequest request);
+
         /// <summary>메시지 탭에 오류 한 줄.</summary>
         void ReportError(string dbId, string text);
     }
@@ -125,6 +128,8 @@ namespace MyPlugin
         private TreeRow _selectedRow;
         // 오른쪽 누름으로 고른 메뉴 대상 행(메뉴를 열 때 쓰고 비운다)
         private TreeRow _menuRow;
+        // Shift+누름으로 여러 줄을 고를 때의 기준 행
+        private string _anchorKey;
 
         private bool _inRebuild;
         private bool _rebuildAgain;
@@ -378,7 +383,8 @@ namespace MyPlugin
             {
                 ItemsSource = _entries,
                 ItemTemplate = new DataTemplate { VisualTree = new FrameworkElementFactory(typeof(TreeRowView)) },
-                SelectionMode = SelectionMode.Single,
+                // 여러 줄 고르기(Ctrl·Shift+누름, Shift+화살표): 테이블 정의서 대상
+                SelectionMode = SelectionMode.Extended,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0, 3, 0, 3)
             };
@@ -557,11 +563,9 @@ namespace MyPlugin
         {
             if (_selectedKey == null)
                 return;
-            var current = _list.SelectedItem as TreeEntry;
-            if (current != null && current.Row.Key == _selectedKey)
-                return;
             var entry = Find(_selectedKey);
-            if (entry != null)
+            // 여러 줄을 골라 둔 상태면 그대로 둔다(고른 키의 행이 그 안에 있으면)
+            if (entry != null && !_list.SelectedItems.Contains(entry))
                 _list.SelectedItem = entry;
         }
 
@@ -697,9 +701,16 @@ namespace MyPlugin
         {
             try
             {
-                var entry = _list.SelectedItem as TreeEntry;
+                // 지금 행 = 새로 고른 행 중 마지막. Ctrl+누름으로 지금 행을 풀었으면 남은 것 중 마지막.
                 // 고른 행이 접혀 사라졌을 뿐이면 고른 키는 그대로 둔다. 안내 행은 고르는 대상이 아니다.
-                if (entry == null || entry.Row == null || entry.Row.Kind == TreeRowKind.Note)
+                var entry = e.AddedItems.OfType<TreeEntry>().LastOrDefault(IsSelectable);
+                if (entry == null && _list.SelectedItems.Count > 0)
+                {
+                    var current = Find(_selectedKey);
+                    if (current != null && !_list.SelectedItems.Contains(current))
+                        entry = _list.SelectedItems.OfType<TreeEntry>().LastOrDefault(IsSelectable);
+                }
+                if (entry == null)
                     return;
                 _selectedKey = entry.Row.Key;
                 _selectedRow = entry.Row;
@@ -731,7 +742,27 @@ namespace MyPlugin
                         StartLoad(row.Load, true);
                     return;
                 }
+                // Ctrl+누름: 그 행을 고르거나 풂, Shift+누름: 기준 행부터 그 행까지 — 펼치기·두 번 누르기는 하지 않는다
+                var modifiers = Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Shift);
+                if (modifiers != ModifierKeys.None && e.ClickCount == 1)
+                {
+                    if (modifiers == ModifierKeys.Control)
+                    {
+                        if (_list.SelectedItems.Contains(entry))
+                            _list.SelectedItems.Remove(entry);
+                        else
+                            _list.SelectedItems.Add(entry);
+                        _anchorKey = row.Key;
+                    }
+                    else
+                    {
+                        SelectRange(entry);
+                    }
+                    container.Focus();
+                    return;
+                }
                 _list.SelectedItem = entry;
+                _anchorKey = row.Key;
                 container.Focus();
                 var view = ShellUi.FindAncestor<TreeRowView>(source, container);
                 if (row.Expandable && view != null && view.IsOnTwisty(source))
@@ -765,7 +796,12 @@ namespace MyPlugin
                 var entry = _list.ItemContainerGenerator.ItemFromContainer(container) as TreeEntry ?? container.DataContext as TreeEntry;
                 if (entry == null || entry.Row == null || entry.Row.Kind == TreeRowKind.Note)
                     return;
-                _list.SelectedItem = entry;
+                // 여러 줄을 골라 둔 곳 안을 누르면 고른 것을 그대로 둔다(메뉴가 그 행들에 적용)
+                if (!_list.SelectedItems.Contains(entry))
+                {
+                    _list.SelectedItem = entry;
+                    _anchorKey = entry.Row.Key;
+                }
                 container.Focus();
                 _menuRow = entry.Row;
             }
@@ -781,7 +817,7 @@ namespace MyPlugin
             try
             {
                 var byKeyboard = e.CursorLeft < 0 && e.CursorTop < 0;
-                var selected = _list.SelectedItem as TreeEntry;
+                var selected = CurrentEntry();
                 var row = byKeyboard ? (selected != null ? selected.Row : null) : _menuRow;
                 _menuRow = null;
                 if (row == null || row.Kind == TreeRowKind.Note || string.IsNullOrEmpty(row.DbId) || _shutdown)
@@ -835,6 +871,39 @@ namespace MyPlugin
                 menu.Items.Add(describe);
                 menu.Items.Add(MenuAction("SELECT 문 넣기", true, () => _host.InsertSelect(dbId, owner, name)));
             }
+            // 테이블 정의서: 누른 행이 고른 행들 안에 있으면 고른 행 전부(같은 DB), 아니면 누른 행
+            var targets = TableSpecRows(dbId, row);
+            var specText = TableSpecLogic.MenuText(row, targets);
+            if (specText != null && !state.Connecting)
+            {
+                menu.Items.Add(new Separator());
+                menu.Items.Add(MenuAction(specText, true, () => _host.CreateTableSpec(TableSpecRequest(dbId, targets))));
+            }
+        }
+
+        /// <summary>정의서 대상 행: row가 고른 행들 안에 있으면 고른 행 중 같은 DB 것들, 아니면 row 하나.</summary>
+        private List<TreeRow> TableSpecRows(string dbId, TreeRow row)
+        {
+            var selected = _list.SelectedItems.OfType<TreeEntry>().Select(e => e.Row).Where(r => r != null && r.DbId == dbId).ToList();
+            return selected.Any(r => r.Key == row.Key) ? selected : new List<TreeRow> { row };
+        }
+
+        private TableSpecRequest TableSpecRequest(string dbId, IEnumerable<TreeRow> rows)
+        {
+            var db = DataOf(dbId);
+            return TableSpecLogic.Request(dbId, rows, _host.MySchemaOf(dbId), db == null ? null : db.Schemas, _showSystem.IsChecked == true);
+        }
+
+        /// <summary>도구 메뉴 [테이블 정의서 만들기…]: 지금 고른 행들(지금 행의 DB)로 대상 선택 창을 연다. 고른 DB가 없으면 false.</summary>
+        public bool CreateTableSpecFromSelection()
+        {
+            var current = CurrentEntry();
+            var dbId = current != null && current.Row != null ? current.Row.DbId : TreeKeys.DbIdOf(_selectedKey);
+            if (string.IsNullOrEmpty(dbId) || !Profiles().Any(p => p.Id == dbId))
+                return false;
+            var rows = _list.SelectedItems.OfType<TreeEntry>().Select(e => e.Row).Where(r => r != null && r.DbId == dbId).ToList();
+            _host.CreateTableSpec(TableSpecRequest(dbId, rows));
+            return true;
         }
 
         // 메뉴가 닫힌 뒤 실행한다(확인·비밀번호 창이 메뉴 위에 뜨지 않게)
@@ -871,7 +940,7 @@ namespace MyPlugin
                     }
                     return;
                 }
-                var entry = _list.SelectedItem as TreeEntry;
+                var entry = CurrentEntry();
                 // F1 빠른 조회(앞 100행) · F4 테이블 정보: 테이블·뷰 행에서
                 if ((e.Key == Key.F1 || e.Key == Key.F4) && Keyboard.Modifiers == ModifierKeys.None)
                 {
@@ -919,6 +988,35 @@ namespace MyPlugin
             {
                 Report(ex, null);
             }
+        }
+
+        /// <summary>지금 행: 고른 키의 행이 골라져 있으면 그 행, 아니면 목록이 고른 첫 행.</summary>
+        private TreeEntry CurrentEntry()
+        {
+            var entry = Find(_selectedKey);
+            return entry != null && _list.SelectedItems.Contains(entry) ? entry : _list.SelectedItem as TreeEntry;
+        }
+
+        private static bool IsSelectable(TreeEntry entry)
+        {
+            return entry != null && entry.Row != null && entry.Row.Kind != TreeRowKind.Note;
+        }
+
+        /// <summary>Shift+누름: 기준 행(없으면 지금 행)부터 entry까지 안내 행을 뺀 행들을 고른다.</summary>
+        private void SelectRange(TreeEntry entry)
+        {
+            var anchor = Find(_anchorKey) ?? CurrentEntry() ?? entry;
+            var from = _entries.IndexOf(anchor);
+            var to = _entries.IndexOf(entry);
+            if (from < 0)
+                from = to;
+            var range = new List<TreeEntry>();
+            for (var i = Math.Min(from, to); i <= Math.Max(from, to); i++)
+            {
+                if (IsSelectable(_entries[i]))
+                    range.Add(_entries[i]);
+            }
+            _list.SelectRange(range, entry);
         }
 
         private void SelectFirstChild(TreeEntry entry)
@@ -1479,6 +1577,15 @@ namespace MyPlugin
         /// <summary>항목 컨테이너를 줄에 맞춘다: 내용을 가로로 채우고(오른쪽 개수 표시), 안내 행은 키보드로 고르지 않게.</summary>
         private sealed class TreeList : ListBox
         {
+            /// <summary>items만 고른다(바뀜 알림 한 번). last를 맨 끝에 넣어 지금 행이 되게 한다.</summary>
+            public void SelectRange(List<TreeEntry> items, TreeEntry last)
+            {
+                var ordered = items.Where(i => !ReferenceEquals(i, last)).ToList();
+                if (items.Contains(last))
+                    ordered.Add(last);
+                SetSelectedItems(ordered);
+            }
+
             protected override void PrepareContainerForItemOverride(DependencyObject element, object item)
             {
                 base.PrepareContainerForItemOverride(element, item);

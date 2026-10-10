@@ -1,0 +1,129 @@
+{
+  "$comment": "DB Helper 테이블 정의서 템플릿 변수(기계용). 사람용 설명은 guide.md. 모든 값은 null이 아니다(없으면 빈 글자 \"\"). type: text·number·bool·list. list의 item은 그 목록을 #foreach로 돌 때의 항목 종류.",
+  "roots": {
+    "doc": "doc",
+    "db": "db",
+    "tables": { "type": "list", "item": "table" },
+    "codes": { "type": "list", "item": "code" }
+  },
+  "objects": {
+    "doc": {
+      "title": { "type": "text", "desc": "문서 제목(비우면 '테이블 정의서')" },
+      "project": { "type": "text", "desc": "프로젝트(시스템) 이름" },
+      "system": { "type": "text", "desc": "시스템/모듈" },
+      "author": { "type": "text", "desc": "작성자" },
+      "version": { "type": "text", "desc": "문서 버전" },
+      "date": { "type": "text", "desc": "작성일 = 스키마 기준일 yyyy-MM-dd" },
+      "description": { "type": "text", "desc": "문서 설명" },
+      "schemas": { "type": "text", "desc": "대상 스키마(쉼표로 이음)" },
+      "tableCount": { "type": "number", "desc": "대상 테이블 수" },
+      "generatedAt": { "type": "text", "desc": "만든 시각 yyyy-MM-dd HH:mm" }
+    },
+    "db": {
+      "name": { "type": "text", "desc": "접속 이름" },
+      "user": { "type": "text", "desc": "접속 사용자" },
+      "host": { "type": "text", "desc": "호스트" },
+      "port": { "type": "number", "desc": "포트" },
+      "service": { "type": "text", "desc": "서비스명" },
+      "address": { "type": "text", "desc": "user@host:port/service" },
+      "version": { "type": "text", "desc": "DBMS 제품·버전(읽지 못하면 빈 글자)" }
+    },
+    "table": {
+      "no": { "type": "number", "desc": "순번(1부터)" },
+      "owner": { "type": "text", "desc": "스키마" },
+      "name": { "type": "text", "desc": "테이블 이름(물리명)" },
+      "qualifiedName": { "type": "text", "desc": "스키마.이름" },
+      "sheetName": { "type": "text", "desc": "이 테이블의 시트 이름(31자 안, 겹치지 않음)" },
+      "comment": { "type": "text", "desc": "테이블 주석 전체" },
+      "logicalName": { "type": "text", "desc": "주석에서 나눈 논리명" },
+      "description": { "type": "text", "desc": "주석에서 논리명을 뺀 나머지" },
+      "type": { "type": "text", "desc": "TABLE 또는 VIEW" },
+      "typeLabel": { "type": "text", "desc": "테이블 또는 뷰" },
+      "status": { "type": "text", "desc": "VALID·INVALID" },
+      "numRows": { "type": "number", "desc": "통계의 행 수(통계가 없으면 빈 글자)" },
+      "numRowsText": { "type": "text", "desc": "1,000 꼴 행 수(없으면 빈 글자)" },
+      "lastAnalyzed": { "type": "text", "desc": "통계 날짜 yyyy-MM-dd HH:mm" },
+      "created": { "type": "text", "desc": "만든 날" },
+      "lastDdl": { "type": "text", "desc": "마지막 DDL" },
+      "tablespace": { "type": "text", "desc": "테이블스페이스" },
+      "pkName": { "type": "text", "desc": "기본 키 이름" },
+      "pkColumns": { "type": "text", "desc": "기본 키 열(쉼표로 이음)" },
+      "columnCount": { "type": "number", "desc": "열 수" },
+      "columns": { "type": "list", "item": "col", "desc": "열 목록" },
+      "indexes": { "type": "list", "item": "idx", "desc": "인덱스 목록" },
+      "constraints": { "type": "list", "item": "con", "desc": "제약 조건 목록(P·U·R·C)" },
+      "foreignKeys": { "type": "list", "item": "con", "desc": "외래 키만(R)" },
+      "checks": { "type": "list", "item": "con", "desc": "검사 조건만(C)" }
+    },
+    "col": {
+      "no": { "type": "number", "desc": "열 순서(COLUMN_ID)" },
+      "name": { "type": "text", "desc": "열 이름(물리명)" },
+      "comment": { "type": "text", "desc": "열 주석 전체" },
+      "logicalName": { "type": "text", "desc": "주석에서 나눈 논리명" },
+      "description": { "type": "text", "desc": "주석에서 논리명을 뺀 나머지" },
+      "typeLabel": { "type": "text", "desc": "형식 전체 VARCHAR2(10 CHAR)" },
+      "dataType": { "type": "text", "desc": "형식 이름 VARCHAR2" },
+      "length": { "type": "text", "desc": "괄호 안 10 CHAR · 7,2" },
+      "nullable": { "type": "text", "desc": "Y·N" },
+      "notNull": { "type": "text", "desc": "NOT NULL이면 Y, 아니면 빈 글자" },
+      "isNullable": { "type": "bool", "desc": "NULL 허용" },
+      "pk": { "type": "text", "desc": "기본 키면 Y" },
+      "pkOrder": { "type": "number", "desc": "기본 키 안 순서(아니면 빈 글자)" },
+      "isPk": { "type": "bool", "desc": "기본 키" },
+      "fk": { "type": "text", "desc": "외래 키면 Y" },
+      "fkRef": { "type": "text", "desc": "가리키는 열 OWNER.TABLE.COLUMN(여럿이면 쉼표)" },
+      "isFk": { "type": "bool", "desc": "외래 키" },
+      "key": { "type": "text", "desc": "PK·FK·UK·IX(겹치면 PK,FK)" },
+      "default": { "type": "text", "desc": "기본값(DATA_DEFAULT)" }
+    },
+    "idx": {
+      "no": { "type": "number", "desc": "순번" },
+      "name": { "type": "text", "desc": "인덱스 이름" },
+      "columns": { "type": "text", "desc": "열(순서대로, DESC 포함, 쉼표로 이음)" },
+      "unique": { "type": "text", "desc": "고유면 Y" },
+      "uniqueness": { "type": "text", "desc": "UNIQUE·NONUNIQUE" },
+      "kind": { "type": "text", "desc": "PK·UNIQUE·INDEX" },
+      "type": { "type": "text", "desc": "NORMAL·BITMAP 등" },
+      "status": { "type": "text", "desc": "VALID 등" }
+    },
+    "con": {
+      "no": { "type": "number", "desc": "순번" },
+      "name": { "type": "text", "desc": "제약 조건 이름" },
+      "type": { "type": "text", "desc": "P·U·R·C" },
+      "typeLabel": { "type": "text", "desc": "기본 키·고유·외래 키·검사" },
+      "columns": { "type": "text", "desc": "열(쉼표로 이음)" },
+      "reference": { "type": "text", "desc": "외래 키가 가리키는 테이블 OWNER.TABLE" },
+      "referenceColumns": { "type": "text", "desc": "가리키는 열(쉼표로 이음)" },
+      "target": { "type": "text", "desc": "OWNER.TABLE.COL(열이 여럿이면 OWNER.TABLE(A, B))" },
+      "deleteRule": { "type": "text", "desc": "외래 키 삭제 시: NO ACTION·CASCADE·SET NULL" },
+      "updateRule": { "type": "text", "desc": "외래 키 갱신 시: Oracle은 늘 NO ACTION" },
+      "condition": { "type": "text", "desc": "검사 조건" },
+      "indexName": { "type": "text", "desc": "기본 키·고유 제약이 쓰는 인덱스" },
+      "status": { "type": "text", "desc": "ENABLED·DISABLED" }
+    },
+    "code": {
+      "no": { "type": "number", "desc": "순번" },
+      "group": { "type": "text", "desc": "코드 그룹(열 이름)" },
+      "code": { "type": "text", "desc": "코드 값" },
+      "meaning": { "type": "text", "desc": "의미(늘 빈 글자 — 사람이 채움)" },
+      "usage": { "type": "text", "desc": "사용 테이블.열" },
+      "table": { "type": "text", "desc": "테이블" },
+      "column": { "type": "text", "desc": "열" },
+      "constraint": { "type": "text", "desc": "검사 조건 이름" }
+    },
+    "foreach": {
+      "count": { "type": "number", "desc": "1부터 순번" },
+      "index": { "type": "number", "desc": "0부터 순번" },
+      "hasNext": { "type": "bool", "desc": "다음 항목이 있음" },
+      "first": { "type": "bool", "desc": "첫 항목" },
+      "last": { "type": "bool", "desc": "끝 항목" }
+    }
+  },
+  "listMembers": {
+    "size": { "type": "number", "desc": "목록 개수 ($tables.size(), $table.columns.size)" },
+    "length": { "type": "number", "desc": "size와 같음(글자에도 됨)" },
+    "count": { "type": "number", "desc": "size와 같음" },
+    "isEmpty": { "type": "bool", "desc": "비었음" },
+    "empty": { "type": "bool", "desc": "isEmpty와 같음" }
+  }
+}

@@ -23,6 +23,9 @@ namespace MyPlugin
         void ManageConnections();
         void ShowShortcuts();
 
+        /// <summary>도구 > 테이블 정의서 만들기: 트리에서 고른 행들로 대상 선택 창.</summary>
+        void CreateTableSpec();
+
         /// <summary>편집 메뉴(잘라내기·복사·되돌리기 등)의 대상. 없으면 null.</summary>
         TextBox ActiveEditor { get; }
         void ToggleComment();
@@ -104,6 +107,7 @@ namespace MyPlugin
             menu.Items.Add(EditMenu());
             menu.Items.Add(SqlMenu());
             menu.Items.Add(ConnectionMenu());
+            menu.Items.Add(ToolsMenu());
             menu.Items.Add(HelpMenu());
             DockPanel.SetDock(menu, Dock.Left);
 
@@ -280,6 +284,15 @@ namespace MyPlugin
                 reconnect.IsEnabled = state.CanReconnect;
                 disconnect.IsEnabled = state.CanDisconnect;
             };
+            return top;
+        }
+
+        private MenuItem ToolsMenu()
+        {
+            var top = Top("도구(_T)");
+            var spec = Item("테이블 정의서 만들기(_D)…", null, null, _commands.CreateTableSpec);
+            spec.ToolTip = "트리에서 고른 테이블(Ctrl·Shift+누름으로 여러 개)·스키마·DB로 엑셀 테이블 정의서를 만듭니다";
+            top.Items.Add(spec);
             return top;
         }
 

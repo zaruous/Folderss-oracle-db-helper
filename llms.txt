@@ -1,0 +1,18 @@
+# Folderss DB Helper
+
+> Oracle DB helper plugin for the Folderss file manager. Its "테이블 정의서 만들기" feature renders Excel (.xlsx) templates with a Velocity-subset engine to produce table definition documents from the Oracle data dictionary.
+
+## Table definition templates (테이블 정의서 양식)
+
+- [Template authoring guide (Markdown, Korean)](https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/guide.md): rendering rules, syntax, every variable, data rules, how to build with openpyxl, validation checklist. Read this first.
+- [Variables (JSON)](https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/variables.json): machine-readable variable schema (roots, objects, list item types).
+- [make_template.py](https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/examples/make_template.py): example that builds a template from scratch with openpyxl.
+- [check_template.py](https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/examples/check_template.py): validator — run `python check_template.py template.xlsx` before handing a template to the user.
+
+## Where templates go
+
+- User template folder (Windows): `%LOCALAPPDATA%\Folderss\plugin-data\zaruous.folderss-db-helper	emplates\` — every `.xlsx` there appears in DB Helper's template list as "내 양식 — <file name>".
+
+## Source
+
+- [Repository](https://github.com/zaruous/Folderss-oracle-db-helper)

@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <!-- 계약 DLL은 Folderss 본체의 것을 쓰므로 zip에 넣지 않는다 (Private=false) -->
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
     <ProjectReference Include="..\..\contract\Folderss.PluginContract\Folderss.PluginContract.csproj" Private="false" />
     <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.301" />
   </ItemGroup>

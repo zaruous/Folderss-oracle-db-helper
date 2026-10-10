@@ -2,7 +2,7 @@
 
   <!--
     플러그인 프로젝트는 WPF(net8.0-windows)라 Linux에서 테스트를 실행할 수 없다.
-    화면과 무관한 파일(접속 정보, Db/*, 트리 모델)만 링크해 net8.0으로 테스트한다 (CI의 Ubuntu에서도 실행됨).
+    화면과 무관한 파일(접속 정보, Db/*, Doc/*, 트리 모델)만 링크해 net8.0으로 테스트한다 (CI의 Ubuntu에서도 실행됨).
     DPAPI(ProtectedData)는 Windows에서만 동작하므로 여기서는 테스트하지 않는다.
     DbSession은 SQLite(Microsoft.Data.Sqlite) 연결로 테스트한다 — Oracle 서버 없이 커서·트랜잭션·잠금 동작을 확인하기 위함.
   -->
@@ -20,10 +20,13 @@
     <Compile Include="..\..\src\MyPlugin\Ui\TreeModel.cs" Link="Ui\TreeModel.cs" />
     <!-- 화면 쪽 순수 로직(WPF 없음)은 Ui/*Logic.cs 이름으로 두면 여기서 함께 테스트한다 -->
     <Compile Include="..\..\src\MyPlugin\Ui\*Logic.cs" Link="Ui\%(Filename)%(Extension)" />
+    <!-- 테이블 정의서(템플릿 엔진·엑셀 렌더러·기본 템플릿). ClosedXML은 Linux에서도 돈다 -->
+    <Compile Include="..\..\src\MyPlugin\Doc\*.cs" Link="Doc\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.301" />
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />

@@ -314,6 +314,12 @@ namespace MyPlugin
             Manage_Click(this, new RoutedEventArgs());
         }
 
+        void IShellCommands.CreateTableSpec()
+        {
+            if (!_tree.CreateTableSpecFromSelection())
+                Dialogs.Show(OwnerWindow(), TableSpecLogic.Title, "트리에서 DB·스키마·테이블을 고른 뒤 다시 누르세요(Ctrl·Shift+누름으로 여러 개).", false);
+        }
+
         public void ShowShortcuts()
         {
             Dialogs.Show(OwnerWindow(), "단축키", ShellLogic.ShortcutsText, false);
@@ -553,6 +559,46 @@ namespace MyPlugin
         public void ReportError(string dbId, string text)
         {
             AddMessage(dbId, text, MessageKind.Error);
+        }
+
+        /// <summary>테이블 정의서 대상 선택 창. 연결 안 됐으면 연결하고, 그 DB에서 실행 중이면 알리고 열지 않는다(세션 하나를 같이 쓴다).</summary>
+        public async void CreateTableSpec(TableSpecRequest request)
+        {
+            try
+            {
+                if (request == null || _closed)
+                    return;
+                var dbId = request.DbId;
+                var profile = FindProfile(dbId);
+                if (profile == null)
+                    return;
+                var session = GetSession(dbId);
+                if (session == null || session.IsBroken)
+                {
+                    if (!await ConnectAsync(dbId))
+                        return;
+                    session = GetSession(dbId);
+                    if (session == null)
+                        return;
+                }
+                // 이제 막 연결했으면 내 스키마를 여기서 안다
+                if (request.MySchema == null)
+                    request.MySchema = MySchemaOf(dbId);
+                if (request.InitialOwner == null)
+                    request.InitialOwner = request.MySchema;
+                if (IsRunning(dbId))
+                {
+                    Dialogs.Show(OwnerWindow(), TableSpecLogic.Title, TableSpecLogic.BusyText(profile.Name), true);
+                    return;
+                }
+                TableSpecDialog.Show(OwnerWindow(), profile, session, request, () => IsRunning(dbId),
+                    () => SafeSetting(TableSpecLogic.SettingKey), value => SaveSetting(TableSpecLogic.SettingKey, value),
+                    TableSpecTemplates.UserFolder(DataDirectory));
+            }
+            catch (Exception ex)
+            {
+                ReportUnexpected(ex, request == null ? null : request.DbId);
+            }
         }
 
         // ================= 화면 =================

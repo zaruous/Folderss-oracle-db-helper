@@ -121,6 +121,9 @@
   },
   "listMembers": {
     "size": { "type": "number", "desc": "목록 개수 ($tables.size(), $table.columns.size)" },
-    "isEmpty": { "type": "bool", "desc": "비었음" }
+    "length": { "type": "number", "desc": "size와 같음(글자에도 됨)" },
+    "count": { "type": "number", "desc": "size와 같음" },
+    "isEmpty": { "type": "bool", "desc": "비었음" },
+    "empty": { "type": "bool", "desc": "isEmpty와 같음" }
   }
 }

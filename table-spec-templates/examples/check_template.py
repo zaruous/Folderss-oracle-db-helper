@@ -32,15 +32,19 @@ LIST_MEMBERS = {"size", "length", "count", "isempty", "empty"}
 
 
 def load_schema(path):
-    if path and os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    local = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "variables.json")
-    if os.path.exists(local):
-        with open(local, encoding="utf-8") as f:
-            return json.load(f)
-    with urllib.request.urlopen(VARIABLES_URL, timeout=10) as r:
-        return json.loads(r.read().decode("utf-8"))
+    """variables.json: 인자 → 스크립트 옆 → 스크립트 상위(저장소 구조) → 현재 폴더 → 인터넷 순으로 찾는다."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in [path, os.path.join(here, "variables.json"), os.path.join(here, "..", "variables.json"), os.path.join(os.getcwd(), "variables.json")]:
+        if candidate and os.path.exists(candidate):
+            with open(candidate, encoding="utf-8") as f:
+                return json.load(f)
+    if path:
+        raise SystemExit(f"variables.json을 찾을 수 없습니다: {path}")
+    try:
+        with urllib.request.urlopen(VARIABLES_URL, timeout=10) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as ex:
+        raise SystemExit(f"variables.json을 내려받지 못했습니다({ex}). {VARIABLES_URL} 를 받아 이 스크립트 옆에 두거나 두 번째 인자로 주세요.")
 
 
 def match_paren(text, start):
@@ -306,14 +310,16 @@ class Checker:
                     scope = stack.pop()[2]
         for kind, where, _ in stack:
             self.error(where, f"#{kind}에 맞는 #end가 없습니다")
-        # 시트 이름
+        # 시트 이름: 양식 파일 자체가 올바른 엑셀이어야 한다(템플릿 글자 그대로 31자 이하, 금지 글자 없음)
+        if re.search(r"[\[\]:*?/\\]", name) or len(name) > 31:
+            self.error(f"'{name}'", "시트(탭) 이름은 템플릿 글자 그대로 31자 이하이고 []:*?/\\ 를 쓸 수 없습니다")
         if sheet_directive:
             if "$" not in name:
                 self.warn(f"'{name}'", "반복 시트(#sheet)의 탭 이름에 참조가 없어 모든 시트가 같은 이름(+ (2), (3)…)이 됩니다 — 보통 ${table.sheetName}")
             else:
                 self.check_refs(f"'{name}'(탭 이름)", name, scope)
-        elif re.search(r"[\[\]:*?/\\]", name) or len(name) > 31:
-            self.error(f"'{name}'", "시트 이름은 31자 이하이고 []:*?/\\ 를 쓸 수 없습니다")
+                if "sheetName" not in name:
+                    self.warn(f"'{name}'", "반복 시트 탭 이름이 ${table.sheetName}이 아니면 엔진이 31자로 자르거나 (2)를 붙여 목록의 ${t.sheetName} 링크와 어긋날 수 있습니다")
 
 
 def main():

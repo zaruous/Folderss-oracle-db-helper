@@ -25,8 +25,8 @@ pre{background:var(--code);border:1px solid var(--line);padding:12px;overflow-x:
 <li>양식 파일을 만든다.</li>
 <li>바탕 양식(사용자가 준 파일, 또는 DB Helper에서 <code>[복사해서 고치기]</code>로 꺼낸 기본 양식)이 있으면 <strong>복사본</strong>을 고친다. 원본은 덮어쓰지 않는다.</li>
 <li>없으면 <a href="examples/make_template.py">examples/make_template.py</a>를 바탕으로 openpyxl로 새로 만든다.</li>
-<li><strong>사용자 양식 폴더</strong>에 <code>.xlsx</code>로 저장한다(2장). 파일 이름이 목록에 보이는 이름이 된다.</li>
-<li><a href="examples/check_template.py">examples/check_template.py</a>로 검사하고 오류를 모두 고친다: <code>python check_template.py 양식.xlsx</code></li>
+<li><strong>사용자 양식 폴더</strong>에 <code>.xlsx</code>로 저장한다(2장). 파일 이름이 목록에 보이는 이름이 된다. 사용자가 다른 저장 위치를 말하면 그 위치에 저장하고, DB Helper에서 쓰려면 양식 폴더로 복사하거나 <code>[템플릿 파일] &gt; [찾아보기…]</code>로 고르라고 알린다.</li>
+<li><a href="examples/check_template.py">examples/check_template.py</a>로 검사하고 오류를 모두 고친다: <code>python check_template.py 양식.xlsx</code> (실행 방법은 8장)</li>
 <li>사용자에게 알린다: 파일 경로, 시트 구성, 쓴 변수, DB Helper에서 <code>[양식]</code> 목록을 펼치면 <code>내 양식 — 파일 이름</code>으로 보인다는 것.</li>
 </ol>
 <hr />
@@ -62,7 +62,11 @@ pre{background:var(--code);border:1px solid var(--line);padding:12px;overflow-x:
 </tr>
 <tr>
 <td>시트 이름</td>
-<td>탭 이름도 템플릿이다. 반복 시트는 보통 <code>${table.sheetName}</code>(31자 안·겹치지 않게 미리 고친 이름). 결과 이름은 <code>[]:*?/\'</code> → <code>_</code>, 31자로 자름, 비거나 <code>History</code>면 <code>Sheet</code>, 겹치면 <code>(2)</code></td>
+<td>탭 이름도 템플릿이다. 반복 시트는 <strong><code>${table.sheetName}</code>을 권장</strong>(31자 안·겹치지 않게 미리 고친 이름 — 목록의 링크 <code>${t.sheetName}</code>과 정확히 같아진다). 다른 꼴(<code>${table.owner}_${table.name}</code> 등)을 쓰면 결과 이름을 엔진이 <code>[]:*?/\'</code> → <code>_</code>, 31자로 자르기, 겹치면 <code>(2)</code>로 고치므로 <code>${t.sheetName}</code> 링크와 <strong>어긋날 수 있다</strong>. 비거나 <code>History</code>면 <code>Sheet</code></td>
+</tr>
+<tr>
+<td>템플릿 파일의 시트 이름</td>
+<td>양식 파일 자체도 올바른 엑셀이어야 한다 — 모든 탭 이름(템플릿 글자 그대로, 예: <code>${table.sheetName}</code> 18자)이 <strong>31자 이하</strong>, <code>[]:*?/\</code> 없이. 길면 엑셀이 파일을 "복구"하며 이름을 바꾼다</td>
 </tr>
 <tr>
 <td><code>#sheet</code> 위치</td>
@@ -113,7 +117,7 @@ ${col.no} | ${col.name} | …        ← 열마다 한 줄씩 되풀이
 </thead>
 <tbody>
 <tr>
-<td>셀 값·서식, 줄 높이, 숨긴 줄</td>
+<td>셀 값·서식, 줄 높이(템플릿에서 높이를 정한 줄만), 숨긴 줄</td>
 <td>조건부 서식, 데이터 유효성(드롭다운)</td>
 </tr>
 <tr>
@@ -130,6 +134,10 @@ ${col.no} | ${col.name} | …        ← 열마다 한 줄씩 되풀이
 </tr>
 </tbody>
 </table>
+<p><strong>줄 높이와 줄바꿈</strong>: 엔진은 템플릿에서 높이를 직접 정한 줄만 그 높이로 복사하고, 나머지는 높이를 정하지 않는다 → 엑셀이 열 때 내용에 맞춰 높이를 정한다. 그래서
+- 내용이 여러 줄이 될 수 있는 반복 줄(설명·주석·조건 칸)은 <strong>줄 높이를 정하지 말고</strong> 셀에 <code>줄 바꿈(wrap_text)</code>만 켠다.
+- <strong>병합한 칸은 엑셀이 높이를 맞추지 않는다</strong> → 줄바꿈이 필요한 내용은 병합하지 말고 열 너비를 넓힌다. 병합은 짧은 값(이름·코드)에만 쓴다.
+- 서명란처럼 높이가 정해져야 하는 줄은 높이를 정해 둔다(그대로 복사된다).</p>
 <hr />
 <h2>4. 문법 (Velocity 일부)</h2>
 <h3>4.1 참조</h3>
@@ -155,7 +163,7 @@ ${col.no} | ${col.name} | …        ← 열마다 한 줄씩 되풀이
 </tr>
 <tr>
 <td><code>$list.size()</code>, <code>$list.size</code></td>
-<td>목록 개수(인자 없는 호출은 속성으로 본다). <code>isEmpty</code>도 있음</td>
+<td>목록 개수(인자 없는 호출은 속성으로 본다). 같은 뜻: <code>length</code>, <code>count</code>. 비었는지: <code>isEmpty</code>(= <code>empty</code>). 글자에도 <code>length</code>가 된다</td>
 </tr>
 <tr>
 <td><code>${table.name}_백업</code></td>
@@ -194,7 +202,7 @@ ${col.no} | ${col.name} | …        ← 열마다 한 줄씩 되풀이
 </tr>
 <tr>
 <td><code>#{else}</code>, <code>#{end}</code></td>
-<td>글자가 바로 붙을 때: <code>#if($col.isPk)PK#{else}-#end</code></td>
+<td>글자가 바로 붙을 때: <code>#if($col.isPk)PK#{else}-#end</code>. <strong><code>#else</code>·<code>#end</code>는 인자를 받지 않는다</strong> — <code>#else(확인 불가)</code>의 <code>(확인 불가)</code>는 그냥 글자지만, 헷갈리지 않게 뒤에 글자가 오면 늘 <code>#{else}</code>·<code>#{end}</code>로 쓴다</td>
 </tr>
 <tr>
 <td><code>## 주석</code>, <code>#* 주석 *#</code></td>
@@ -204,6 +212,7 @@ ${col.no} | ${col.name} | …        ← 열마다 한 줄씩 되풀이
 </table>
 <p>셀 안 예: <code>#if($col.isFk)→ ${col.fkRef}#end</code>, <code>#if($con.type == "R")→ ${con.target}#elseif($con.type == "C")${con.condition}#end</code>,
 <code>#foreach($c in $table.columns)$c.name#if($foreach.hasNext), #end#end</code>.</p>
+<p><strong>중첩 반복과 <code>$foreach</code></strong>: <code>$foreach</code>는 <strong>가장 안쪽</strong> 반복(<code>#foreach</code> 또는 <code>#sheet</code>)을 가리킨다. <code>#sheet</code> 시트 안의 셀에서 <code>#foreach</code>를 쓰면 그 셀 안에서는 셀 안 반복의 순번이 된다. 바깥 순번이 필요하면 안쪽 반복 전에 <code>#set($tableNo = $foreach.count)</code>로 담아 두거나, 테이블 순번은 <code>$table.no</code>를 쓴다. 반복 변수와 <code>$foreach</code>는 그 반복이 끝나면 사라진다.</p>
 <h3>4.3 식</h3>
 <ul>
 <li>값: <code>$참조</code>, <code>"글자"</code>·<code>'글자'</code>, 숫자, <code>true</code>·<code>false</code>·<code>null</code></li>
@@ -298,7 +307,7 @@ ${col.no} | ${col.name} | …        ← 열마다 한 줄씩 되풀이
 </tr>
 <tr>
 <td><code>$db.version</code></td>
-<td>DBMS 제품·버전(못 읽으면 빈 글자)</td>
+<td>DBMS <strong>제품 이름 + 버전 전체</strong>(버전 숫자만 따로 있는 변수는 없음). 권한 등으로 못 읽으면 빈 글자 → <code>#if($db.version)${db.version}#{else}(확인 불가)#end</code>처럼 대신할 글자를 둔다</td>
 <td>Oracle Database 19c Enterprise Edition 19.0.0.0.0</td>
 </tr>
 </tbody>
@@ -740,15 +749,28 @@ wb.save(&quot;내_양식.xlsx&quot;)
 </table>
 <hr />
 <h2>8. 검증 체크리스트</h2>
-<p><a href="examples/check_template.py">examples/check_template.py</a>가 아래 대부분을 검사한다(<code>pip install openpyxl</code> 후 <code>python check_template.py 양식.xlsx</code>).</p>
+<p><a href="examples/check_template.py">examples/check_template.py</a>가 아래 대부분을 검사한다.</p>
+<pre><code>pip install openpyxl
+python check_template.py 양식.xlsx                    # variables.json을 아래 순서로 찾는다
+python check_template.py 양식.xlsx variables.json     # 변수 목록 파일을 직접 지정
+</code></pre>
 <ul>
-<li>[ ] <code>.xlsx</code>로 저장했고 사용자 양식 폴더에 있다. 파일 이름이 <code>~$</code>로 시작하지 않는다.</li>
+<li>variables.json 찾는 순서: 두 번째 인자 → 스크립트와 같은 폴더 → 스크립트의 상위 폴더(저장소 구조) → 현재 폴더 → <a href="variables.json">인터넷 주소</a>에서 내려받기(네트워크 필요). 인터넷이 안 되면 <a href="variables.json">variables.json</a>을 스크립트 옆에 같이 받아 둔다.</li>
+<li>결과 마지막 줄 <code>검사한 시트 N개 · 오류 0개 · 경고 M개</code>. 오류가 있으면 종료 코드 1. 경고는 동작은 하지만 의도와 다를 수 있는 것.</li>
+<li>
+<p>검사하지 못하는 것: 그림·도형 위치, 줄 높이·병합의 보기 좋음, 실제 데이터로 그렸을 때의 모양 — 사용자에게 DB Helper에서 한 번 만들어 보게 한다.</p>
+</li>
+<li>
+<p>[ ] <code>.xlsx</code>로 저장했고 사용자 양식 폴더에 있다. 파일 이름이 <code>~$</code>로 시작하지 않는다.</p>
+</li>
 <li>[ ] 시트마다 <code>#foreach</code>/<code>#if</code>/<code>#sheet</code>와 <code>#end</code>의 짝이 맞는다(<code>#sheet</code>는 <code>#end</code> 없음).</li>
 <li>[ ] 지시문 셀은 그 줄에서 값이 있는 유일한 셀이다(같은 줄에 다른 값 없음).</li>
 <li>[ ] <code>#sheet</code>는 시트의 첫 지시문이고 그 위에 내용이 없다.</li>
 <li>[ ] 모든 참조의 변수·속성 이름이 5장(또는 variables.json)에 있다. 반복 변수는 그 <code>#foreach</code>/<code>#sheet</code> 안에서만 쓴다.</li>
 <li>[ ] 수식 안 참조는 <code>${…}</code> 꼴이다.</li>
-<li>[ ] 반복 시트의 탭 이름은 <code>${table.sheetName}</code> 같은 참조이고, 고정 시트 이름은 31자 이하이며 <code>[]:*?/\</code> 를 쓰지 않는다.</li>
+<li>[ ] 반복 시트의 탭 이름은 <code>${table.sheetName}</code>이다(목록 링크 <code>${t.sheetName}</code>과 맞음). 모든 탭 이름(템플릿 글자 그대로)이 31자 이하이며 <code>[]:*?/\</code> 를 쓰지 않는다.</li>
+<li>[ ] 여러 줄이 될 수 있는 반복 칸은 줄 바꿈만 켜고 줄 높이를 정하지 않았으며 병합하지 않았다.</li>
+<li>[ ] 바깥 반복의 순번이 필요한 곳은 <code>$table.no</code>나 <code>#set</code>으로 담은 값을 쓴다(안쪽 <code>#foreach</code> 안의 <code>$foreach</code>는 안쪽 순번).</li>
 <li>[ ] 안내용 시트는 이름을 <code>_</code>로 시작했다.</li>
 <li>[ ] 조건부 서식·데이터 유효성·그림을 반복 영역에 기대지 않았다.</li>
 </ul>
@@ -796,6 +818,26 @@ wb.save(&quot;내_양식.xlsx&quot;)
 <td>결과에 안내 시트가 남음</td>
 <td>이름이 <code>_</code>로 시작하지 않음</td>
 <td><code>_안내</code>처럼</td>
+</tr>
+<tr>
+<td>목록 링크를 누르면 "참조가 올바르지 않음"</td>
+<td>반복 시트 탭 이름이 <code>${table.sheetName}</code>이 아니라 결과 이름이 달라짐</td>
+<td>탭 이름을 <code>${table.sheetName}</code>로</td>
+</tr>
+<tr>
+<td>긴 설명이 한 줄로 잘려 보임</td>
+<td>병합 칸이거나 줄 높이를 정해 둠</td>
+<td>병합 풀기·줄 높이 지우기·줄 바꿈 켜기</td>
+</tr>
+<tr>
+<td>표지에 DBMS 칸이 비어 있음</td>
+<td>계정 권한으로 버전을 못 읽음</td>
+<td><code>#if($db.version)…#{else}(확인 불가)#end</code></td>
+</tr>
+<tr>
+<td>열 표의 No가 1부터 다시 시작하지 않음/엉뚱함</td>
+<td>셀 안 <code>#foreach</code> 안에서 바깥 <code>$foreach</code>를 기대</td>
+<td><code>$col.no</code>(열 순서)나 <code>#set</code>으로 담은 값</td>
 </tr>
 </tbody>
 </table>

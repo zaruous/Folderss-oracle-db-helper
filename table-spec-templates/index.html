@@ -91,7 +91,7 @@ ${col.no} | ${col.name} | …        ← 열마다 한 줄씩 되풀이
 <ul>
 <li>지시문: <code>#foreach($x in 식)</code>, <code>#if(식)</code>, <code>#elseif(식)</code>, <code>#else</code>, <code>#end</code>, <code>#set($x = 식)</code>, <code>#sheet($x in 식)</code>. 중괄호 꼴(<code>#{else}</code>, <code>#{end}</code>, <code>#{if}(…)</code>)도 된다.</li>
 <li>중첩 가능: <code>#foreach</code> 안의 <code>#if</code>, <code>#foreach</code> 안의 <code>#foreach</code>.</li>
-<li>같은 줄의 다른 셀에 값이 있으면 줄 지시문이 <strong>아니다</strong> — 그 셀은 셀 템플릿으로 그려진다(인라인 지시문, 4장).</li>
+<li>같은 줄의 다른 셀에 값이 있으면 줄 지시문이 <strong>아니다</strong> — 그 셀은 셀 템플릿(인라인 지시문, 4장)으로 읽힌다. 그래서 <code>#foreach(…)</code>·<code>#if(…)</code>만 있고 그 셀 안에 <code>#end</code>가 없으면 <strong>템플릿 오류</strong>("…#foreach에 맞는 #end가 없습니다")가 난다. 지시문 줄의 다른 칸은 칠하기·테두리만 하고 값은 넣지 않는다.</li>
 <li>지시문 셀은 보통 A열에 두고 A열을 좁게(폭 2~3) 둔다. 기본 양식은 지시문 줄을 연노랑 바탕·갈색 기울임 글자로 칠해 눈에 띄게 한다(결과에는 남지 않음).</li>
 </ul>
 <h3>3.3 셀</h3>
@@ -790,9 +790,9 @@ python check_template.py 양식.xlsx variables.json     # 변수 목록 파일�
 <td>5장 이름으로</td>
 </tr>
 <tr>
-<td><code>#foreach(...)</code> 글자가 결과에 남음</td>
-<td>같은 줄에 다른 값이 있어 줄 지시문이 아님</td>
-<td>지시문 셀만 있는 줄로 옮김</td>
+<td><code>#end</code> 줄이 있는데도 "템플릿 오류 — '시트'!A5: #foreach에 맞는 #end가 없습니다"</td>
+<td>지시문 셀이 있는 줄에 다른 값이 있어 줄 지시문이 아니라 셀 안 지시문으로 읽힘</td>
+<td>지시문 셀만 있는 줄로 옮김(다른 칸은 칠하기만)</td>
 </tr>
 <tr>
 <td>DB Helper가 "템플릿 오류 — '시트'!A5: #foreach에 맞는 #end가 없습니다"</td>
@@ -842,4 +842,8 @@ python check_template.py 양식.xlsx variables.json     # 변수 목록 파일�
 </tbody>
 </table>
 <hr />
-<p>이 지침은 DB Helper 저장소의 <code>docs/table-spec-templates/</code>에 있는 원본에서 만들어진다. 엔진·변수가 바뀌면 함께 고친다(변수 목록은 단위 테스트로 코드와 맞춰 확인한다).</p></body></html>
+<p>이 지침은 DB Helper 저장소의 <code>docs/table-spec-templates/</code>에 있는 원본에서 만들어진다. 엔진·변수가 바뀌면 함께 고친다.</p>
+<p><strong>단위 테스트로 확인하는 것</strong>(저장소 <code>tests/MyPlugin.Tests</code>):
+- <code>GuideRulesTests</code> — 3·4·6·7.3·9장의 규칙을 하나씩 실제 엔진으로 확인(테스트 이름 앞 <code>S3_1</code> 등이 장·절 번호).
+- <code>GuideExamplesTests</code> — 3~7장의 템플릿 예제(인라인 코드)를 모두 뽑아 실제 변수로 그려 보고, 7.1의 파이썬 코드와 <code>make_template.py</code>를 실제로 돌려 만든 양식이 <code>check_template.py</code>(오류 0개)와 엔진을 통과하는지, 검사 도구가 9장의 실수를 잡는지 본다.
+- <code>TemplateGuideTests</code> — <code>variables.json</code>의 변수가 엔진이 넣는 값과 정확히 같은지, 5장이 모든 변수를 적었는지.</p></body></html>

@@ -1,5 +1,4 @@
 using Folderss.Plugins;
-using Oracle.ManagedDataAccess.Client;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -213,6 +212,8 @@ namespace MyPlugin
             private ScrollViewer _form;
             private TextBlock _formEmpty;
             private TextBox _name, _host, _port, _service, _user;
+            private ComboBox _provider;
+            private TextBlock _serviceLabel;
             private PasswordBox _password;
             private TextBlock _passwordPlaceholder;
             private Run _passwordState;
@@ -419,6 +420,26 @@ namespace MyPlugin
                 Place(grid, Label("이름"), row, 0, 1, 0);
                 Place(grid, _name, row, 1, 3, 0);
 
+                // DBMS 공급자: 바꾸면 서비스명/데이터베이스 라벨이 바뀌고, 포트가 이전 공급자의 기본값이었으면 새 기본값으로
+                _provider = new ComboBox { ItemsSource = DbProviders.All, DisplayMemberPath = "DisplayName" };
+                AutomationProperties.SetName(_provider, "DBMS");
+                _provider.SelectionChanged += (s, e) =>
+                {
+                    var chosen = _provider.SelectedItem as IDbProvider;
+                    if (chosen == null)
+                        return;
+                    UpdateProviderLabels(chosen);
+                    if (_filling)
+                        return;
+                    var previous = DbProviders.For(Selected == null ? null : Selected.Draft.Profile);
+                    Edit(p => p.Provider = chosen.Kind, true);
+                    if (previous != chosen && ConnectionManagerLogic.ParsePort(_port.Text) == previous.DefaultPort)
+                        SetText(_port, chosen.DefaultPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                };
+                row = NewRow(grid);
+                Place(grid, Label("DBMS"), row, 0, 1, Gap);
+                Place(grid, _provider, row, 1, 3, Gap);
+
                 row = NewRow(grid);
                 Place(grid, Label("호스트"), row, 0, 1, Gap);
                 Place(grid, _host, row, 1, 1, Gap);
@@ -429,7 +450,8 @@ namespace MyPlugin
                 Place(grid, _port, row, 3, 1, Gap);
 
                 row = NewRow(grid);
-                Place(grid, Label("서비스명"), row, 0, 1, Gap);
+                _serviceLabel = Label("서비스명");
+                Place(grid, _serviceLabel, row, 0, 1, Gap);
                 Place(grid, _service, row, 1, 3, Gap);
 
                 row = NewRow(grid);
@@ -649,8 +671,9 @@ namespace MyPlugin
                 {
                     Id = OracleConnectionStore.NewId(),
                     Name = ConnectionManagerLogic.NameForNew(_items.Select(i => i.Draft.Profile.Name)),
+                    Provider = DbProviders.Default.Kind,
                     Host = "",
-                    Port = 1521,
+                    Port = DbProviders.Default.DefaultPort,
                     ServiceName = "",
                     UserId = "",
                     Color = ""
@@ -725,6 +748,9 @@ namespace MyPlugin
                         return;
                     var p = item.Draft.Profile;
                     SetText(_name, p.Name);
+                    var provider = DbProviders.For(p);
+                    _provider.SelectedItem = provider;
+                    UpdateProviderLabels(provider);
                     SetText(_host, p.Host);
                     SetText(_port, p.Port > 0 ? p.Port.ToString(System.Globalization.CultureInfo.InvariantCulture) : "");
                     SetText(_service, p.ServiceName);
@@ -1000,25 +1026,34 @@ namespace MyPlugin
                 }
             }
 
+            private void UpdateProviderLabels(IDbProvider provider)
+            {
+                if (_serviceLabel != null)
+                    _serviceLabel.Text = provider.ServiceLabel;
+                if (_service != null)
+                    AutomationProperties.SetName(_service, provider.ServiceLabel);
+            }
+
             /// <summary>
             /// 백그라운드 스레드에서 연결을 열어 보고 닫는다. 예외를 밖으로 내지 않는다.
-            /// 연결 문자열도 여기서 만든다(Oracle 드라이버를 처음 불러오는 일까지 UI 스레드 밖에서 하도록).
+            /// 연결 문자열도 여기서 만든다(드라이버를 처음 불러오는 일까지 UI 스레드 밖에서 하도록). 공급자는 프로필의 provider.
             /// </summary>
             private static Tuple<bool, string> Probe(OracleConnectionProfile profile, string password)
             {
                 var watch = Stopwatch.StartNew();
                 try
                 {
+                    var provider = DbProviders.For(profile);
                     var connectionString = OracleConnectionStore.BuildConnectionString(profile, password, ConnectionManagerLogic.TestTimeoutSeconds);
-                    // 첫 연결이 접속 테스트일 수 있다 — 연결을 연 뒤에는 취소 방식을 바꿀 수 없다(ORA-50099)
-                    DbSession.UseInBandBreak();
+                    // 첫 연결이 접속 테스트일 수 있다 — Oracle은 연결을 연 뒤에는 취소 방식을 바꿀 수 없다(ORA-50099)
+                    provider.ConfigureProcess();
                     string version;
-                    using (var connection = new OracleConnection(connectionString))
+                    using (var connection = provider.CreateConnection(connectionString))
                     {
                         connection.Open();
-                        version = connection.ServerVersion;
+                        version = provider.ServerVersionOf(connection);
                     }
-                    return Tuple.Create(true, ConnectionManagerLogic.TestSuccess(version, watch.Elapsed));
+                    return Tuple.Create(true, ConnectionManagerLogic.TestSuccess(version, watch.Elapsed, provider.DisplayName));
                 }
                 catch (Exception ex)
                 {

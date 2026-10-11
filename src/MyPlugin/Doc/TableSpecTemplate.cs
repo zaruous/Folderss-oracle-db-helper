@@ -18,13 +18,13 @@ namespace MyPlugin
         public const string TableSheet = "${table.sheetName}";
         public const string HelpSheet = "_변수 설명";
 
-        private static readonly XLColor Navy = XLColor.FromHtml("#1F3864");
-        private static readonly XLColor HeaderFill = XLColor.FromHtml("#D9E1F2");
-        private static readonly XLColor LabelFill = XLColor.FromHtml("#F2F2F2");
-        private static readonly XLColor LineColor = XLColor.FromHtml("#8EA9DB");
-        private static readonly XLColor DirectiveFill = XLColor.FromHtml("#FFF2CC");
-        private static readonly XLColor DirectiveText = XLColor.FromHtml("#7F6000");
-        private static readonly XLColor Muted = XLColor.FromHtml("#595959");
+        internal static readonly XLColor Navy = XLColor.FromHtml("#1F3864");
+        internal static readonly XLColor HeaderFill = XLColor.FromHtml("#D9E1F2");
+        internal static readonly XLColor LabelFill = XLColor.FromHtml("#F2F2F2");
+        internal static readonly XLColor LineColor = XLColor.FromHtml("#8EA9DB");
+        internal static readonly XLColor DirectiveFill = XLColor.FromHtml("#FFF2CC");
+        internal static readonly XLColor DirectiveText = XLColor.FromHtml("#7F6000");
+        internal static readonly XLColor Muted = XLColor.FromHtml("#595959");
 
         public static byte[] Create()
         {
@@ -372,7 +372,7 @@ namespace MyPlugin
 
         // ================= 모양 도우미 =================
 
-        private static IXLCell Merge(IXLWorksheet sheet, int row1, int column1, int row2, int column2, string value)
+        internal static IXLCell Merge(IXLWorksheet sheet, int row1, int column1, int row2, int column2, string value)
         {
             var range = sheet.Range(row1, column1, row2, column2);
             range.Merge();
@@ -381,7 +381,7 @@ namespace MyPlugin
             return cell;
         }
 
-        private static void Header(IXLRange range)
+        internal static void Header(IXLRange range)
         {
             range.Style.Fill.BackgroundColor = HeaderFill;
             range.Style.Font.Bold = true;
@@ -390,7 +390,7 @@ namespace MyPlugin
             Box(range);
         }
 
-        private static void Label(IXLCell cell)
+        internal static void Label(IXLCell cell)
         {
             var range = cell.MergedRange() ?? cell.AsRange();
             range.Style.Fill.BackgroundColor = LabelFill;
@@ -398,7 +398,7 @@ namespace MyPlugin
             range.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
         }
 
-        private static void Section(IXLCell cell, string text)
+        internal static void Section(IXLCell cell, string text)
         {
             cell.Value = text;
             cell.Style.Font.Bold = true;
@@ -406,7 +406,7 @@ namespace MyPlugin
             cell.Style.Font.FontColor = Navy;
         }
 
-        private static void Box(IXLRange range)
+        internal static void Box(IXLRange range)
         {
             range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
             range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
@@ -417,7 +417,12 @@ namespace MyPlugin
         // 지시문 줄: 결과에는 남지 않지만 템플릿에서 눈에 띄게
         private static void Directive(IXLWorksheet sheet, int row, string text)
         {
-            var lastColumn = sheet.Name == ListSheet ? 8 : 11;
+            Directive(sheet, row, text, sheet.Name == ListSheet ? 8 : 11);
+        }
+
+        /// <summary>지시문 줄(A열에 지시문, lastColumn까지 연노랑 바탕). GCM 양식도 쓴다.</summary>
+        internal static void Directive(IXLWorksheet sheet, int row, string text, int lastColumn)
+        {
             var cell = sheet.Cell(row, 1);
             cell.Value = text;
             cell.Style.Font.FontColor = DirectiveText;

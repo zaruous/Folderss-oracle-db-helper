@@ -16,7 +16,7 @@
 
   <ItemGroup>
     <Compile Include="..\..\src\MyPlugin\OracleConnections.cs" Link="OracleConnections.cs" />
-    <Compile Include="..\..\src\MyPlugin\Db\*.cs" Link="Db\%(Filename)%(Extension)" />
+    <Compile Include="..\..\src\MyPlugin\Db\**\*.cs" Link="Db\%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="..\..\src\MyPlugin\Ui\TreeModel.cs" Link="Ui\TreeModel.cs" />
     <!-- 화면 쪽 순수 로직(WPF 없음)은 Ui/*Logic.cs 이름으로 두면 여기서 함께 테스트한다 -->
     <Compile Include="..\..\src\MyPlugin\Ui\*Logic.cs" Link="Ui\%(Filename)%(Extension)" />
@@ -26,6 +26,8 @@
 
   <ItemGroup>
     <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.301" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
     <PackageReference Include="ClosedXML" Version="0.105.1" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />

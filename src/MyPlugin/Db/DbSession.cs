@@ -4,6 +4,7 @@ using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -74,6 +75,13 @@ namespace MyPlugin
 
         /// <summary>Warning의 자세한 줄들(ALL_ERRORS의 "줄 3, 열 5: PLS-00103: …"). 없으면 빈 목록.</summary>
         public List<string> WarningDetails { get; } = new List<string>();
+    }
+
+    /// <summary>사용자 SQL을 통째로 읽은 결과(<see cref="DbSession.QueryTableAsync"/>): 열 이름(결과 순서)과 행(글자, NULL은 null).</summary>
+    public sealed class QueryTable
+    {
+        public List<string> Columns { get; } = new List<string>();
+        public List<string[]> Rows { get; } = new List<string[]>();
     }
 
     /// <summary>열 값을 읽는 방법.</summary>
@@ -170,12 +178,18 @@ namespace MyPlugin
         private volatile int _pendingRows;
         private int _disposed;
 
-        /// <summary>연결을 받아 세션을 만든다(아직 안 열림). 세션이 연결의 수명을 맡는다.</summary>
-        public DbSession(DbConnection connection)
+        /// <summary>연결을 받아 세션을 만든다(아직 안 열림). 세션이 연결의 수명을 맡는다. 공급자는 연결 형식으로 고른다(시험의 SQLite는 Generic).</summary>
+        public DbSession(DbConnection connection) : this(connection, null)
+        {
+        }
+
+        /// <summary>연결과 공급자로 세션을 만든다. provider가 null이면 연결 형식으로 고른다.</summary>
+        internal DbSession(DbConnection connection, IDbProvider provider)
         {
             if (connection == null)
                 throw new ArgumentNullException(nameof(connection));
             _connection = connection;
+            Provider = provider ?? DbProviders.For(connection);
             var oracle = connection as OracleConnection;
             if (oracle != null)
             {
@@ -185,17 +199,31 @@ namespace MyPlugin
             }
         }
 
+        /// <summary>이 세션의 DBMS 공급자(방언·데이터 사전·오류 판정). 트리·정의서 창이 세션에서 꺼내 쓴다.</summary>
+        internal IDbProvider Provider { get; }
+
+        /// <summary>이 연결의 SQL 방언(공급자의 것). 사용자 SQL을 감싸는 쪽(CodeSpecQueries 등)이 쓴다.</summary>
+        internal ISqlDialect Dialect { get { return Provider.Dialect; } }
+
         /// <summary>
         /// 서버에 열린 트랜잭션이 있는지 묻는 문장. 값이 NULL이면 없음. null이면 묻지 않는다(알 수 없음 — 대기로 본다).
         /// Oracle은 DBMS_TRANSACTION.LOCAL_TRANSACTION_ID, 그 밖의 공급자는 null(시험에서 바꾼다).
         /// </summary>
         internal string TransactionProbeSql { get; set; }
 
-        /// <summary>OracleConnection으로 세션을 만든다.</summary>
+        /// <summary>OracleConnection으로 세션을 만든다(= <see cref="Create"/>(Oracle 공급자)).</summary>
         public static DbSession CreateOracle(string connectionString)
         {
-            UseInBandBreak();
-            return new DbSession(new OracleConnection(connectionString));
+            return Create(DbProviders.Oracle, connectionString);
+        }
+
+        /// <summary>공급자의 연결로 세션을 만든다(아직 안 열림). 공급자의 프로세스 설정(Oracle in-band break)을 먼저 한다.</summary>
+        internal static DbSession Create(IDbProvider provider, string connectionString)
+        {
+            if (provider == null)
+                throw new ArgumentNullException(nameof(provider));
+            provider.ConfigureProcess();
+            return new DbSession(provider.CreateConnection(connectionString), provider);
         }
 
         /// <summary>
@@ -345,6 +373,40 @@ namespace MyPlugin
             {
                 _lock.Release();
             }
+        }
+
+        /// <summary>
+        /// 사용자 SQL을 통째로 읽는다(GCM 정의서 등): 열 이름과 모든 행(값은 결과 격자와 같은 글자 — NULL은 null, LOB·큰 NUMBER도 글자).
+        /// maxRows가 있으면 그만큼만 읽는다(0이면 열 이름만). 잠금을 기다리고(RunAsync), cancellationToken으로 실행 중인 명령을 취소한다.
+        /// 바인드 변수는 받지 않는다 — 사용자 SQL은 값을 직접 쓴다.
+        /// </summary>
+        public Task<QueryTable> QueryTableAsync(string sql, int? maxRows, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(sql))
+                throw new ArgumentException("SQL이 비어 있습니다.", nameof(sql));
+            return RunAsync((connection, transaction) =>
+            {
+                using (var command = CreateCommand(sql))
+                using (cancellationToken.Register(() => CancelQuietly(command)))
+                using (var reader = command.ExecuteReader())
+                {
+                    var table = new QueryTable();
+                    var count = reader.FieldCount;
+                    var oracle = reader is OracleDataReader;
+                    var modes = new ColumnRead[count];
+                    for (var i = 0; i < count; i++)
+                    {
+                        table.Columns.Add(reader.GetName(i));
+                        modes[i] = oracle ? OracleReadMode(reader.GetDataTypeName(i)) : ColumnRead.Value;
+                    }
+                    while ((!maxRows.HasValue || table.Rows.Count < maxRows.Value) && reader.Read())
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        table.Rows.Add(ReadRow(reader, modes));
+                    }
+                    return table;
+                }
+            }, cancellationToken);
         }
 
         /// <summary>메타데이터 조회 등: 잠금을 기다린 뒤 work(연결, 현재 트랜잭션 또는 null)를 Task.Run에서 실행한다.</summary>
@@ -564,6 +626,8 @@ namespace MyPlugin
                     return true;
                 if (e is OracleException oracle && oracle.Number == CancelErrorNumber)
                     return true;
+                if (DbProviders.All.Any(p => p.IsCancellation(e)))
+                    return true;
                 // 다른 예외로 감싸여 번호 없이 메시지에만 남은 경우
                 if (e.Message != null && e.Message.IndexOf(CancelErrorCode, StringComparison.Ordinal) >= 0)
                     return true;
@@ -580,6 +644,8 @@ namespace MyPlugin
             for (var e = ex; e != null; e = e.InnerException)
             {
                 if (e is InvalidOperationException && !(e is SessionBusyException) && MentionsClosedConnection(e.Message))
+                    return true;
+                if (DbProviders.All.Any(p => p.IsBroken(e)))
                     return true;
             }
             return false;
@@ -1158,6 +1224,7 @@ namespace MyPlugin
 
         private DbCommand CreateCommand(string text)
         {
+            ReleaseReadersIfSingle();
             var command = _connection.CreateCommand();
             command.CommandText = text;
             // 연결에 트랜잭션이 있으면 명령에도 넣어야 실행하는 공급자가 있다(CreateCommand가 넣어 주지 않는 경우)
@@ -1207,12 +1274,29 @@ namespace MyPlugin
         private void EnsureTransaction()
         {
             if (_transaction == null)
+            {
+                ReleaseReadersIfSingle();
                 _transaction = _connection.BeginTransaction();
+            }
+        }
+
+        /// <summary>
+        /// 리더를 하나만 열 수 있는 공급자(PostgreSQL)면 열린 결과 커서를 모두 닫는다 — 새 명령·트랜잭션 시작·커밋·롤백 전에 부른다.
+        /// 닫힌 커서는 HasMore = false·IsClosed = true가 되어 화면의 [다음 행 가져오기]가 꺼진다(가져온 행은 그대로).
+        /// 잠금 안(작업 스레드)에서만 부른다.
+        /// </summary>
+        private void ReleaseReadersIfSingle()
+        {
+            if (Provider.SupportsMultipleOpenReaders)
+                return;
+            foreach (var cursor in SnapshotCursors())
+                CloseCursorCore(cursor);
         }
 
         private void CommitCore()
         {
             // 트랜잭션 객체가 없어도 서버 트랜잭션은 있을 수 있다(자동 커밋을 끈 ODP.NET 연결의 DB 링크 조회·EXPLAIN PLAN 등) — 언제나 서버까지 보낸다
+            ReleaseReadersIfSingle();
             EnsureTransaction();
             var transaction = _transaction;
             try
@@ -1233,6 +1317,7 @@ namespace MyPlugin
         private void RollbackCore()
         {
             // CommitCore와 같은 까닭으로 트랜잭션 객체가 없어도 서버까지 롤백한다
+            ReleaseReadersIfSingle();
             EnsureTransaction();
             var transaction = _transaction;
             try

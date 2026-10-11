@@ -64,6 +64,7 @@ namespace MyPlugin
             "F4 — 테이블·뷰 정보",
             "Ctrl+클릭 · Shift+클릭 · Shift+↑↓ — 여러 줄 고르기 (테이블 정의서 대상)",
             "Shift+F10 또는 오른쪽 클릭 — 연결 · 다시 연결 · 연결 끊기 · 테이블 정의서 만들기",
+            "도구 메뉴 — 테이블 정의서 만들기 · GCM 정의서 만들기 (트리에서 고른 DB)",
             "Esc — 검색 지우기",
             "",
             "[메뉴]",
@@ -86,6 +87,14 @@ namespace MyPlugin
         public const string CommitDone = "커밋 완료 (같은 DB의 모든 탭에 적용)";
         public const string RollbackDone = "롤백 완료 (같은 DB의 모든 탭에 적용)";
         public const string ConnectFailedPrefix = "연결하지 못했습니다: ";
+        /// <summary>도구 메뉴 [GCM 정의서 만들기…] 글: 트리에서 고른 DB가 있으면 "GCM 정의서 만들기 — 개발 DB(_G)…"('_'는 메뉴 밑줄이라 두 개로).</summary>
+        public static string CodeSpecMenuText(string dbName)
+        {
+            return string.IsNullOrEmpty(dbName)
+                ? "GCM 정의서 만들기(_G)… (트리에서 DB를 고르세요)"
+                : "GCM 정의서 만들기 — " + dbName.Replace("_", "__") + "(_G)…";
+        }
+
         public const string ProfileRemovedWhileConnecting = "연결하는 동안 접속이 삭제되어 연결을 닫았습니다.";
         public const string ProfileChangedNote = "변경됨 — 다시 연결하면 적용";
 
@@ -95,20 +104,7 @@ namespace MyPlugin
         /// </summary>
         public static OracleConnectionProfile SessionCopy(OracleConnectionProfile profile)
         {
-            if (profile == null)
-                return null;
-            return new OracleConnectionProfile
-            {
-                Id = profile.Id,
-                Name = profile.Name,
-                Host = profile.Host,
-                Port = profile.Port,
-                ServiceName = profile.ServiceName,
-                UserId = profile.UserId,
-                ProtectedPassword = profile.ProtectedPassword,
-                ReadOnly = profile.ReadOnly,
-                Color = profile.Color
-            };
+            return profile == null ? null : profile.Copy();
         }
 
         /// <summary>다시 읽은 저장 값(saved)에서 열린 세션(session 사본)에 바로 적용할 것: 읽기 전용을 켠 것만(더 안전한 쪽). 나머지는 다시 연결할 때.</summary>
@@ -123,10 +119,7 @@ namespace MyPlugin
         {
             if (saved == null || session == null)
                 return false;
-            return !(Same(saved.Name, session.Name) && Same(saved.Host, session.Host) && saved.Port == session.Port
-                && Same(saved.ServiceName, session.ServiceName) && Same(saved.UserId, session.UserId)
-                && Same(saved.ProtectedPassword, session.ProtectedPassword) && saved.ReadOnly == session.ReadOnly
-                && Same(saved.Color ?? "", session.Color ?? ""));
+            return !saved.SameAs(session, false);
         }
 
         /// <summary>접속 표시 user@host:port/service.</summary>

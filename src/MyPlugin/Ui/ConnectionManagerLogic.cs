@@ -134,18 +134,7 @@ namespace MyPlugin
         /// <summary>모든 저장 값을 복사한 새 객체(정리 포함).</summary>
         public static OracleConnectionProfile Clone(OracleConnectionProfile profile)
         {
-            return Normalize(new OracleConnectionProfile
-            {
-                Id = profile.Id,
-                Name = profile.Name,
-                Host = profile.Host,
-                Port = profile.Port,
-                ServiceName = profile.ServiceName,
-                UserId = profile.UserId,
-                ProtectedPassword = profile.ProtectedPassword,
-                ReadOnly = profile.ReadOnly,
-                Color = profile.Color
-            });
+            return Normalize(profile.Copy());
         }
 
         /// <summary>저장되는 값이 모두 같은지. null과 ""는 같게 본다.</summary>
@@ -153,9 +142,7 @@ namespace MyPlugin
         {
             if (a == null || b == null)
                 return a == b;
-            return Same(a.Id, b.Id) && Same(a.Name, b.Name) && Same(a.Host, b.Host) && a.Port == b.Port
-                && Same(a.ServiceName, b.ServiceName) && Same(a.UserId, b.UserId)
-                && Same(a.ProtectedPassword, b.ProtectedPassword) && a.ReadOnly == b.ReadOnly && Same(a.Color, b.Color);
+            return a.SameAs(b);
         }
 
         /// <summary>목록의 ● 표시: 새로 만들었거나, 저장된 값과 다르거나, 비밀번호를 바꿈.</summary>
@@ -278,13 +265,10 @@ namespace MyPlugin
             return originals.Where(o => o != null && !string.IsNullOrEmpty(o.Id) && !kept.Contains(o.Id)).ToList();
         }
 
-        /// <summary>접속 표시: user@host:port/service.</summary>
+        /// <summary>접속 표시: user@host:port/service(공급자 형식).</summary>
         public static string Address(OracleConnectionProfile profile)
         {
-            if (profile == null)
-                return "";
-            return (profile.UserId ?? "").Trim() + "@" + (profile.Host ?? "").Trim() + ":"
-                + profile.Port.ToString(CultureInfo.InvariantCulture) + "/" + (profile.ServiceName ?? "").Trim();
+            return profile == null ? "" : DbProviders.For(profile).Address(profile);
         }
 
         /// <summary>목록에 보일 이름. 비어 있으면 "(이름 없음)".</summary>
@@ -335,13 +319,13 @@ namespace MyPlugin
             return first;
         }
 
-        /// <summary>접속 테스트 성공 문구: "접속 성공 · Oracle 23.4.0.24.05 · 0.2초".</summary>
-        public static string TestSuccess(string serverVersion, TimeSpan elapsed)
+        /// <summary>접속 테스트 성공 문구: "접속 성공 · Oracle 23.4.0.24.05 · 0.2초". product는 공급자 표시 이름(없으면 Oracle).</summary>
+        public static string TestSuccess(string serverVersion, TimeSpan elapsed, string product = null)
         {
             var seconds = elapsed.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + "초";
             return string.IsNullOrWhiteSpace(serverVersion)
                 ? "접속 성공 · " + seconds
-                : "접속 성공 · Oracle " + serverVersion.Trim() + " · " + seconds;
+                : "접속 성공 · " + (string.IsNullOrWhiteSpace(product) ? "Oracle" : product.Trim()) + " " + serverVersion.Trim() + " · " + seconds;
         }
 
         private static bool Same(string a, string b)

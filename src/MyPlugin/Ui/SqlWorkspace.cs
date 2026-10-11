@@ -658,6 +658,8 @@ namespace MyPlugin
             editor.SetResourceReference(TextBoxBase.CaretBrushProperty, Theme.PrimaryText);
             AutomationProperties.SetName(editor, "SQL 편집기");
             editor.TextChanged += Editor_TextChanged;
+            // 탐색기에서 파일을 끌어다 놓으면 그 파일 탭으로 연다(이미 연 파일은 그 탭으로) — 열린 뒤에는 Ctrl+S로 그 파일에 저장
+            ShellUi.EnableFileDrop(editor, files => OpenPaths(files));
             editor.SelectionChanged += Editor_SelectionChanged;
             editor.PreviewKeyDown += Editor_PreviewKeyDown;
             editor.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(Editor_ScrollChanged));

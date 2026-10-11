@@ -82,7 +82,13 @@ namespace MyPlugin
         /// <summary>기본 양식 + 사용자 양식(파일 이름 순). 폴더가 없거나 읽을 수 없으면 기본 양식만.</summary>
         public static List<SpecTemplate> List(string userFolder)
         {
-            var list = new List<SpecTemplate>(All);
+            return List(userFolder, All);
+        }
+
+        /// <summary>builtIn 양식 + userFolder의 사용자 양식(파일 이름 순). GCM 정의서 양식 목록도 이 방법을 쓴다.</summary>
+        public static List<SpecTemplate> List(string userFolder, IReadOnlyList<SpecTemplate> builtIn)
+        {
+            var list = new List<SpecTemplate>(builtIn ?? All);
             if (string.IsNullOrEmpty(userFolder) || !Directory.Exists(userFolder))
                 return list;
             try

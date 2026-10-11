@@ -1,0 +1,83 @@
+{
+  "$comment": "DB Helper GCM(공통 코드) 정의서 템플릿 변수(기계용). 사람용 설명은 guide.md. 모든 값은 null이 아니다(없으면 빈 글자 \"\"). type: text·number·bool·list·map. list의 item은 그 목록을 #foreach로 돌 때의 항목 종류(text면 글자 목록). map은 열 이름으로 꺼내는 사전($code.attrs.PLANT_CD).",
+  "roots": {
+    "doc": "doc",
+    "db": "db",
+    "source": "source",
+    "groups": { "type": "list", "item": "group" },
+    "codes": { "type": "list", "item": "code" }
+  },
+  "objects": {
+    "doc": {
+      "title": { "type": "text", "desc": "문서 제목(비우면 '공통 코드 정의서')" },
+      "project": { "type": "text", "desc": "프로젝트(시스템) 이름" },
+      "system": { "type": "text", "desc": "시스템/모듈" },
+      "author": { "type": "text", "desc": "작성자" },
+      "version": { "type": "text", "desc": "문서 버전" },
+      "date": { "type": "text", "desc": "작성일 yyyy-MM-dd" },
+      "description": { "type": "text", "desc": "문서 설명" },
+      "groupCount": { "type": "number", "desc": "그룹 수" },
+      "codeCount": { "type": "number", "desc": "코드 수" },
+      "generatedAt": { "type": "text", "desc": "만든 시각 yyyy-MM-dd HH:mm" }
+    },
+    "db": {
+      "name": { "type": "text", "desc": "접속 이름" },
+      "user": { "type": "text", "desc": "접속 사용자" },
+      "host": { "type": "text", "desc": "호스트" },
+      "port": { "type": "number", "desc": "포트" },
+      "service": { "type": "text", "desc": "서비스명" },
+      "address": { "type": "text", "desc": "user@host:port/service" },
+      "version": { "type": "text", "desc": "DBMS 제품·버전(읽지 못하면 빈 글자)" }
+    },
+    "source": {
+      "name": { "type": "text", "desc": "SQL 이름(저장한 SQL 파일 이름, 없으면 빈 글자)" },
+      "sql": { "type": "text", "desc": "실행한 SQL 본문" },
+      "fetchedAt": { "type": "text", "desc": "조회 시각 yyyy-MM-dd HH:mm" },
+      "rowCount": { "type": "number", "desc": "조회한 행 수" },
+      "columns": { "type": "text", "desc": "결과 열 이름(쉼표로 이음)" },
+      "attrNames": { "type": "list", "item": "text", "desc": "추가 속성 열 이름 목록(계약에 없는 열, 결과 순서)" },
+      "attrNamesText": { "type": "text", "desc": "추가 속성 열 이름(쉼표로 이음)" },
+      "expandedColumnsText": { "type": "text", "desc": "열 대신 이름→값으로 펼친 열(이름/값 짝 열 'X_NAME→X', JSON 객체 열, 쉼표로 이음, 없으면 빈 칸)" }
+    },
+    "group": {
+      "no": { "type": "number", "desc": "그룹 순번(1부터)" },
+      "id": { "type": "text", "desc": "그룹 식별자(TABLE_NAME)" },
+      "name": { "type": "text", "desc": "그룹 명칭(GROUP_NAME의 첫 값)" },
+      "description": { "type": "text", "desc": "그룹 설명(GROUP_DESC의 첫 값)" },
+      "sheetName": { "type": "text", "desc": "이 그룹의 시트 이름(31자 안, 겹치지 않음)" },
+      "codeCount": { "type": "number", "desc": "그룹의 코드 수" },
+      "codes": { "type": "list", "item": "code", "desc": "그룹의 코드 목록" },
+      "attrNames": { "type": "list", "item": "text", "desc": "이 그룹에 있는 추가 속성 이름 목록(JSON 열을 펼치면 그룹마다 다름)" },
+      "attrNamesText": { "type": "text", "desc": "이 그룹의 추가 속성 이름(쉼표로 이음)" }
+    },
+    "code": {
+      "no": { "type": "number", "desc": "코드 순번($group.codes 안에서는 그룹 안 1부터, $codes에서는 전체 순번)" },
+      "group": { "type": "text", "desc": "그룹 식별자(TABLE_NAME)" },
+      "groupName": { "type": "text", "desc": "그룹 명칭" },
+      "code": { "type": "text", "desc": "코드 값(CODE)" },
+      "name": { "type": "text", "desc": "코드 명칭(CODE_NAME)" },
+      "description": { "type": "text", "desc": "코드 설명(CODE_DESC)" },
+      "sortNo": { "type": "text", "desc": "정렬 순서(SORT_NO, 글자 그대로)" },
+      "useYn": { "type": "text", "desc": "사용 여부(USE_YN, 글자 그대로)" },
+      "isUsed": { "type": "bool", "desc": "사용 여부 참·거짓(비우거나 Y·1·TRUE·T·사용이면 참)" },
+      "attrs": { "type": "map", "desc": "추가 속성 값(열 이름으로 꺼낸다: $code.attrs.PLANT_CD, 이름 대소문자 무시)" },
+      "attrValues": { "type": "list", "item": "text", "desc": "추가 속성 값 목록($source.attrNames와 같은 순서)" },
+      "groupAttrValues": { "type": "list", "item": "text", "desc": "추가 속성 값 목록($group.attrNames와 같은 순서 — 그룹 시트의 동적 열)" },
+      "attrText": { "type": "text", "desc": "추가 속성을 '이름=값; …'으로 이은 글자(값이 빈 속성은 뺌)" }
+    },
+    "foreach": {
+      "count": { "type": "number", "desc": "1부터 순번" },
+      "index": { "type": "number", "desc": "0부터 순번" },
+      "hasNext": { "type": "bool", "desc": "다음 항목이 있음" },
+      "first": { "type": "bool", "desc": "첫 항목" },
+      "last": { "type": "bool", "desc": "끝 항목" }
+    }
+  },
+  "listMembers": {
+    "size": { "type": "number", "desc": "목록 개수 ($groups.size(), $group.codes.size)" },
+    "length": { "type": "number", "desc": "size와 같음(글자에도 됨)" },
+    "count": { "type": "number", "desc": "size와 같음" },
+    "isEmpty": { "type": "bool", "desc": "비었음" },
+    "empty": { "type": "bool", "desc": "isEmpty와 같음" }
+  }
+}

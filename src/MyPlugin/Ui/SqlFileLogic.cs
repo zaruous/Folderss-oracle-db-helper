@@ -198,6 +198,23 @@ namespace MyPlugin
             return list;
         }
 
+        /// <summary>
+        /// 드래그 드롭으로 받은 경로 중 열 파일: 폴더·없는 파일은 빼고, 같은 파일은 한 번만(받은 순서). exists는 시험에서 바꾼다.
+        /// </summary>
+        public static List<string> DroppedFiles(IEnumerable<string> paths, Func<string, bool> exists = null)
+        {
+            exists = exists ?? File.Exists;
+            var result = new List<string>();
+            foreach (var path in paths ?? Enumerable.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(path) || !exists(path))
+                    continue;
+                if (!result.Any(p => SamePath(p, path)))
+                    result.Add(path);
+            }
+            return result;
+        }
+
         /// <summary>같은 파일인지(전체 경로, 대소문자 무시 — Windows 파일 시스템).</summary>
         public static bool SamePath(string a, string b)
         {

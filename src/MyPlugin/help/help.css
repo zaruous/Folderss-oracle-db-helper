@@ -1,0 +1,16 @@
+body { font-family: "Malgun Gothic", "맑은 고딕", "Segoe UI", sans-serif; font-size: 14px; line-height: 1.6; color: #222; background: #fff; margin: 0; padding: 18px 26px 40px; max-width: 920px; }
+h1 { font-size: 22px; margin: 0 0 6px; color: #1F3864; }
+h2 { font-size: 17px; margin: 26px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #D9E1F2; color: #1F3864; }
+h3 { font-size: 15px; margin: 18px 0 6px; }
+p, li { margin: 4px 0; }
+table { border-collapse: collapse; margin: 8px 0 12px; width: 100%; }
+th, td { border: 1px solid #c9d3e6; padding: 5px 8px; text-align: left; vertical-align: top; }
+th { background: #D9E1F2; }
+code, pre { font-family: "Cascadia Mono", Consolas, "D2Coding", monospace; font-size: 13px; }
+code { background: #f2f4f8; padding: 1px 4px; border-radius: 3px; }
+pre { background: #f6f8fb; border: 1px solid #dde3ee; padding: 10px 12px; overflow-x: auto; }
+.nav { font-size: 13px; color: #595959; margin-bottom: 14px; }
+.nav a { margin-right: 10px; }
+.note { background: #FFF8E1; border-left: 4px solid #F6C343; padding: 6px 10px; margin: 8px 0; }
+.kbd { display: inline-block; border: 1px solid #aaa; border-bottom-width: 2px; border-radius: 3px; padding: 0 5px; font-size: 12px; background: #fafafa; }
+a { color: #0563C1; }

@@ -320,9 +320,39 @@ namespace MyPlugin
                 Dialogs.Show(OwnerWindow(), TableSpecLogic.Title, "트리에서 DB·스키마·테이블을 고른 뒤 다시 누르세요(Ctrl·Shift+누름으로 여러 개).", false);
         }
 
+        void IShellCommands.CreateCodeSpec()
+        {
+            var dbId = _tree.SelectedDbId();
+            if (dbId == null)
+                Dialogs.Show(OwnerWindow(), CodeSpecLogic.Title, "트리에서 대상 DB(또는 그 안의 객체)를 고른 뒤 다시 누르세요.", false);
+            else
+                CreateCodeSpec(dbId);
+        }
+
         public void ShowShortcuts()
         {
             Dialogs.Show(OwnerWindow(), "단축키", ShellLogic.ShortcutsText, false);
+        }
+
+        public void ShowHelp()
+        {
+            HelpWindow.Show(OwnerWindow(), HelpFolder, HelpLogic.Index);
+        }
+
+        /// <summary>플러그인 폴더의 help(도움말 HTML). 폴더를 모르면 null — 온라인 사본을 연다.</summary>
+        private string HelpFolder
+        {
+            get
+            {
+                try
+                {
+                    return HelpLogic.Folder(_manager.PluginDirectory);
+                }
+                catch (Exception)
+                {
+                    return null;
+                }
+            }
         }
 
         public void ToggleComment()
@@ -357,7 +387,20 @@ namespace MyPlugin
 
         public void DescribeObject(string dbId, string owner, string objectName)
         {
+            if (!SupportsTableInfo(dbId, "테이블 정보"))
+                return;
             _workspace.DescribeObject(dbId, owner, objectName);
+        }
+
+        /// <summary>테이블 정보(F4)·테이블 정의서는 아직 Oracle 데이터 사전(ALL_*)으로만 읽는다. 다른 공급자면 알리고 false.</summary>
+        private bool SupportsTableInfo(string dbId, string feature)
+        {
+            var profile = FindProfile(dbId);
+            var provider = DbProviders.For(profile);
+            if (provider.Metadata.SupportsTableInfo)
+                return true;
+            Dialogs.Show(OwnerWindow(), feature, provider.DisplayName + " 접속에서는 " + feature + "을(를) 아직 지원하지 않습니다(Oracle 데이터 사전 기반). SQL 실행·트리·GCM 정의서는 쓸 수 있습니다.", false);
+            return false;
         }
 
         public void Cancel()
@@ -570,7 +613,7 @@ namespace MyPlugin
                     return;
                 var dbId = request.DbId;
                 var profile = FindProfile(dbId);
-                if (profile == null)
+                if (profile == null || !SupportsTableInfo(dbId, TableSpecLogic.Title))
                     return;
                 var session = GetSession(dbId);
                 if (session == null || session.IsBroken)
@@ -593,11 +636,54 @@ namespace MyPlugin
                 }
                 TableSpecDialog.Show(OwnerWindow(), profile, session, request, () => IsRunning(dbId),
                     () => SafeSetting(TableSpecLogic.SettingKey), value => SaveSetting(TableSpecLogic.SettingKey, value),
-                    TableSpecTemplates.UserFolder(DataDirectory));
+                    TableSpecTemplates.UserFolder(DataDirectory), HelpFolder);
             }
             catch (Exception ex)
             {
                 ReportUnexpected(ex, request == null ? null : request.DbId);
+            }
+        }
+
+        /// <summary>GCM 정의서 창. 연결 안 됐으면 연결하고, 그 DB에서 실행 중이면 알리고 열지 않는다(세션 하나를 같이 쓴다).</summary>
+        public void CreateCodeSpec(string dbId)
+        {
+            CreateCodeSpec(dbId, null);
+        }
+
+        /// <summary>carrySql: 창 안에서 대상 DB를 바꿔 넘어올 때 가져온 편집기 SQL(없으면 null).</summary>
+        private async void CreateCodeSpec(string dbId, string carrySql)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(dbId) || _closed)
+                    return;
+                var profile = FindProfile(dbId);
+                if (profile == null)
+                    return;
+                var session = GetSession(dbId);
+                if (session == null || session.IsBroken)
+                {
+                    if (!await ConnectAsync(dbId))
+                        return;
+                    session = GetSession(dbId);
+                    if (session == null)
+                        return;
+                }
+                if (IsRunning(dbId))
+                {
+                    Dialogs.Show(OwnerWindow(), CodeSpecLogic.Title, TableSpecLogic.BusyText(profile.Name), true);
+                    return;
+                }
+                var next = CodeSpecDialog.Show(OwnerWindow(), profile, session, () => IsRunning(dbId),
+                    () => SafeSetting(CodeSpecLogic.SettingKey), value => SaveSetting(CodeSpecLogic.SettingKey, value),
+                    CodeSpecTemplates.UserFolder(DataDirectory), CodeSpecLogic.SqlFolder(DataDirectory), Profiles, carrySql, HelpFolder);
+                // 콤보로 다른 접속을 골랐다: 그 DB로 다시 연다(연결이 안 돼 있으면 비밀번호를 묻고 연결)
+                if (next != null && !_closed)
+                    CreateCodeSpec(next.DbId, next.Sql);
+            }
+            catch (Exception ex)
+            {
+                ReportUnexpected(ex, dbId);
             }
         }
 
@@ -950,14 +1036,15 @@ namespace MyPlugin
             DbSession session = null;
             try
             {
+                var provider = DbProviders.For(profile);
                 var connectionString = OracleConnectionStore.BuildConnectionString(profile, password, ShellLogic.ConnectTimeoutSeconds);
                 password = null;
                 var used = ShellLogic.SessionCopy(profile);
                 state.Opening = true;
                 StateChanged(dbId);
-                session = DbSession.CreateOracle(connectionString);
+                session = DbSession.Create(provider, connectionString);
                 await session.OpenAsync();
-                var schemas = await session.QueryAsync(OracleMetadata.CurrentSchema(),
+                var schemas = await session.QueryAsync(provider.Metadata.CurrentSchema(),
                     r => r.IsDBNull(0) ? null : Convert.ToString(r.GetValue(0), CultureInfo.InvariantCulture));
                 var mySchema = schemas.FirstOrDefault();
                 if (string.IsNullOrWhiteSpace(mySchema))

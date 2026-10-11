@@ -14,7 +14,7 @@
 
   <ItemGroup>
     <Compile Include="..\..\src\MyPlugin\OracleConnections.cs" Link="OracleConnections.cs" />
-    <Compile Include="..\..\src\MyPlugin\Db\*.cs" Link="Db\%(Filename)%(Extension)" />
+    <Compile Include="..\..\src\MyPlugin\Db\**\*.cs" Link="Db\%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="..\..\src\MyPlugin\Ui\TreeModel.cs" Link="Ui\TreeModel.cs" />
     <Compile Include="..\..\src\MyPlugin\Ui\*Logic.cs" Link="Ui\%(Filename)%(Extension)" />
     <Compile Include="..\..\src\MyPlugin\Doc\*.cs" Link="Doc\%(Filename)%(Extension)" />
@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.301" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
     <PackageReference Include="ClosedXML" Version="0.105.1" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />

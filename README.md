@@ -1,6 +1,6 @@
 # DB Helper
 
-[Folderss](https://github.com/zaruous/Folderss) 파일 관리자 안에서 Oracle DB에 접속해 객체를 찾아보고 SQL을 실행하는 플러그인입니다.
+[Folderss](https://github.com/zaruous/Folderss) 파일 관리자 안에서 Oracle(또는 PostgreSQL) DB에 접속해 객체를 찾아보고 SQL을 실행하는 플러그인입니다.
 `⋯ 메뉴 > 플러그인 > DB Helper`를 누르면 팝업 창으로 열립니다.
 
 ## 설치
@@ -30,19 +30,22 @@
 | 안전장치 | WHERE 없는 UPDATE·DELETE, DROP·TRUNCATE·ALTER 등은 확인 체크 후 실행. 커밋 대기 중 DDL 실행(자동 커밋됨) 경고. 컴파일 오류가 있는 PL/SQL은 메시지 탭에 오류 목록 표시 |
 | 결과 | NULL·숫자 구분, 열 머리에 Oracle 형식, 열 머리를 눌러 정렬(오름차순 → 내림차순 → 해제, 숫자 열은 수로, NULL은 Oracle 기본처럼 오름차순 맨 뒤), TSV 복사(`Ctrl+C`·[복사], 화면 순서), 메시지·실행 기록 |
 | 테이블 정의서 (PoC) | 트리에서 테이블을 `Ctrl`·`Shift`+클릭으로 여러 개 고르거나 스키마·DB를 고른 뒤 오른쪽 메뉴(또는 `도구 > 테이블 정의서 만들기…`). 대상 선택 창에서 스키마별로 **정규식**(대소문자 무시·주석도 찾기)이나 여러 줄 선택 + `Space`로 체크하고, 문서 정보(제목·프로젝트·작성자·버전·작성일)를 넣으면 **엑셀 템플릿**에 Velocity 변수를 채운 .xlsx를 만듦. 고친 양식은 **사용자 양식 폴더**(팝업의 [양식 폴더])에 넣으면 목록에 "내 양식"으로 보이고, [복사해서 고치기]로 기본 양식을 꺼내 엑셀에서 고칠 수 있음. LLM으로 양식을 만들 때는 [LLM 지침 복사] — 지침: https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/ . [만들기…] 때 입력한 문서 정보(제목·프로젝트·시스템/모듈·작성자·버전·작성일·설명)와 고른 양식·저장 폴더는 플러그인 설정에 저장해 다음에 창을 열 때 불러옴. 기본 양식은 2종: **기본**(표지 · 목록(시트 링크) · 테이블마다 열·인덱스·제약 조건)과 **명세서형**(워크스코브 테이블 명세서 양식 구성 — 논리명·키 PK/FK/UK/IX·외래키 삭제 규칙·인덱스 유형·공통 코드·개정 이력). |
+| GCM 정의서 | `도구 > GCM 정의서 만들기…`(트리에서 대상 DB를 고른 뒤). **공통 코드 테이블을 읽는 SELECT 문을 직접 쓰고**, 결과 열에 `AS` 별칭만 맞추면 됩니다 — 필수 `TABLE_NAME`·`CODE`·`CODE_NAME`, 선택 `GROUP_NAME`·`GROUP_DESC`·`CODE_DESC`·`SORT_NO`·`USE_YN`, 그 밖의 열은 추가 속성(`$code.attrs.열이름`). 플러그인은 SQL을 해석하지 않으므로 환경마다 테이블·열 이름이 달라도 SQL만 바꿉니다. [열 확인]은 SQL을 `ROWNUM <= 1`로 감싸 실행해 별칭을 검사하고, [저장…]으로 SQL을 **SQL 폴더**(`plugin-data\…\code-sql\*.sql`)에 저장하면 목록에 보이며 접속마다 마지막에 쓴 파일을 기억합니다. 그룹 정규식으로 `TABLE_NAME`를 걸러 일부만 넣을 수 있고, 출력은 **엑셀 양식**(기본 2종: 그룹별 시트 · 단일 시트, 내 양식은 `templates\gcm\`) · **JSON**(doc·db·source·groups[].codes[]) · **CSV**(UTF-8 BOM) 중 고릅니다. "코드 테이블마다 열 이름이 다른" 범용 코드 테이블(정의 테이블이 열 이름, 데이터 테이블이 값)은 **이름 열과 값 열을 짝으로 나열**하면 됩니다 — 추가 열 `X`와 `X_NAME`이 함께 있으면 `X_NAME` 값이 속성 이름, `X` 값이 속성 값(`KEY_1_NAME`/`KEY_1`, `DATA_1_NAME`/`DATA_1` …). 평범한 열 나열이라 어떤 DBMS에서나 같은 SQL이고, 그룹마다 실제 열 이름이 속성이 되어 양식의 `$group.attrNames`·`$code.groupAttrValues`로 씁니다. JSON 객체 열(`jsonb_build_object`)도 같은 식으로 펼치지만 DBMS 고유 함수라 선택 사항입니다. 창 머리의 [대상 DB] 콤보로 다른 접속으로 바꿀 수 있고, 트리의 DB 행 오른쪽 메뉴에도 항목이 있습니다. [LLM에게 SQL 요청]은 별칭 계약이 든 요청 글을 복사하고, [본보기 SQL]은 플러그인 본보기(범용 코드 테이블 꼴)를 편집기에 넣습니다. 본보기 전문은 사내 테이블 구조라 코드·DLL·문서에 평문으로 두지 않고 플러그인 안에 잠가 둡니다(`SqlCipherLogic`, 고정 키). 조회가 0행이거나 정규식에 맞는 그룹이 없으면 빈 문서를 만들지 않고 상태 줄에 이유를 보입니다. 양식 지침: https://zaruous.github.io/Folderss-oracle-db-helper/code-spec-templates/ |
 
 ## 알아 둘 점
 
+- **PostgreSQL·SQL Server 접속**(Npgsql·Microsoft.Data.SqlClient): 접속 관리의 [DBMS]에서 고르면 서비스명 칸이 데이터베이스가 되고 기본 포트는 5432·1433입니다. 지원 범위는 접속·트리(스키마·테이블·뷰·시퀀스·함수/프로시저·열)·검색·SQL 실행·빠른 조회·GCM 정의서입니다. 테이블 정보(F4)·테이블 정의서는 아직 Oracle 데이터 사전 기반이라 안내만 띄웁니다. 결과 열 형식은 그 DBMS 이름 그대로(`character varying(20)`, `nvarchar(50)`), DDL은 Oracle처럼 실행 전에 자동 커밋합니다. SQL Server는 암호화 Optional·TrustServerCertificate·MARS로 붙습니다(사내 자체 서명 인증서). PostgreSQL은 연결당 결과 커서가 하나라, 조회 결과를 열어 둔 채 다른 문장·조회(GCM 정의서 포함)를 실행하면 이전 결과의 [다음 행 가져오기]가 꺼집니다(가져온 행은 그대로). 이전 버전의 접속 설정은 그대로 Oracle로 읽힙니다.
+- **SQL 파일 드래그 드롭**: 탐색기에서 SQL 편집기로 파일을 끌어다 놓으면 그 파일 탭으로 열립니다(이미 연 파일은 그 탭으로). 이후 편집·`Ctrl+S` 저장은 그 파일에 됩니다. GCM 정의서 창의 SQL 편집기에 놓으면 그 .sql을 불러오고 [저장…]이 그 파일을 먼저 보입니다. 창을 닫았다 열면 쓰던 탭(파일 탭 포함)은 임시 저장으로 되살아납니다.
 - **DB마다 세션 1개**: 같은 DB를 대상으로 하는 탭들은 트랜잭션을 함께 씁니다(한 탭의 커밋이 다른 탭의 변경도 커밋). 같은 DB에서는 한 번에 한 문장만 실행합니다.
 - **읽기 전용은 플러그인 쪽 차단**입니다. 운영 DB는 DB 계정 권한도 읽기 전용으로 두세요.
 - **비밀번호**는 이 PC의 이 Windows 사용자만 풀 수 있게 저장합니다. 다른 PC로 옮기면 다시 입력해야 합니다.
 - **SQL 파일**은 5MB까지 엽니다. BOM이 없고 UTF-8로 읽히지 않는 파일은 CP949로 읽고, 그대로 CP949로 저장합니다(CP949로 나타낼 수 없는 글자가 생기면 UTF-8로 저장하고 알림). 새 파일은 BOM 없는 UTF-8입니다.
 - **정렬은 가져온 행 안에서만** 합니다. 더 가져온 행도 정렬 위치에 들어가지만, 전체 결과의 순서는 `ORDER BY`로 정하세요.
-- **임시 저장 위치**: `%LOCALAPPDATA%\Folderss\plugin-data\<플러그인 id>\sql-drafts\`(창마다 파일 하나, 평문). 창을 여러 개 열어도 서로 덮어쓰지 않고, 닫힌 창의 것은 다음에 여는 창이 넘겨받습니다.
+- **임시 저장 위치**: `%LOCALAPPDATA%\Folderss\plugin-data\<플러그인 id>\sql-drafts\`(창마다 파일 하나, 평문). GCM 창의 마지막 SQL과 본보기 SQL은 플러그인 고정 키(AES-GCM)로 잠가 둡니다(비밀 보호가 아니라 노출 방지용). 창을 여러 개 열어도 서로 덮어쓰지 않고, 닫힌 창의 것은 다음에 여는 창이 넘겨받습니다.
 - **여러 문장 실행**에서는 문장 안에 빈 줄이 있어도 됩니다: 빈 줄 다음이 `FROM`·`WHERE`·`SET`·`AND`처럼 문장을 잇는 말이면 같은 문장으로 봅니다(`;`·`/` 줄은 언제나 문장 끝). 한 번에 결과는 20개까지 남깁니다.
 - **문장 구분**: `;`, 빈 줄, `/`만 있는 줄. PL/SQL 블록(BEGIN·DECLARE·CREATE PROCEDURE 등)은 `/` 줄로 끝내세요.
 - **접속 방식**: 호스트·포트·서비스명(EZConnect)만 지원합니다. TNS 별칭과 Wallet(mTLS)은 아직 지원하지 않습니다.
-- **확인 상태**: 문장 분석·조회 SQL·세션·트리 로직·템플릿 엔진·엑셀 렌더러·LLM용 양식 지침은 단위 테스트(1,200여 개, Linux·Windows)로, 접속·트리 조회·SQL 실행·트랜잭션·취소·테이블 정의서 조회는 실제 Oracle 12.1(Docker)에 붙는 시험(`tests/MyPlugin.OracleIT`)으로 확인했습니다. Windows 화면은 Folderss 테마를 입힌 시험 창에서 편집기 정렬·SQL 임시 저장·트리 메뉴(다시 연결)·결과 정렬·메뉴 막대·SQL 파일 열기/저장·여러 문장 결과·빠른 조회(F1)·테이블 정보(F4)를, 테이블 정의서(트리 여러 줄 선택·오른쪽 메뉴·도구 메뉴·대상 선택 팝업·내 양식·만들기)는 Folderss 본체 안에서 확인했습니다.
+- **확인 상태**: 문장 분석·조회 SQL·세션·트리 로직·템플릿 엔진·엑셀 렌더러·LLM용 양식 지침은 단위 테스트(1,300여 개, Linux·Windows)로, 접속·트리 조회·SQL 실행·트랜잭션·취소·테이블 정의서 조회는 실제 Oracle 12.1(Docker)에 붙는 시험(`tests/MyPlugin.OracleIT`)으로 확인했습니다. Windows 화면은 Folderss 테마를 입힌 시험 창에서 편집기 정렬·SQL 임시 저장·트리 메뉴(다시 연결)·결과 정렬·메뉴 막대·SQL 파일 열기/저장·여러 문장 결과·빠른 조회(F1)·테이블 정보(F4)를, 테이블 정의서(트리 여러 줄 선택·오른쪽 메뉴·도구 메뉴·대상 선택 팝업·내 양식·만들기)는 Folderss 본체 안에서 확인했습니다.
 - **취소**: [취소]는 in-band break로 보냅니다. 기본값(OOB, TCP 긴급 데이터)은 Docker Desktop·일부 방화벽·NAT를 지나지 못해 서버가 취소를 받지 못합니다.
 
 ### 테이블 정의서 템플릿
@@ -66,6 +69,26 @@
 - Velocity 문법 일부만 직접 구현했습니다(`#macro`·`#parse`·인자 있는 메서드 호출은 없음). 엑셀은 ClosedXML로 읽고 씁니다.
 - 데이터는 스키마마다 이름 500개씩 묶어 4번(요약·열·인덱스·제약 조건) 조회합니다. 기본값(`DATA_DEFAULT`)·검사 조건도 읽습니다.
 - 조건부 서식·데이터 유효성·그림은 줄을 되풀이해도 따라 움직이지 않습니다.
+
+### GCM 정의서 (별칭 계약)
+
+GCM(공통 코드) 정의서는 테이블 정의서와 같은 엔진(Velocity 엑셀 템플릿)을 쓰되, 데이터는 **사용자 SQL**에서 옵니다. 플러그인이 아는 것은 결과 열의 별칭뿐입니다.
+
+| 별칭 | 필수 | 뜻 |
+|---|---|---|
+| `TABLE_NAME` | 필수 | 코드 그룹(코드 테이블) 식별자. 옛 별칭 `GROUP_ID`도 받음 |
+| `CODE` | 필수 | 코드 값 |
+| `CODE_NAME` | 필수 | 코드 명칭 |
+| `GROUP_NAME` · `GROUP_DESC` | 선택 | 그룹 명칭·설명(행마다 반복되면 첫 값) |
+| `CODE_DESC` | 선택 | 코드 설명 |
+| `SORT_NO` | 선택 | 그룹 안 정렬(숫자로 읽히면 수로). 없으면 SQL 순서 |
+| `USE_YN` | 선택 | 사용 여부(Y/N·1/0·true/false, 비우면 사용) |
+| 그 밖의 열 | — | 추가 속성: `${code.attrs.열이름}`, `${code.attrText}`("이름=값; …"), JSON의 `attrs`, CSV의 뒤쪽 열 |
+
+변수: `$doc`(title·project·system·author·version·date·description·groupCount·codeCount·generatedAt), `$db`(name·user·address·version), `$source`(name·sql·fetchedAt·rowCount·columns·attrNames), `$groups` → `$group`(no·id·name·description·sheetName·codeCount·codes) → `$code`(no·group·groupName·code·name·description·sortNo·useYn·isUsed·attrs·attrValues·attrText), `$codes`(모든 코드를 편 목록). 지침·변수 목록은 `docs/code-spec-templates/`(사람용: https://zaruous.github.io/Folderss-oracle-db-helper/code-spec-templates/ ).
+
+- 본보기 SQL이 처음 열 때 들어 있습니다. `FROM`·열 이름만 환경에 맞게 바꾸세요. 바인드 변수는 받지 않습니다(값을 직접 적습니다).
+- 조회는 모든 행을 메모리에 올립니다. 그룹이 아주 많으면 그룹별 시트 양식 대신 단일 시트 양식이나 그룹 정규식을 쓰세요.
 
 ### 실제 Oracle로 시험
 

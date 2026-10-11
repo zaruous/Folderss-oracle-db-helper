@@ -167,6 +167,17 @@ namespace MyPlugin.OracleIT
                 Exec(c, "ALTER TABLE " + s + "ORDER_ITEMS ADD CONSTRAINT CK_ORDER_ITEMS_QTY CHECK (QTY > 0)");
                 Exec(c, "CREATE INDEX " + s + "IX_ORDERS_NAME ON " + s + "ORDERS(CUSTOMER_NAME, CREATED_AT)");
                 Exec(c, "BEGIN DBMS_STATS.GATHER_TABLE_STATS('" + User + "', 'ORDERS'); END;");
+
+                // GCM 정의서(F5): 공통 코드 표 — 열 이름은 일부러 별칭 계약과 다르게(사용자 SQL의 AS로 맞춘다)
+                Exec(c, "CREATE TABLE " + s + "GCM_CODE (CODE_GROUP VARCHAR2(30) NOT NULL, GROUP_NM VARCHAR2(100), CODE VARCHAR2(30) NOT NULL, CODE_NM VARCHAR2(100), SORT_SEQ NUMBER, USE_FLAG CHAR(1), PLANT_CD VARCHAR2(10))");
+                Exec(c, "INSERT ALL"
+                    + " INTO " + s + "GCM_CODE VALUES ('ORDER_STATUS', '주문 상태', 'B', '출고', 2, 'Y', 'P1')"
+                    + " INTO " + s + "GCM_CODE VALUES ('ORDER_STATUS', '주문 상태', 'A', '접수', 1, 'Y', 'P1')"
+                    + " INTO " + s + "GCM_CODE VALUES ('ORDER_STATUS', '주문 상태', 'Z', '취소', 10, 'N', NULL)"
+                    + " INTO " + s + "GCM_CODE VALUES ('YN', '예/아니오', 'Y', '예', 1, 'Y', NULL)"
+                    + " INTO " + s + "GCM_CODE VALUES ('YN', '예/아니오', 'N', '아니오', 2, 'Y', NULL)"
+                    + " SELECT 1 FROM DUAL");
+                Exec(c, "COMMIT");
             }
         }
 

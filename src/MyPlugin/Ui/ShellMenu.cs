@@ -23,8 +23,14 @@ namespace MyPlugin
         void ManageConnections();
         void ShowShortcuts();
 
+        /// <summary>도움말 > 도움말: 플러그인 폴더의 HTML 도움말 창.</summary>
+        void ShowHelp();
+
         /// <summary>도구 > 테이블 정의서 만들기: 트리에서 고른 행들로 대상 선택 창.</summary>
         void CreateTableSpec();
+
+        /// <summary>도구 > GCM 정의서 만들기: 트리에서 고른 DB로 사용자 SQL·별칭 계약 창.</summary>
+        void CreateCodeSpec();
 
         /// <summary>편집 메뉴(잘라내기·복사·되돌리기 등)의 대상. 없으면 null.</summary>
         TextBox ActiveEditor { get; }
@@ -293,12 +299,24 @@ namespace MyPlugin
             var spec = Item("테이블 정의서 만들기(_D)…", null, null, _commands.CreateTableSpec);
             spec.ToolTip = "트리에서 고른 테이블(Ctrl·Shift+누름으로 여러 개)·스키마·DB로 엑셀 테이블 정의서를 만듭니다";
             top.Items.Add(spec);
+            var codes = Item("GCM 정의서 만들기(_G)…", null, null, _commands.CreateCodeSpec);
+            codes.ToolTip = "트리에서 고른 DB에서 공통 코드(GCM) 조회 SQL을 실행해 엑셀·JSON·CSV 정의서를 만듭니다. SQL의 결과 열 별칭(TABLE_NAME·CODE·CODE_NAME …)만 맞으면 됩니다. 창 안에서 대상 DB를 바꿀 수 있습니다";
+            top.Items.Add(codes);
+            // 열 때마다 대상 DB(트리에서 고른 것)를 항목 글에 보인다 — 어느 접속으로 만드는지 바로 알 수 있게
+            top.SubmenuOpened += (s, e) =>
+            {
+                if (!ReferenceEquals(e.OriginalSource, top))
+                    return;
+                var state = SafeState();
+                codes.Header = ShellLogic.CodeSpecMenuText(state.DbName);
+            };
             return top;
         }
 
         private MenuItem HelpMenu()
         {
             var top = Top("도움말(_H)");
+            top.Items.Add(Item("도움말(_H)…", "F1", null, _commands.ShowHelp));
             top.Items.Add(Item("단축키(_K)…", null, null, _commands.ShowShortcuts));
             return top;
         }

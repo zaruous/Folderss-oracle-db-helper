@@ -248,7 +248,8 @@ namespace MyPlugin
         {
             try
             {
-                var rows = await session.QueryAsync(ServerVersion(), ReadServerVersion, token).ConfigureAwait(true);
+                var metadata = session.Provider.Metadata;
+                var rows = await session.QueryAsync(metadata.ServerVersion(), metadata.ReadServerVersion, token).ConfigureAwait(true);
                 return rows.FirstOrDefault() ?? "";
             }
             catch (OperationCanceledException)

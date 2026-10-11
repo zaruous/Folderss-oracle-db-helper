@@ -75,6 +75,9 @@ namespace MyPlugin
         /// <summary>트리 메뉴·도구 메뉴 [테이블 정의서 만들기…]: 대상 선택 창(필요하면 연결한다).</summary>
         void CreateTableSpec(TableSpecRequest request);
 
+        /// <summary>도구 메뉴 [GCM 정의서 만들기…]: 그 DB의 사용자 SQL 창(필요하면 연결한다).</summary>
+        void CreateCodeSpec(string dbId);
+
         /// <summary>메시지 탭에 오류 한 줄.</summary>
         void ReportError(string dbId, string text);
     }
@@ -858,6 +861,12 @@ namespace MyPlugin
                     "연결을 끊고 저장된 접속 정보로 다시 연결합니다(커밋 대기 변경은 묻습니다)"));
                 menu.Items.Add(MenuAction("연결 끊기", state.CanDisconnect, () => _host.Disconnect(dbId)));
             }
+            if (row.Kind == TreeRowKind.Database && !state.Connecting)
+            {
+                menu.Items.Add(new Separator());
+                menu.Items.Add(MenuAction(CodeSpecLogic.Title + "…", true, () => _host.CreateCodeSpec(dbId),
+                    "이 DB('" + profile.Name + "')에서 공통 코드 조회 SQL을 실행해 정의서를 만듭니다"));
+            }
             if (row.Kind == TreeRowKind.Object && TreeGroups.HasColumns(row.ObjectType))
             {
                 var owner = row.Owner;
@@ -894,12 +903,19 @@ namespace MyPlugin
             return TableSpecLogic.Request(dbId, rows, _host.MySchemaOf(dbId), db == null ? null : db.Schemas, _showSystem.IsChecked == true);
         }
 
-        /// <summary>도구 메뉴 [테이블 정의서 만들기…]: 지금 고른 행들(지금 행의 DB)로 대상 선택 창을 연다. 고른 DB가 없으면 false.</summary>
-        public bool CreateTableSpecFromSelection()
+        /// <summary>지금 고른 행의 DB id(접속 목록에 있는 것). 고른 DB가 없으면 null.</summary>
+        public string SelectedDbId()
         {
             var current = CurrentEntry();
             var dbId = current != null && current.Row != null ? current.Row.DbId : TreeKeys.DbIdOf(_selectedKey);
-            if (string.IsNullOrEmpty(dbId) || !Profiles().Any(p => p.Id == dbId))
+            return string.IsNullOrEmpty(dbId) || !Profiles().Any(p => p.Id == dbId) ? null : dbId;
+        }
+
+        /// <summary>도구 메뉴 [테이블 정의서 만들기…]: 지금 고른 행들(지금 행의 DB)로 대상 선택 창을 연다. 고른 DB가 없으면 false.</summary>
+        public bool CreateTableSpecFromSelection()
+        {
+            var dbId = SelectedDbId();
+            if (dbId == null)
                 return false;
             var rows = _list.SelectedItems.OfType<TreeEntry>().Select(e => e.Row).Where(r => r != null && r.DbId == dbId).ToList();
             _host.CreateTableSpec(TableSpecRequest(dbId, rows));
@@ -1093,33 +1109,34 @@ namespace MyPlugin
                 if (loadMore)
                     RequestRebuild(); // "더 보기"에 불러오는 중 표시
                 var token = _host.LoadToken(load.DbId);
+                var meta = session.Provider.Metadata;
                 switch (load.Kind)
                 {
                     case TreeLoadKind.Schemas:
                     {
-                        var schemas = await QueryWithOmAsync<SchemaInfo>(session, load.DbId, om => OracleMetadata.Schemas(om),
-                            om => r => OracleMetadata.ReadSchema(r, om), true, token);
+                        var schemas = await QueryWithOmAsync<SchemaInfo>(session, load.DbId, om => meta.Schemas(om),
+                            om => r => meta.ReadSchema(r, om), meta.HasMaintainedFlagFallback, token);
                         if (IsCurrent(db, session))
                             db.Schemas = schemas;
                         break;
                     }
                     case TreeLoadKind.GroupCounts:
                     {
-                        var counts = await session.QueryAsync(OracleMetadata.GroupCounts(load.Owner), r => TreeLoaderLogic.ReadGroupCount(r), token);
+                        var counts = await session.QueryAsync(meta.GroupCounts(load.Owner), r => TreeLoaderLogic.ReadGroupCount(r), token);
                         if (IsCurrent(db, session))
                             db.GroupCounts[load.Key] = TreeLoaderLogic.GroupCounts(counts);
                         break;
                     }
                     case TreeLoadKind.Objects:
                     {
-                        var objects = await session.QueryAsync(OracleMetadata.Objects(load.Owner, load.Group, load.Limit), r => OracleMetadata.ReadObject(r), token);
+                        var objects = await session.QueryAsync(meta.Objects(load.Owner, load.Group, load.Limit), r => meta.ReadObject(r), token);
                         if (IsCurrent(db, session))
                             db.Objects[load.Key] = TreeLoaderLogic.Page(objects, load.Limit);
                         break;
                     }
                     case TreeLoadKind.Columns:
                     {
-                        var columns = await session.QueryAsync(OracleMetadata.Columns(load.Owner, load.ObjectName), r => OracleMetadata.ReadColumn(r), token);
+                        var columns = await session.QueryAsync(meta.Columns(load.Owner, load.ObjectName), r => meta.ReadColumn(r), token);
                         if (IsCurrent(db, session))
                             db.Columns[load.Key] = columns;
                         break;
@@ -1448,14 +1465,16 @@ namespace MyPlugin
         private async Task<TreeSearchResult> SearchOneAsync(DbSession session, string dbId, string pattern, bool includeSystem, bool columns, CancellationToken token)
         {
             var limit = OracleMetadata.SearchLimit;
+            var meta = session.Provider.Metadata;
+            var fallback = meta.HasMaintainedFlagFallback;
             string error = null;
             List<SchemaInfo> schemas = null;
             List<SearchHit> objects = null;
             List<SearchHit> columnHits = null;
             try
             {
-                schemas = await QueryWithOmAsync<SchemaInfo>(session, dbId, om => OracleMetadata.SearchSchemas(pattern, includeSystem, om, limit),
-                    om => r => OracleMetadata.ReadSchema(r, om), true, token);
+                schemas = await QueryWithOmAsync<SchemaInfo>(session, dbId, om => meta.SearchSchemas(pattern, includeSystem, om, limit),
+                    om => r => meta.ReadSchema(r, om), fallback, token);
             }
             catch (Exception ex) when (!token.IsCancellationRequested)
             {
@@ -1463,8 +1482,8 @@ namespace MyPlugin
             }
             try
             {
-                objects = await QueryWithOmAsync<SearchHit>(session, dbId, om => OracleMetadata.SearchObjects(pattern, includeSystem, om, limit),
-                    om => r => OracleMetadata.ReadObjectHit(r), !includeSystem, token);
+                objects = await QueryWithOmAsync<SearchHit>(session, dbId, om => meta.SearchObjects(pattern, includeSystem, om, limit),
+                    om => r => meta.ReadObjectHit(r), fallback && !includeSystem, token);
             }
             catch (Exception ex) when (!token.IsCancellationRequested)
             {
@@ -1474,8 +1493,8 @@ namespace MyPlugin
             {
                 try
                 {
-                    columnHits = await QueryWithOmAsync<SearchHit>(session, dbId, om => OracleMetadata.SearchColumns(pattern, includeSystem, om, limit),
-                        om => r => OracleMetadata.ReadColumnHit(r), !includeSystem, token);
+                    columnHits = await QueryWithOmAsync<SearchHit>(session, dbId, om => meta.SearchColumns(pattern, includeSystem, om, limit),
+                        om => r => meta.ReadColumnHit(r), fallback && !includeSystem, token);
                 }
                 catch (Exception ex) when (!token.IsCancellationRequested)
                 {
@@ -2017,6 +2036,33 @@ namespace MyPlugin
     /// <summary>셸·트리 화면 조각: 테마 색으로 그린 체크 상자·작은 버튼·주 동작 버튼, 반투명 의미 색, 시각 트리 도우미.</summary>
     internal static class ShellUi
     {
+        /// <summary>
+        /// 요소에 파일 드래그 드롭을 받는다(탐색기에서 끌어다 놓기). 파일이 아닌 드래그(글자 등)는 요소의 기본 동작에 맡긴다.
+        /// TextBox는 자기 드래그 처리가 있어 Preview 이벤트로 먼저 가로챈다. onFiles에는 실제로 있는 파일만(순서대로, 중복 없이).
+        /// </summary>
+        public static void EnableFileDrop(UIElement element, Action<IReadOnlyList<string>> onFiles)
+        {
+            if (element == null || onFiles == null)
+                return;
+            element.AllowDrop = true;
+            element.PreviewDragOver += (s, e) =>
+            {
+                if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+                    return;
+                e.Effects = DragDropEffects.Copy;
+                e.Handled = true;
+            };
+            element.PreviewDrop += (s, e) =>
+            {
+                if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+                    return;
+                e.Handled = true;
+                var files = SqlFileLogic.DroppedFiles(e.Data.GetData(DataFormats.FileDrop) as string[]);
+                if (files.Count > 0)
+                    onFiles(files);
+            };
+        }
+
         /// <summary>검색어 강조 바탕(경고색 30%).</summary>
         public static readonly Brush HighlightTint = Tint(Theme.Warning, 0x4D);
 

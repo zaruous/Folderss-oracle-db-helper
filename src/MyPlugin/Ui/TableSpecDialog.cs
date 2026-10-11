@@ -68,6 +68,8 @@ namespace MyPlugin
         private Button _openTemplate;
         // 사용자 양식 폴더(플러그인 데이터 폴더\templates). 모르면 null — 기본 양식만 쓴다
         private readonly string _templateFolder;
+        // 플러그인 폴더의 help(도움말 HTML). 모르면 null — 온라인
+        private readonly string _helpFolder;
         private List<SpecTemplate> _templates;
         // 목록을 다시 읽는 중(고른 양식이 바뀌어도 [양식] 라디오를 건드리지 않게)
         private bool _refreshingTemplates;
@@ -89,8 +91,9 @@ namespace MyPlugin
         private bool _bulk;
 
         private TableSpecDialog(Window owner, OracleConnectionProfile profile, DbSession session, TableSpecRequest request, Func<bool> isRunning,
-            Func<string> loadSettings, Action<string> saveSettings, string templateFolder)
+            Func<string> loadSettings, Action<string> saveSettings, string templateFolder, string helpFolder)
         {
+            _helpFolder = helpFolder;
             _templateFolder = templateFolder;
             _profile = profile;
             _session = session;
@@ -136,9 +139,9 @@ namespace MyPlugin
         /// loadSettings·saveSettings: 지난번 입력값(TableSpecLogic.SettingKey의 글)을 읽고 쓴다. templateFolder: 사용자 양식 폴더(모르면 null).
         /// </summary>
         public static void Show(Window owner, OracleConnectionProfile profile, DbSession session, TableSpecRequest request, Func<bool> isRunning,
-            Func<string> loadSettings, Action<string> saveSettings, string templateFolder)
+            Func<string> loadSettings, Action<string> saveSettings, string templateFolder, string helpFolder = null)
         {
-            new TableSpecDialog(owner, profile, session, request ?? new TableSpecRequest(), isRunning, loadSettings, saveSettings, templateFolder)._window.ShowDialog();
+            new TableSpecDialog(owner, profile, session, request ?? new TableSpecRequest(), isRunning, loadSettings, saveSettings, templateFolder, helpFolder)._window.ShowDialog();
         }
 
         // ================= 만들기 =================
@@ -147,9 +150,13 @@ namespace MyPlugin
         {
             var root = new DockPanel { Margin = new Thickness(14, 12, 14, 12) };
 
-            var head = new StackPanel();
+            var head = new DockPanel();
+            var help = SmallButton("도움말", "대상 고르기·양식·LLM 지침 설명(도움말 창)");
+            help.Click += (s, e) => HelpWindow.Show(_window, _helpFolder, HelpLogic.TableSpec);
+            help.VerticalAlignment = VerticalAlignment.Top;
+            DockPanel.SetDock(help, Dock.Right);
+            head.Children.Add(help);
             head.Children.Add(DialogKit.Target(_profile, ConnectionManagerLogic.Address(_profile)));
-            head.Children.Add(DialogKit.Hint("트리에서 고른 테이블은 체크되어 있습니다. 스키마를 바꿔 가며 정규식이나 여러 줄 선택으로 대상을 체크하고, 문서 정보를 채운 뒤 [만들기…]를 누르세요.", 6));
             DockPanel.SetDock(head, Dock.Top);
             root.Children.Add(head);
 
@@ -239,9 +246,6 @@ namespace MyPlugin
             DockPanel.SetDock(top, Dock.Top);
             panel.Children.Add(top);
 
-            var hint = DialogKit.Hint("Ctrl·Shift로 여러 줄을 고른 뒤 Space로 체크·해제 · 두 번 누르면 체크·해제 · Ctrl+A 모두 고르기", 6);
-            DockPanel.SetDock(hint, Dock.Bottom);
-            panel.Children.Add(hint);
 
             _list = BuildList();
             panel.Children.Add(_list);
@@ -368,7 +372,6 @@ namespace MyPlugin
             llmButtons.Children.Add(llm);
             llmButtons.Children.Add(guide);
             panel.Children.Add(llmButtons);
-            panel.Children.Add(DialogKit.Hint("셀에 ${table.name} 같은 변수를 쓰고 #foreach … #end 줄로 되풀이합니다. 문법·변수는 양식의 '_변수 설명' 시트와 [지침 보기]에.", 6));
 
             return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false };
         }

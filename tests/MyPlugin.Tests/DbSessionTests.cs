@@ -1507,6 +1507,57 @@ namespace MyPlugin.Tests
                 Assert.Throws<OracleException>(() => DbSession.ReadValue(reader, 0, ColumnRead.ProviderSpecific));
         }
 
+        // ---------- QueryTableAsync (GCM 정의서의 사용자 SQL) ----------
+
+        [Fact]
+        public async Task QueryTable_ReturnsColumnNamesAndAllRows_NullAsNull_MaxRowsLimits()
+        {
+            using (var session = await OpenAsync(new SqliteConnection(Memory)))
+            {
+                await CreateNumbersAsync(session, 5);
+
+                var table = await session.QueryTableAsync("SELECT x AS TABLE_NAME, 'c' || x AS code, NULL AS code_name FROM nums ORDER BY x", null);
+                Assert.Equal(new[] { "TABLE_NAME", "code", "code_name" }, table.Columns.ToArray());
+                Assert.Equal(5, table.Rows.Count);
+                Assert.Equal(new[] { "1", "c1", null }, table.Rows[0]);
+
+                var head = await session.QueryTableAsync("SELECT x FROM nums ORDER BY x", 2);
+                Assert.Equal(2, head.Rows.Count);
+                var none = await session.QueryTableAsync("SELECT x FROM nums", 0);
+                Assert.Equal(new[] { "x" }, none.Columns.ToArray());
+                Assert.Empty(none.Rows);
+                // 조회가 끝난 뒤 세션은 그대로 쓸 수 있다
+                Assert.False(session.IsBusy);
+                await Assert.ThrowsAsync<ArgumentException>(() => session.QueryTableAsync(" ", null));
+            }
+        }
+
+        /// <summary>SQLite 세션의 방언은 Generic(LIMIT 1) — 세션의 방언으로 감싼 열 확인 SQL이 실제로 한 행만 읽고, ProbeAsync가 별칭 검사까지 한다.</summary>
+        [Fact]
+        public async Task QueryTable_WithSessionDialect_ProbeReadsOneRow_AndChecksAliases()
+        {
+            using (var session = await OpenAsync(new SqliteConnection(Memory)))
+            {
+                await CreateNumbersAsync(session, 5);
+                Assert.Same(SqlDialects.Generic, session.Dialect);
+
+                var sql = "SELECT x AS TABLE_NAME, 'c' || x AS CODE, 'n' || x AS CODE_NAME, x AS PLANT_CD FROM nums ORDER BY x DESC;";
+                var probe = await session.QueryTableAsync(CodeSpecQueries.ProbeSql(sql, session.Dialect), null);
+                Assert.Equal(new[] { "TABLE_NAME", "CODE", "CODE_NAME", "PLANT_CD" }, probe.Columns.ToArray());
+                Assert.Single(probe.Rows);
+                // 인라인 뷰 안의 ORDER BY가 그대로 적용된다
+                Assert.Equal("5", probe.Rows[0][0]);
+
+                var check = await CodeSpecQueries.ProbeAsync(session, sql, CancellationToken.None);
+                Assert.True(check.Ok, check.Summary);
+                Assert.Equal(new[] { "PLANT_CD" }, check.Extra.ToArray());
+
+                var missing = await CodeSpecQueries.ProbeAsync(session, "SELECT x FROM nums", CancellationToken.None);
+                Assert.Equal(new[] { "TABLE_NAME", "CODE", "CODE_NAME" }, missing.Missing.ToArray());
+                Assert.False(session.IsBusy);
+            }
+        }
+
         private static async Task<DbSession> OpenAsync(DbConnection connection)
         {
             var session = new DbSession(connection);

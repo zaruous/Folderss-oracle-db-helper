@@ -5,3 +5,7 @@ obj/
 *.suo
 # scripts/pack.ps1 가 만드는 릴리스 zip
 /release/
+# 이 저장소와 무관한 작업 폴더(디자인 실험·MCP 로그·스킬)
+.playwright-mcp/
+/design/
+/skills/

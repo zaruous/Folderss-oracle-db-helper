@@ -29,8 +29,8 @@ namespace MyPlugin.OracleIT
                 var all = await session.QueryAsync(TableSpecQueries.Candidates(Owner, true), TableSpecQueries.ReadCandidate);
                 Log("후보: 테이블 " + tables.Count + "개, 뷰 포함 " + all.Count + "개 — " + string.Join(", ", all.Select(c => c.Name + "/" + c.Type + "/" + c.Comment)));
 
-                Assert.Equal(new[] { "ORDERS", "ORDER_ITEMS" }, tables.Select(c => c.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray());
-                Assert.Equal(3, all.Count);
+                Assert.Equal(new[] { "GCM_CODE", "ORDERS", "ORDER_ITEMS" }, tables.Select(c => c.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray());
+                Assert.Equal(4, all.Count);
                 var orders = all.Single(c => c.Name == "ORDERS");
                 Assert.Equal("주문", orders.Comment);
                 Assert.Equal(OracleFixture.OrderRows, orders.NumRows);

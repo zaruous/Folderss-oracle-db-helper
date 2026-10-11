@@ -12,8 +12,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- 도움말(HTML)은 플러그인 폴더의 help\로 함께 배포한다 (도움말 메뉴·팝업의 [도움말]이 연다) -->
+    <None Include="help\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 계약 DLL은 Folderss 본체의 것을 쓰므로 zip에 넣지 않는다 (Private=false) -->
     <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
     <ProjectReference Include="..\..\contract\Folderss.PluginContract\Folderss.PluginContract.csproj" Private="false" />
     <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.301" />
   </ItemGroup>

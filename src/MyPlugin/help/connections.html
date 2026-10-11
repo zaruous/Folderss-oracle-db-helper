@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>접속 — DB Helper 도움말</title>
+<link rel="stylesheet" href="help.css">
+</head>
+<body>
+<div class="nav"><a href="index.html">개요·단축키</a><a href="connections.html">접속</a><a href="table-spec.html">테이블 정의서</a><a href="gcm-spec.html">GCM 정의서</a></div>
+<h1>접속</h1>
+<p><b>연결 &gt; 접속 관리…</b>에서 접속을 추가·복제·삭제·편집하고 [접속 테스트]로 확인합니다. 비밀번호는 이 PC의 이 Windows 사용자만 풀 수 있게(DPAPI) 저장하며, 저장하지 않고 연결 때마다 입력할 수도 있습니다. 색 표시(개발 초록 · 검증 노랑 · 운영 빨강)는 탭·트리·확인 창의 배지에 쓰입니다.</p>
+
+<h2>DBMS 종류</h2>
+<table>
+<tr><th>DBMS</th><th>드라이버</th><th>기본 포트</th><th>"서비스명" 칸</th><th>주소 형식</th></tr>
+<tr><td>Oracle</td><td>ODP.NET Core</td><td>1521</td><td>서비스명(EZConnect)</td><td>host:port/service</td></tr>
+<tr><td>PostgreSQL</td><td>Npgsql</td><td>5432</td><td>데이터베이스</td><td>host:port/database</td></tr>
+<tr><td>SQL Server</td><td>Microsoft.Data.SqlClient</td><td>1433</td><td>데이터베이스</td><td>host,port · 암호화 Optional · TrustServerCertificate · MARS</td></tr>
+</table>
+<p>TNS 별칭과 Oracle Wallet(mTLS)은 아직 지원하지 않습니다. 이전 버전에서 저장한 접속은 그대로 Oracle로 읽힙니다.</p>
+
+<h2>DBMS별 지원 범위</h2>
+<table>
+<tr><th>기능</th><th>Oracle</th><th>PostgreSQL</th><th>SQL Server</th></tr>
+<tr><td>접속 · 접속 테스트</td><td>됨</td><td>됨</td><td>됨</td></tr>
+<tr><td>트리(스키마·테이블·뷰·시퀀스·함수/프로시저·열) · 검색</td><td>됨</td><td>됨</td><td>됨</td></tr>
+<tr><td>SQL 실행 · 빠른 조회 · 커밋/롤백 · 취소</td><td>됨</td><td>됨</td><td>됨</td></tr>
+<tr><td>GCM 정의서</td><td>됨</td><td>됨</td><td>됨</td></tr>
+<tr><td>테이블 정보(F4) · 테이블 정의서</td><td>됨</td><td>안내만(예정)</td><td>안내만(예정)</td></tr>
+<tr><td>PL/SQL 컴파일 오류 목록</td><td>됨</td><td>—</td><td>—</td></tr>
+</table>
+<div class="note"><b>PostgreSQL</b>은 연결당 결과 커서가 하나입니다. 조회 결과를 열어 둔 채 다른 문장이나 조회(GCM 정의서 포함)를 실행하면 이전 결과의 [다음 행 가져오기]가 꺼집니다(가져온 행은 그대로).</div>
+
+<h2>버전</h2>
+<table>
+<tr><th>DBMS</th><th>지원 범위</th><th>비고</th></tr>
+<tr><td>Oracle</td><td>11gR2 이상</td><td>11g의 ORACLE_MAINTAINED 열 부재는 자동으로 다른 조회로 대신합니다. 행 제한은 ROWNUM.</td></tr>
+<tr><td>PostgreSQL</td><td>11 이상</td><td>함수 종류 조회가 pg_proc.prokind를 씁니다.</td></tr>
+<tr><td>SQL Server</td><td>2012 이상</td><td>시퀀스(sys.sequences)는 2012부터. 그 전 버전은 접속은 되고 시퀀스 묶음만 비어 보입니다.</td></tr>
+</table>
+
+<h2>취소</h2>
+<p>[취소]는 실행 중인 명령에 취소를 보냅니다. Oracle은 in-band break를 씁니다(기본 OOB는 Docker Desktop·일부 방화벽·NAT를 지나지 못합니다). 취소된 실행은 오류로 끝나고 세션은 계속 쓸 수 있습니다.</p>
+
+<h2>세션 규칙</h2>
+<ul>
+  <li>DB마다 세션 1개. 같은 DB의 탭들은 트랜잭션을 함께 쓰고, 한 번에 한 문장만 실행합니다.</li>
+  <li>연결을 끊거나 창을 닫을 때 커밋 대기가 있으면 물어봅니다.</li>
+  <li>저장된 접속 정보를 바꿔도 열린 세션은 원래 DB에 붙어 있습니다. [다시 연결]하면 적용됩니다(읽기 전용을 켠 것만 바로 적용).</li>
+</ul>
+</body>
+</html>

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>GCM 정의서 — DB Helper 도움말</title>
+<link rel="stylesheet" href="help.css">
+</head>
+<body>
+<div class="nav"><a href="index.html">개요·단축키</a><a href="connections.html">접속</a><a href="table-spec.html">테이블 정의서</a><a href="gcm-spec.html">GCM 정의서</a></div>
+<h1>GCM(공통 코드) 정의서</h1>
+<p>공통 코드 테이블을 읽는 <b>SELECT 문을 직접 쓰고</b>, 결과 열의 <b>AS 별칭</b>만 계약에 맞추면 엑셀·JSON·CSV 정의서를 만듭니다. 플러그인은 SQL을 해석하지 않으므로 환경마다 테이블·열 이름이 달라도 SQL만 바꾸면 되고, Oracle·PostgreSQL·SQL Server 어디서나 됩니다. <b>도구 &gt; GCM 정의서 만들기…</b>(트리에서 고른 DB) 또는 트리의 DB 행 오른쪽 메뉴.</p>
+
+<h2>순서</h2>
+<ol>
+  <li>창 머리의 <b>[대상 DB]</b>를 확인합니다. 다른 접속을 고르면 창을 닫고 그 DB로 다시 엽니다(편집기의 SQL은 가져감).</li>
+  <li>SQL을 쓰거나 [저장한 SQL]에서 고릅니다. .sql 파일을 편집기에 끌어다 놓아도 되고, [본보기 SQL]로 플러그인의 본보기(범용 코드 테이블 꼴)를 넣어 고쳐도 됩니다.</li>
+  <li><b>[열 확인]</b>: SQL을 한 행만 읽게 감싸 실행해 별칭 표에 있음·빠짐을 표시합니다(큰 조회도 빠릅니다).</li>
+  <li>문서 정보와 출력 형식(엑셀 양식 · JSON · CSV)을 고르고 <b>[만들기…]</b>. 저장 위치를 물은 뒤 조회 → 별칭 검사 → 그룹 묶기 → 출력합니다.</li>
+</ol>
+
+<h2>별칭 계약</h2>
+<table>
+<tr><th>별칭</th><th>필수</th><th>뜻</th></tr>
+<tr><td><code>TABLE_NAME</code></td><td>필수</td><td>코드 그룹(코드 테이블) 식별자 — 그룹을 나누는 기준. 옛 별칭 <code>GROUP_ID</code>도 받습니다</td></tr>
+<tr><td><code>CODE</code></td><td>필수</td><td>코드 값</td></tr>
+<tr><td><code>CODE_NAME</code></td><td>필수</td><td>코드 명칭</td></tr>
+<tr><td><code>GROUP_NAME</code></td><td>선택</td><td>그룹 명칭(행마다 반복되면 첫 값)</td></tr>
+<tr><td><code>GROUP_DESC</code></td><td>선택</td><td>그룹 설명(첫 값)</td></tr>
+<tr><td><code>CODE_DESC</code></td><td>선택</td><td>코드 설명</td></tr>
+<tr><td><code>SORT_NO</code></td><td>선택</td><td>그룹 안 정렬(숫자로 읽히면 수로, 아니면 글자로). 없으면 SQL 순서</td></tr>
+<tr><td><code>USE_YN</code></td><td>선택</td><td>사용 여부(Y/N · 1/0 · true/false, 비우면 사용)</td></tr>
+</table>
+<ul>
+  <li>대소문자는 구분하지 않습니다. 바인드 변수는 받지 않습니다(값을 직접 적습니다). 끝의 <code>;</code>·<code>/</code> 줄은 떼어 냅니다.</li>
+  <li><b>그 밖의 열은 모두 추가 속성</b>이 되어 양식의 <code>${code.attrs.열이름}</code>·<code>${code.attrText}</code>("이름=값; …"), JSON의 <code>attrs</code>, CSV의 뒤쪽 열에 들어갑니다.</li>
+  <li>그룹은 TABLE_NAME이 같은 행을 처음 나온 순서로 묶습니다. 그룹 명칭·설명은 그 그룹에서 처음 비어 있지 않은 값입니다.</li>
+</ul>
+
+<h2>코드 테이블마다 열 이름이 다른 구조 (이름/값 짝 열)</h2>
+<p>정의 테이블이 열 이름을 정하고 데이터 테이블이 값을 담는 범용 코드 테이블은 <b>이름 열과 값 열을 짝으로 나열</b>합니다. 추가 열 <code>X</code>와 <code>X_NAME</code>이 함께 있으면 행마다 <code>X_NAME</code>의 값이 속성 이름, <code>X</code>의 값이 속성 값이 됩니다. 이름이 비어 있는데 값이 있으면 값 열 이름(<code>DATA_2</code>)이 속성 이름이 되고, 둘 다 비면 뺍니다. 평범한 열 나열이라 어떤 DBMS에서나 같은 SQL입니다.</p>
+<p>본보기 SQL 전문은 창의 <b>[본보기 SQL]</b> 버튼으로 편집기에 넣어 보세요. 사내 코드 테이블 구조가 담겨 있어 도움말·문서에는 싣지 않고 플러그인 안에 잠가 둡니다.</p>
+<p>본보기는 정의 테이블이 없는 그룹도 남도록 <code>LEFT JOIN</code>이고, 공장(사이트)은 첫 것 하나만 고릅니다(환경마다 코드가 달라 고정값은 0행이 되기 쉽습니다. 특정 공장은 WHERE에 직접 적으세요). 예를 들어 그룹 ORDER_STATUS의 코드에는 STATUS·SHIP_FLAG처럼 그 그룹의 열 이름이 속성이 됩니다. 기본 양식의 그룹 시트는 머리글에 그 그룹의 속성 이름을 적고 칸에 "이름=값; …"을 넣습니다. 양식에서 열을 따로 두려면 <code>$group.attrNames</code>·<code>$code.groupAttrValues</code>를 씁니다. 문자열 잇기 <code>||</code>는 Oracle·PostgreSQL에서 되고 MySQL은 CONCAT, SQL Server는 <code>+</code>입니다.</p>
+<p>JSON 객체 열(PostgreSQL <code>jsonb_build_object</code> 등)도 같은 식으로 키를 펼치지만 DBMS 고유 함수라 선택 사항입니다.</p>
+
+<h2>저장한 SQL과 그룹 정규식</h2>
+<ul>
+  <li>[저장…]은 편집기의 SQL을 <b>SQL 폴더</b>(플러그인 데이터 폴더의 <code>code-sql</code>)에 .sql로 저장합니다. 이 폴더의 파일이 [저장한 SQL] 목록에 보이고, 접속마다 마지막에 쓴 파일을 기억합니다. [SQL 폴더]로 탐색기에서 엽니다.</li>
+  <li>[LLM에게 SQL 요청]은 별칭 계약이 든 요청 글을 복사합니다. 우리 테이블 구조를 덧붙여 LLM에게 보내면 맞는 SQL을 써 줍니다.</li>
+  <li><b>그룹 정규식</b>으로 TABLE_NAME(옵션: 그룹명·설명도)를 걸러 일부 그룹만 넣습니다. 예: <code>^ORDER_</code>, <code>STATUS$</code>. 비우면 모두.</li>
+  <li>조회가 0행이거나 정규식에 맞는 그룹이 없으면 정의서를 만들지 않고 상태 줄에 이유를 보입니다(빈 문서가 나오지 않게). WHERE의 공장 코드 등을 확인하세요.</li>
+</ul>
+
+<h2>출력 형식</h2>
+<table>
+<tr><th>형식</th><th>내용</th></tr>
+<tr><td>엑셀(양식)</td><td>기본 2종: <b>기본</b>(표지 · 그룹 목록(시트 링크) · 그룹마다 코드 표) / <b>단일 시트형</b>(표지 · 모든 코드 한 표). 내 양식은 <b>GCM 양식 폴더</b>(<code>templates\gcm</code>)에 .xlsx로. [복사해서 고치기]·[LLM 지침 복사]는 테이블 정의서와 같습니다. 지침: <a href="https://zaruous.github.io/Folderss-oracle-db-helper/code-spec-templates/">code-spec-templates</a></td></tr>
+<tr><td>JSON</td><td><code>{ doc, db, source, groups: [ { id, name, description, attrNames, codes: [ { code, name, description, sortNo, useYn, isUsed, attrs } ] } ] }</code>. 한글 그대로, 들여쓰기</td></tr>
+<tr><td>CSV</td><td>코드마다 한 줄. 머리글은 계약 별칭 8개 + 추가 속성(전체). UTF-8 BOM이라 엑셀에서 바로 열립니다</td></tr>
+</table>
+
+<h2>양식 변수 요약</h2>
+<p><code>$doc</code>(title·project·system·author·version·date·description·groupCount·codeCount·generatedAt), <code>$db</code>(name·user·address·version), <code>$source</code>(name·sql·fetchedAt·rowCount·columns·attrNames·expandedColumnsText), <code>$groups</code> → <code>$group</code>(no·id·name·description·sheetName·codeCount·codes·attrNames), <code>$codes</code> → <code>$code</code>(no·group·groupName·code·name·description·sortNo·useYn·isUsed·attrs·attrValues·groupAttrValues·attrText). 셀에 <code>${group.id}</code>처럼 쓰고 <code>#foreach … #end</code> 줄로 되풀이하며, 그룹마다 시트는 시트 맨 위 <code>#sheet($group in $groups)</code>. 전체 목록은 양식의 <code>_변수 설명</code> 시트.</p>
+
+<h2>알아 둘 점</h2>
+<ul>
+  <li>조회는 모든 행을 메모리에 올립니다. 그룹이 아주 많으면 그룹별 시트 양식 대신 단일 시트 양식이나 그룹 정규식을 쓰세요.</li>
+  <li>PostgreSQL에서는 조회 결과를 열어 둔 채 정의서를 만들면 그 결과의 [다음 행 가져오기]가 꺼집니다(연결당 커서 하나).</li>
+  <li>표지의 DBMS 버전은 서버에서 읽어 넣습니다(읽지 못하면 빈 칸).</li>
+</ul>
+</body>
+</html>

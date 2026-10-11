@@ -7,7 +7,7 @@ using System.Windows.Controls;
 namespace MyPlugin
 {
     /// <summary>
-    /// 설정 창의 "Oracle 접속" 탭: 저장된 접속 목록(읽기 전용)과 [접속 관리 열기].
+    /// 설정 창의 "DB 접속" 탭: 저장된 접속 목록(읽기 전용)과 [접속 관리 열기].
     /// 편집은 접속 관리 대화상자에서만 한다(두 곳에서 편집하면 나중에 저장한 쪽이 다른 쪽 변경을 덮어쓰므로).
     /// </summary>
     public sealed class ConnectionSettingsPage : IPluginSettingsPage
@@ -19,7 +19,7 @@ namespace MyPlugin
             _manager = manager;
         }
 
-        public string Title { get { return "Oracle 접속"; } }
+        public string Title { get { return "DB 접속"; } }
 
         public FrameworkElement CreateView()
         {
@@ -121,7 +121,7 @@ namespace MyPlugin
                 }
                 catch (Exception ex)
                 {
-                    Dialogs.Show(owner, "Oracle 접속", "접속 관리를 열지 못했습니다: " + ex.Message, true);
+                    Dialogs.Show(owner, "DB 접속", "접속 관리를 열지 못했습니다: " + ex.Message, true);
                 }
                 Refresh();
             }

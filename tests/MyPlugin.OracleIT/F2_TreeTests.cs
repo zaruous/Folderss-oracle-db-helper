@@ -48,7 +48,7 @@ namespace MyPlugin.OracleIT
                 var rows = await Timed(() => session.QueryAsync(OracleMetadata.GroupCounts(Owner), r => TreeLoaderLogic.ReadGroupCount(r)), x => countMs = x);
                 var counts = TreeLoaderLogic.GroupCounts(rows);
                 Log("묶음 개수(" + countMs + "ms): " + string.Join(", ", counts.Select(kv => TreeGroups.Title(kv.Key) + " " + kv.Value)));
-                Assert.Equal(2, counts[TreeGroups.Table]);
+                Assert.Equal(3, counts[TreeGroups.Table]); // ORDERS, ORDER_ITEMS, GCM_CODE(F5)
                 Assert.Equal(1, counts[TreeGroups.View]);
                 Assert.Equal(1, counts[TreeGroups.Sequence]);
                 Assert.Equal(3, counts[TreeGroups.Code]); // PROCEDURE·FUNCTION·PACKAGE (PACKAGE BODY 제외)

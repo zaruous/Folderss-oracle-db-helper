@@ -1,6 +1,6 @@
 # Folderss DB Helper
 
-> Oracle DB helper plugin for the Folderss file manager. Its "테이블 정의서 만들기" feature renders Excel (.xlsx) templates with a Velocity-subset engine to produce table definition documents from the Oracle data dictionary.
+> Oracle DB helper plugin for the Folderss file manager. Its "테이블 정의서 만들기" feature renders Excel (.xlsx) templates with a Velocity-subset engine to produce table definition documents from the Oracle data dictionary. Its "GCM 정의서 만들기" feature renders the same kind of template from the user's own SQL (common code groups and codes).
 
 ## Table definition templates (테이블 정의서 양식)
 
@@ -9,9 +9,15 @@
 - [make_template.py](https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/examples/make_template.py): example that builds a template from scratch with openpyxl.
 - [check_template.py](https://zaruous.github.io/Folderss-oracle-db-helper/table-spec-templates/examples/check_template.py): validator — run `python check_template.py template.xlsx` before handing a template to the user.
 
+## GCM (common code) templates (GCM 정의서 양식)
+
+- [GCM template authoring guide (Markdown, Korean)](https://zaruous.github.io/Folderss-oracle-db-helper/code-spec-templates/guide.md): the SQL alias contract (TABLE_NAME, CODE, CODE_NAME required; GROUP_NAME, GROUP_DESC, CODE_DESC, SORT_NO, USE_YN optional; other columns become extra attributes), every variable (`$doc`, `$db`, `$source`, `$groups`/`$group`, `$codes`/`$code`), validation checklist. The engine rules, syntax and checker are the same as the table-spec guide — read that guide's sections 3–4 too.
+- [Variables (JSON)](https://zaruous.github.io/Folderss-oracle-db-helper/code-spec-templates/variables.json): machine-readable variable schema for GCM templates. Pass it to the checker: `python check_template.py template.xlsx variables.json`.
+
 ## Where templates go
 
-- User template folder (Windows): `%LOCALAPPDATA%\Folderss\plugin-data\zaruous.folderss-db-helper	emplates\` — every `.xlsx` there appears in DB Helper's template list as "내 양식 — <file name>".
+- User template folder (Windows): `%LOCALAPPDATA%\Folderss\plugin-data\zaruous.folderss-db-helper\templates\` — every `.xlsx` there appears in DB Helper's template list as "내 양식 — <file name>".
+- GCM template folder: the `gcm` subfolder of that folder (`...\templates\gcm\`). A GCM template placed directly in `templates\` shows up in the table-spec list, not the GCM list.
 
 ## Source
 

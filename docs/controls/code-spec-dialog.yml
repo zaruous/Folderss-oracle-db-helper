@@ -1,0 +1,41 @@
+id: code-spec-dialog
+name: CodeSpecDialog
+title: GCM 정의서 만들기
+kind: dialog
+source:
+  - src/MyPlugin/Ui/CodeSpecDialog.cs
+  - src/MyPlugin/Ui/CodeSpecLogic.cs
+  - src/MyPlugin/Db/CodeSpecQueries.cs
+used_by: [db-helper-view, db-tree-panel]
+summary: >-
+  공통 코드(GCM) 정의서를 만드는 모달 창. 사용자가 쓴 SELECT의 결과 열 별칭이 계약이고,
+  엑셀 양식·JSON·CSV로 출력한다.
+features:
+  - name: 대상 DB
+    description: 창 머리 콤보로 다른 접속으로 바꿀 수 있다(편집기 SQL을 들고 창을 다시 연다).
+  - name: SQL
+    description: >-
+      [저장한 SQL] 목록(플러그인 데이터 폴더 code-sql의 *.sql), [저장…]·[SQL 폴더]·[LLM에게 SQL 요청]·[본보기 SQL].
+      편집기에 .sql을 끌어다 놓으면 불러온다. 접속마다 마지막에 쓴 파일을 기억한다.
+  - name: 열 확인
+    description: SQL을 한 행만 읽게 감싸 실행하고 별칭 계약 표에 상태를 보인다(필수 TABLE_NAME·CODE·CODE_NAME).
+  - name: 그룹 정규식
+    description: TABLE_NAME을 걸러 일부만 넣는다([그룹명·설명도 찾기]).
+  - name: 출력
+    description: 엑셀 양식(그룹별 시트·단일 시트·내 양식) · JSON · CSV(UTF-8 BOM). 문서 정보는 테이블 정의서와 같다.
+  - name: 만들기
+    description: >-
+      저장 위치를 물은 뒤 조회 → 별칭 검사 → 그룹 묶기 → 출력. 0행이거나 맞는 그룹이 없으면 빈 문서를 만들지 않고 이유를 보인다.
+keyboard:
+  - keys: Esc
+    action: 닫기(만드는 중이 아닐 때).
+theme:
+  - part: 창·편집기·표
+    keys: [WindowBackground, PanelBackground, PrimaryText, SecondaryText, AccentBrush]
+limits:
+  - 조회는 모든 행을 메모리에 올린다.
+  - 바인드 변수는 받지 않는다(값을 SQL에 직접 쓴다).
+tests:
+  - tests/MyPlugin.Tests/CodeSpecTests.cs
+  - tests/MyPlugin.Tests/CodeSpecTemplateTests.cs
+related: [table-spec-dialog]

@@ -1,0 +1,50 @@
+id: row-edit-dialog
+name: RowEditDialog
+title: 행 편집 창
+kind: dialog
+source:
+  - src/MyPlugin/Ui/RowEditDialog.cs
+  - src/MyPlugin/Ui/RowEditLogic.cs
+used_by: [result-edit-bar]
+summary: >-
+  결과 편집 막대의 [편집]으로 여는 모달 창. 한 행의 열마다 값 칸과 NULL 체크를 보이고,
+  [확인]하면 고친 값을 돌려준다(DB에 보내는 것은 [저장]).
+features:
+  - name: 제목
+    description: "\"행 편집 · 스키마.테이블 · 접속 이름\". 본문에는 설명·접속 배지를 두지 않는다."
+  - name: 열 줄
+    description: >-
+      왼쪽 열 이름(기본 키는 🔑)과 형식, 가운데 값 칸, 오른쪽 NULL 체크.
+      열이 많으면 목록이 스크롤된다(최대 높이 약 460px). 창은 크기를 바꿀 수 있다.
+  - name: 값 칸 종류
+    description: >-
+      글자·숫자(오른쪽 정렬)·날짜(날짜·시각 입력 컨트롤). 줄바꿈이 있는 값은 여러 줄 칸(최대 6줄).
+  - name: 편집할 수 없는 칸
+    description: >-
+      LOB·RAW·시간대 있는 TIMESTAMP·INTERVAL 같은 형식과 잘려 보이는 값("…(전체 n자)")은 읽기 전용이고 형식 옆에 이유를 보인다.
+  - name: 입력 검사
+    description: >-
+      [확인]을 누를 때 숫자·날짜 형식을 검사한다. 틀리면 "⚠ 열: 이유"를 보이고 그 칸에 머문다.
+      NULL은 언제나 통과한다.
+keyboard:
+  - keys: Enter
+    action: "[확인] (여러 줄 칸 안에서는 줄바꿈)."
+  - keys: Esc
+    action: "[취소]."
+  - keys: Tab
+    action: 다음 칸.
+theme:
+  - part: 창 바탕·글자
+    keys: [WindowBackground, PrimaryText, AppFontFamily]
+  - part: 형식·이유 글
+    keys: [SecondaryText]
+  - part: 오류 글
+    keys: [Theme.Danger]
+  - part: "[확인] 테두리"
+    keys: [AccentBrush]
+limits:
+  - 한 번에 한 행만 고친다(여러 행 일괄 편집 없음).
+  - 기본 키 열도 고칠 수 있다. 막지 않으므로 바꾸면 그 키로 UPDATE된다.
+tests:
+  - tests/MyPlugin.Tests/RowEditLogicTests.cs
+related: [result-edit-bar, date-time-box, dialogs]

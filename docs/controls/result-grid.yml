@@ -1,0 +1,57 @@
+id: result-grid
+name: ResultGridView
+title: 결과 그리드
+kind: control
+source:
+  - src/MyPlugin/Ui/ResultGrid.cs
+base: System.Windows.Controls.ListView (GridView, 가상화)
+used_by: [sql-workspace, table-info-window]
+summary: >-
+  조회 결과 표. 열 머리에 이름과 형식, NULL·숫자 구분, 열 머리로 정렬, TSV 복사.
+  빠른 조회 결과에서는 행마다 편집 상태(수정·삭제 표시)를 보인다.
+features:
+  - name: 열 머리
+    description: >-
+      이름(굵게) 위, 형식(작은 고정폭) 아래. 열을 끌어 옮길 수 없다(복사 순서와 화면이 달라지지 않게).
+  - name: 칸 표시
+    description: >-
+      NULL은 흐린 기울임꼴, 숫자 열은 오른쪽 정렬, 긴 값은 한 줄로 줄이고 잘렸거나 줄바꿈이 있을 때만 툴팁으로 전체를 보인다.
+  - name: 정렬
+    description: >-
+      열 머리를 누르면 오름차순 → 내림차순 → 해제. # 열을 누르면 해제. 숫자 열은 수로, NULL은 오름차순 맨 뒤.
+      행 번호는 원래 순서 그대로이고 더 가져온 행도 정렬 위치에 들어간다.
+  - name: 복사
+    description: >-
+      Ctrl+C·오른쪽 메뉴로 선택한 행, 오른쪽 메뉴로 전체(머리글 포함)를 TSV로 복사한다. 화면 순서를 따른다.
+  - name: 편집 상태(ResultGridRow)
+    description: >-
+      행은 지금 값(Values)과 원래 값(Original), 상태(변경 없음·수정·삭제)를 가진다.
+      칸은 Values에 바인딩해 편집하면 바로 바뀐다. 편집할 수 있는 결과면 번호 열에 표시 자리(✎·✖)를 둔다.
+keyboard:
+  - keys: Ctrl+C
+    action: 선택한 행 복사(TSV).
+  - keys: Ctrl·Shift+클릭
+    action: 여러 행 고르기.
+theme:
+  - part: 바탕·글자
+    keys: [PanelBackground, PrimaryText]
+  - part: 열 머리
+    keys: [SurfaceBackground, BorderBrush, SecondaryText]
+  - part: "NULL"
+    keys: [DisabledTextBrush]
+  - part: 고른 행 / 마우스 올린 행
+    keys: [SelectionBrush, RowHoverBrush]
+  - part: 수정한 행 바탕 / ✎
+    keys: [Theme.ModifiedRow (경고색 40% 반투명), Theme.Warning]
+  - part: 삭제 표시한 행 바탕 / ✖·취소선
+    keys: [Theme.DeletedRow (위험색 40% 반투명), Theme.Danger]
+states:
+  - 수정한 행은 주황 바탕과 번호 앞 ✎, 삭제 표시한 행은 빨강 바탕과 ✖·취소선.
+  - 고른 행은 선택색이 바탕색보다 앞서지만 번호 열 표시(✎·✖)는 남는다.
+limits:
+  - 정렬은 가져온 행 안에서만 한다(전체 순서는 ORDER BY로).
+  - 긴 값은 ValueFormatter가 잘라 보인다(글 4,000자, 이진 2,000바이트).
+tests:
+  - tests/MyPlugin.Tests/WorkspaceLogicTests.cs
+  - tests/MyPlugin.Tests/ValueFormatterTests.cs
+related: [sql-workspace, result-edit-bar]

@@ -1,0 +1,25 @@
+id: result-history-list
+name: ResultHistoryList
+title: 기록 탭
+kind: control
+source:
+  - src/MyPlugin/Ui/ResultLists.cs
+base: System.Windows.Controls.ListBox
+used_by: [sql-workspace]
+summary: 실행한 문장 기록. 시각 · DB 배지 · SQL 첫 줄 · 걸린 시간, 새것이 위, 최대 100건.
+features:
+  - name: 줄
+    description: 시각, DB 배지, SQL 첫 줄(툴팁에 전체), 걸린 시간.
+  - name: 다시 쓰기
+    description: 누르거나 Enter면 Activated를 올리고, 작업 영역이 그 SQL을 편집기에 넣는다.
+  - name: 남는 것
+    description: 편집기 실행, 빠른 조회, 결과 편집 저장의 UPDATE·DELETE(바인드 값 포함 설명)가 남는다.
+keyboard:
+  - keys: Enter
+    action: 고른 기록을 편집기에 넣기.
+theme:
+  - part: 바탕·글자
+    keys: [PanelBackground, PrimaryText, SecondaryText]
+limits:
+  - 메모리에만 있고 100건을 넘으면 오래된 것부터 지운다.
+related: [sql-workspace, result-message-list]

@@ -1,0 +1,29 @@
+id: result-message-list
+name: ResultMessageList
+title: 메시지 탭
+kind: control
+source:
+  - src/MyPlugin/Ui/ResultLists.cs
+base: System.Windows.Controls.ListBox
+used_by: [sql-workspace]
+summary: 실행 결과·오류·안내를 "시각 · DB 배지 · 문장" 줄로 쌓는 목록. 새것이 위, 최대 1,000줄.
+features:
+  - name: 줄
+    description: 시각, DB 배지(접속이 지워졌으면 "대상 없음", 배지 없는 줄도 있음), 문장.
+  - name: 종류별 색
+    description: 오류는 위험색, 성공은 성공색, 안내는 기본 글자색.
+  - name: 복사
+    description: Ctrl+C·오른쪽 메뉴로 고른 줄을 복사한다(클립보드 실패도 안내).
+keyboard:
+  - keys: Ctrl+C
+    action: 고른 줄 복사.
+theme:
+  - part: 바탕·글자
+    keys: [PanelBackground, PrimaryText]
+  - part: 오류 / 성공
+    keys: [Theme.Danger, Theme.Success]
+  - part: DB 배지
+    keys: [Theme.DbBadge (접속 색 표시 또는 AccentBrush·BorderBrush)]
+limits:
+  - 메모리에만 있고 창을 닫으면 사라진다. 1,000줄을 넘으면 오래된 것부터 지운다.
+related: [sql-workspace, result-history-list, theme]

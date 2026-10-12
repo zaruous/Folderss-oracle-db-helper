@@ -1,0 +1,34 @@
+id: table-info-window
+name: TableInfoWindow
+title: 테이블 정보 창
+kind: window
+source:
+  - src/MyPlugin/Ui/TableInfoWindow.cs
+  - src/MyPlugin/Ui/TableInfoLogic.cs
+  - src/MyPlugin/Db/TableDescription.cs
+used_by: [db-tree-panel, sql-workspace]
+summary: >-
+  F4로 여는 테이블·뷰 정보 창(모달 아님 — 열어 둔 채 SQL을 쓸 수 있다).
+  이름·종류·행 수·주석과 열·인덱스·제약 조건 표.
+features:
+  - name: 머리
+    description: 이름·종류·행 수(통계)·날짜·주석, 동의어로 찾았으면 그 동의어.
+  - name: 표
+    description: >-
+      [열](형식·NULL·PK·주석)·[인덱스]·[제약 조건](기본 키·고유·외래 키와 참조 테이블·검사).
+      결과 그리드와 같은 표라 정렬·복사가 된다.
+  - name: 이름 찾기
+    description: 이름만 쓰면 내 스키마 → 동의어 → PUBLIC 동의어 → 다른 스키마 순으로 찾는다.
+  - name: 아래 버튼
+    description: "[SELECT 문 넣기]·[빠른 조회 (앞 100행)]·[닫기]."
+keyboard:
+  - keys: Esc
+    action: 닫기.
+theme:
+  - part: 창·표
+    keys: [WindowBackground, PanelBackground, PrimaryText, SecondaryText]
+limits:
+  - Oracle 데이터 사전(ALL_*) 기반이라 PostgreSQL·SQL Server에서는 안내만 한다.
+tests:
+  - tests/MyPlugin.Tests/TableInfoTests.cs
+related: [result-grid, db-tree-panel]

@@ -1,0 +1,44 @@
+id: table-spec-dialog
+name: TableSpecDialog
+title: 테이블 정의서 만들기
+kind: dialog
+source:
+  - src/MyPlugin/Ui/TableSpecDialog.cs
+  - src/MyPlugin/Ui/TableSpecLogic.cs
+used_by: [db-helper-view, db-tree-panel]
+summary: >-
+  테이블 정의서(.xlsx)를 만드는 모달 창. 왼쪽에서 대상을 고르고 오른쪽에서 문서 정보·양식을 정한 뒤 [만들기…].
+  만드는 동안 같은 DB 세션으로 다른 문장을 실행하지 않게 모달이다.
+features:
+  - name: 대상 고르기
+    description: >-
+      스키마, [뷰 포함], 정규식([대소문자 무시]·[주석도 찾기]), 체크 목록(Ctrl·Shift로 여러 줄 고른 뒤 Space로 체크),
+      [일치 모두 체크]·[일치 모두 해제], [체크한 것만 보기 (모든 스키마)]. 스키마를 바꿔도 다른 스키마의 체크는 남는다.
+  - name: 문서 정보
+    description: 표지에 쓰는 제목·프로젝트·시스템/모듈·작성자·버전·작성일·설명.
+  - name: 양식
+    description: >-
+      [양식] 목록(기본 양식 2종 + 사용자 양식 폴더의 "내 양식", 펼칠 때마다 다시 읽음),
+      [복사해서 고치기]·[엑셀에서 열기]·[양식 폴더], 또는 [템플릿 파일]. [LLM 지침 복사]·[지침 보기].
+  - name: 만들기
+    description: >-
+      저장 위치를 물은 뒤 조회 → 엑셀. 만드는 동안은 [취소], 다 만들면 [파일 열기]·[폴더 열기].
+  - name: 입력값 기억
+    description: "[만들기…] 때의 문서 정보·양식·템플릿 파일·저장 폴더를 플러그인 설정에 저장하고 다음에 채운다."
+keyboard:
+  - keys: Space
+    action: 고른 줄 체크·해제.
+  - keys: Ctrl+A
+    action: 목록 모두 고르기.
+  - keys: Esc
+    action: 닫기(만드는 중이 아닐 때).
+theme:
+  - part: 창·목록·버튼
+    keys: [WindowBackground, PanelBackground, PrimaryText, SecondaryText, AccentBrush]
+limits:
+  - Oracle 데이터 사전 기반이라 PostgreSQL·SQL Server에서는 열지 않고 안내한다.
+  - 닫기 버튼은 없다(제목 표시줄 ✕ 또는 Esc).
+tests:
+  - tests/MyPlugin.Tests/TableSpecTests.cs
+  - tests/MyPlugin.Tests/TableSpecSheetTemplateTests.cs
+related: [db-tree-panel, code-spec-dialog]

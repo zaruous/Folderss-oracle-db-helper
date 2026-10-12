@@ -1,0 +1,57 @@
+id: dialogs
+name: Dialogs
+title: 확인·안내 대화상자
+kind: dialog
+source:
+  - src/MyPlugin/Ui/Dialogs.cs
+used_by: [sql-workspace, db-helper-view, result-edit-bar]
+summary: >-
+  확인·선택·안내용 모달 창 모음(Dialogs·PasswordPrompt)과 그 공통 틀(DialogKit).
+  되돌릴 수 없는 선택은 경고 + 확인 체크를 거쳐야 실행 버튼이 켜지고, 기본 버튼은 가장 안전한 쪽이다.
+features:
+  - name: 위험한 문장 실행(ConfirmDanger)
+    description: >-
+      WHERE 없는 UPDATE·DELETE, DROP·TRUNCATE·ALTER 등. 접속 배지·주소, 문장, 경고, 확인 체크 뒤 [실행].
+  - name: 커밋 대기 중 DDL(ConfirmDdlWithPending)
+    description: DDL이 커밋 대기 변경까지 함께 커밋한다는 경고와 확인 체크.
+  - name: 커밋하지 않은 변경(AskPending)
+    description: >-
+      끊기·창 닫기 전에 롤백(기본)·커밋을 고른다. 기본 버튼은 아무것도 하지 않는 [돌아가기].
+  - name: 저장하지 않은 SQL(AskSaveChanges)
+    description: 탭을 닫기 전 [저장]·[저장 안 함]·[취소]. 기본 버튼은 [취소].
+  - name: 결과 편집 저장(ConfirmRowEdits)
+    description: >-
+      제목 "결과 편집 저장 · 접속"(본문에 배지 없음), 보낼 문장들(바인드 값 포함), 롤백 안내.
+      삭제가 있으면 경고 + 확인 체크.
+  - name: 안내(Show)
+    description: 아이콘 + 글(오류면 위험색) + [확인]. Ctrl+C로 제목·내용을 복사한다.
+  - name: 비밀번호 입력(PasswordPrompt)
+    description: >-
+      비밀번호를 저장하지 않은 접속의 연결 때. 제목 "비밀번호 입력 · 이름", 이유 한 줄, [연결](빈 값이면 꺼짐)·[취소].
+  - name: 공통 틀(DialogKit)
+    description: >-
+      Folderss GitDialogBase와 같은 모양을 코드로 만든다. 소유 창 가운데, 크기 고정, 작업 표시줄에 안 보임.
+      제목·본문·힌트·경고·문장 상자·체크·라디오·주 동작/일반/취소 버튼·포커스 지정 도우미.
+keyboard:
+  - keys: Enter
+    action: 기본 버튼(대개 [취소]·[돌아가기] — 잘못 눌러도 되돌릴 수 없는 일을 하지 않게).
+  - keys: Esc
+    action: 취소 버튼.
+  - keys: Ctrl+C
+    action: 안내 창의 제목·내용 복사.
+theme:
+  - part: 창 바탕·글자·글꼴
+    keys: [WindowBackground, PrimaryText, AppFontFamily]
+  - part: 문장 상자
+    keys: [SurfaceBackground]
+  - part: 경고 글
+    keys: [Theme.Danger]
+  - part: 주 동작 버튼 테두리
+    keys: [AccentBrush]
+  - part: 접속 배지
+    keys: [Theme.DbBadge]
+limits:
+  - CheckBox는 Folderss 테마 스타일이 없어 글자색만 연결한다(상자는 기본 모양).
+tests:
+  - tests/MyPlugin.Tests/WorkspaceLogicTests.cs
+related: [sql-workspace, result-edit-bar, theme]

@@ -1,0 +1,47 @@
+id: shell-menu
+name: ShellMenu
+title: 메뉴 막대·아이콘 막대
+kind: menu
+source:
+  - src/MyPlugin/Ui/ShellMenu.cs
+used_by: [db-helper-view]
+summary: >-
+  창 맨 위의 메뉴 막대(파일·편집·SQL·연결·도구·도움말)와 그 아래 작은 아이콘 막대.
+  메뉴는 단축키를 글자로 보일 뿐이고, 실제 단축키는 창과 편집기가 처리한다.
+features:
+  - name: 파일 메뉴
+    description: >-
+      새 SQL 탭, 열기, 최근 파일(10개, 목록 지우기), 저장, 다른 이름으로 저장, 탭 닫기, 접속 관리.
+  - name: 편집 메뉴
+    description: 되돌리기·잘라내기·복사·붙여넣기, 줄 주석 토글, 대문자로, 소문자로.
+  - name: SQL 메뉴
+    description: 실행, 스크립트 실행, 실행 취소, 다음 행 가져오기, 커밋, 롤백, 테이블 정보.
+  - name: 연결 메뉴
+    description: 트리에서 고른 DB 이름을 머리에 보이고 연결·다시 연결·연결 끊기·접속 관리.
+  - name: 도구 메뉴
+    description: 테이블 정의서 만들기, GCM 정의서 만들기(트리에서 고른 DB 대상).
+  - name: 도움말 메뉴
+    description: 도움말(HTML 도움말 창), 단축키 목록.
+  - name: 아이콘 막대
+    description: >-
+      새 탭·열기·저장 / 실행·취소 / 커밋·롤백 / 연결·다시 연결·끊기.
+      켬·끔은 Refresh로 실행 시작·끝, 연결 변경, 탭 변경 때 맞춘다.
+  - name: 메뉴 상태 맞추기
+    description: 메뉴를 열 때마다 켬·끔과 이름(연결 대상 DB, 최근 파일)을 지금 상태로 맞춘다.
+keyboard:
+  - keys: Alt+F 등
+    action: 메뉴 머리의 밑줄 글자로 메뉴를 연다(_N·_O 같은 접근 키).
+theme:
+  - part: 메뉴 막대·하위 메뉴 창
+    keys: [SurfaceBackground, PrimaryText, BorderBrush, ControlHoverBrush]
+  - part: 실행 아이콘
+    keys: [Theme.Success]
+  - part: 실행 취소 아이콘
+    keys: [Theme.Danger]
+limits:
+  - >-
+    Folderss의 MenuItem 스타일은 템플릿이 WPF 기본이라 하위 메뉴 창이 밝은 회색으로 뜬다.
+    그래서 메뉴 막대 안에서만 쓰는 템플릿을 테마 키로 직접 준다.
+tests:
+  - tests/MyPlugin.Tests/ShellLogicTests.cs
+related: [db-helper-view, help-window]

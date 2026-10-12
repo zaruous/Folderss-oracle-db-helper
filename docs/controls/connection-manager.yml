@@ -1,0 +1,40 @@
+id: connection-manager
+name: ConnectionManager
+title: 접속 관리
+kind: dialog
+source:
+  - src/MyPlugin/Ui/ConnectionManagerDialog.cs
+  - src/MyPlugin/Ui/ConnectionManagerLogic.cs
+  - src/MyPlugin/Ui/ConnectionRepository.cs
+used_by: [shell-menu, connection-settings-page]
+summary: >-
+  접속을 추가·복제·삭제·편집하고 접속 테스트를 하는 모달 창.
+  편집은 사본에 하고 [저장]할 때만 플러그인 설정에 쓴다.
+features:
+  - name: 목록
+    description: 왼쪽 접속 목록과 [추가]·[복제]·[삭제]. 연결 중인 접속은 지울 수 없다.
+  - name: 입력 칸
+    description: >-
+      이름, DBMS(Oracle·PostgreSQL·SQL Server — 서비스명 칸 이름과 기본 포트가 바뀜), 호스트, 포트, 서비스명(또는 데이터베이스),
+      사용자, 비밀번호(DPAPI로 암호화해 저장, 저장 안 하고 연결 때마다 입력도 가능), 읽기 전용(SELECT·WITH만 실행), 색 표시(초록·노랑·빨강).
+  - name: 접속 테스트
+    description: 입력값으로 연결해 서버 버전을 보이고 결과를 항목별로 남긴다.
+  - name: 저장·닫기
+    description: >-
+      [저장]해야 반영된다. 저장하지 않은 변경이 있으면 닫을 때 [계속 편집]·[버리고 닫기]를 묻는다.
+      연결 중인 접속을 바꾸면 "다시 연결할 때 적용" 안내를 보인다.
+keyboard:
+  - keys: Esc
+    action: 닫기(저장하지 않은 변경이 있으면 묻는다).
+theme:
+  - part: 창·목록·입력 칸
+    keys: [WindowBackground, PanelBackground, PrimaryText, SecondaryText, BorderBrush]
+  - part: 색 표시
+    keys: [Theme.ConnectionColor (초록·노랑·빨강 고정)]
+limits:
+  - 호스트·포트·서비스명(EZConnect)만 지원한다. TNS 별칭·Wallet은 없다.
+  - 비밀번호는 이 PC의 이 Windows 사용자만 풀 수 있다.
+tests:
+  - tests/MyPlugin.Tests/ConnectionManagerLogicTests.cs
+  - tests/MyPlugin.Tests/OracleConnectionStoreTests.cs
+related: [connection-settings-page, shell-menu]

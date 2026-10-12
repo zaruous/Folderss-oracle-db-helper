@@ -91,7 +91,7 @@ namespace MyPlugin
         }
 
         /// <summary>
-        /// 결과 편집 저장 확인. 제목 "결과 편집 저장", 본문: DB 배지 + "table에 UPDATE n행 · DELETE m행을 보낼까요?", 실행할 문장들(고정폭, 스크롤),
+        /// 결과 편집 저장 확인. 제목 "결과 편집 저장 · 접속", 본문: "table에 UPDATE n행 · DELETE m행을 보낼까요?", 실행할 문장들(고정폭, 스크롤),
         /// 삭제가 있으면 경고 + 확인 체크(체크 전 [실행] 비활성), 안내 "커밋 전까지 [롤백]으로 되돌릴 수 있습니다". 실행이면 true.
         /// </summary>
         public static bool ConfirmRowEdits(Window owner, OracleConnectionProfile profile, string table, string statements, int updates, int deletes)
@@ -103,7 +103,8 @@ namespace MyPlugin
                 what.Add("UPDATE " + updates.ToString(System.Globalization.CultureInfo.InvariantCulture) + "행");
             if (deletes > 0)
                 what.Add("DELETE " + deletes.ToString(System.Globalization.CultureInfo.InvariantCulture) + "행");
-            body.Children.Add(DialogKit.Target(profile, (table ?? "") + "에 " + string.Join(" · ", what) + "을(를) 보낼까요?"));
+            // 접속 이름은 창 제목(결과 편집 저장 · 접속)에 있으므로 본문에는 배지 없이 질문만 둔다(행 편집 창과 같게)
+            body.Children.Add(DialogKit.Text((table ?? "") + "에 " + string.Join(" · ", what) + "을(를) 보낼까요?", 0));
             var box = DialogKit.SqlBox(statements ?? "", 10);
             box.MaxHeight = 240;
             box.TextWrapping = TextWrapping.NoWrap;

@@ -330,6 +330,61 @@ namespace MyPlugin
             }
         }
 
+        /// <summary>
+        /// 바인드 변수가 있는 DML 하나(결과 편집의 UPDATE·DELETE)를 실행하고 영향 행 수를 돌려준다. 편집기의 DML처럼 트랜잭션 안에서 실행해
+        /// 커밋 대기로 센다([커밋]·[롤백]으로 끝냄). 바인드 이름은 접두(':'·'@') 없이(SqlQuery.Parameters). 이 세션에서 다른 작업 중이면 SessionBusyException.
+        /// </summary>
+        public async Task<int> ExecuteDmlAsync(SqlQuery query, CancellationToken cancellationToken = default)
+        {
+            if (query == null)
+                throw new ArgumentNullException(nameof(query));
+            if (string.IsNullOrWhiteSpace(query.Sql))
+                throw new ArgumentException("실행할 문장이 없습니다.", nameof(query));
+            cancellationToken.ThrowIfCancellationRequested();
+            EnterNow();
+            try
+            {
+                return await RunDb(() => ExecuteDmlCore(query), cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        // 잠금을 쥔 작업 스레드에서만 부른다
+        private int ExecuteDmlCore(SqlQuery query)
+        {
+            ClearWarnings();
+            EnsureTransaction();
+            int affected;
+            using (var command = CreateCommand(query.Sql))
+            {
+                foreach (var pair in query.Parameters)
+                {
+                    var parameter = command.CreateParameter();
+                    parameter.ParameterName = pair.Key;
+                    parameter.Value = pair.Value ?? DBNull.Value;
+                    command.Parameters.Add(parameter);
+                }
+                SetExecuting(command);
+                try
+                {
+                    affected = command.ExecuteNonQuery();
+                }
+                finally
+                {
+                    SetExecuting(null);
+                }
+            }
+            _hasPending = true;
+            if (affected >= 0)
+                _pendingRows = (int)Math.Min(int.MaxValue, (long)_pendingRows + affected);
+            else
+                _countUnknown = true;
+            return affected;
+        }
+
         /// <summary>열린 커서에서 다음 count행. 끝에 닿으면 cursor.HasMore = false, 커서를 닫는다. 닫힌 커서면 빈 목록.</summary>
         public async Task<List<string[]>> FetchAsync(QueryCursor cursor, int count, CancellationToken cancellationToken = default)
         {

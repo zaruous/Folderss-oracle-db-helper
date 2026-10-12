@@ -59,7 +59,7 @@ namespace MyPlugin
     /// SQL 탭들(탭마다 대상 DB) + 편집기 + 결과(그리드·메시지·기록) + 상태줄. PoC의 오른쪽 영역과 같은 동작.
     /// 화면은 코드로 만든다(XAML 없음). 색은 Theme 도우미로 테마 키에 연결한다.
     /// </summary>
-    internal sealed class SqlWorkspace : Grid
+    internal sealed partial class SqlWorkspace : Grid
     {
         private const double EditorFontSize = 13;
         // 편집기와 줄 번호 칸의 줄 높이를 고정해 맞춘다(한글처럼 대체 글꼴로 그리는 줄도 같은 높이가 된다)
@@ -188,7 +188,7 @@ namespace MyPlugin
         /// <summary>지금 탭이 바뀌었거나 그 탭의 대상 DB가 바뀌었을 때.</summary>
         public event EventHandler ActiveTabChanged;
 
-        /// <summary>트리에서 테이블·뷰를 두 번 눌렀을 때: 그 DB 대상 탭(지금 탭이 다른 DB면 그 DB의 실행 중 아닌 탭, 없으면 새 탭)으로 옮겨 맨 위에 SELECT를 넣는다.</summary>
+        /// <summary>트리 메뉴 [SELECT 문 넣기]·Enter: 그 DB 대상 탭(지금 탭이 다른 DB면 그 DB의 실행 중 아닌 탭, 없으면 새 탭)으로 옮겨 맨 위에 SELECT를 넣는다.</summary>
         public void InsertSelect(string dbId, string owner, string objectName)
         {
             try
@@ -585,6 +585,7 @@ namespace MyPlugin
             DockPanel.SetDock(_resultStrip, Dock.Top);
             _gridArea = new DockPanel();
             _gridArea.Children.Add(_resultStrip);
+            _gridArea.Children.Add(BuildEditBar());
             _gridArea.Children.Add(_gridHost);
             pane.Children.Add(_gridArea);
 
@@ -1245,6 +1246,8 @@ namespace MyPlugin
         /// <summary>
         /// 트리 F1: 그 테이블·뷰의 앞 QuickQueryRows행을 그 DB 탭에서 바로 조회한다. 편집기 글은 바꾸지 않고(실행 기록에는 남음),
         /// 결과는 지금처럼 하나로 보인다. [다음 행 가져오기]는 툴바의 가져올 행 수로 이어 읽는다.
+        /// 결과는 편집할 수 있다(편집 막대 [편집]·[삭제]·[저장]): 조회 전에 데이터 사전에서 기본 키 열을 읽어 둔다
+        /// (조회 뒤에 읽으면 리더가 하나뿐인 PostgreSQL에서 결과 커서가 닫혀 [다음 행 가져오기]를 못 한다).
         /// </summary>
         public async void QuickQuery(string dbId, string owner, string objectName)
         {
@@ -1264,9 +1267,26 @@ namespace MyPlugin
                 session = CheckSession(tab, profile);
                 if (session == null)
                     return;
+                List<ColumnInfo> metadata = null;
+                string metadataError = null;
+                try
+                {
+                    metadata = await LoadColumnsAsync(session, profile, owner, objectName);
+                }
+                catch (Exception ex)
+                {
+                    metadataError = DbSession.DescribeError(ex);
+                }
+                // 열 정보를 읽는 사이 다른 실행이 시작됐거나 연결 상태가 바뀌었을 수 있다
+                if (tab.Running)
+                    return;
+                session = CheckSession(tab, profile);
+                if (session == null)
+                    return;
                 var statement = SqlScript.Parse(WorkspaceLogic.SelectStatement(owner, objectName));
                 AddMessage(dbId, WorkspaceLogic.QuickQueryMessage(WorkspaceLogic.QualifiedName(owner, objectName), tab.Title), MessageKind.Info);
                 await RunSingleAsync(tab, profile, session, statement, WorkspaceLogic.QuickQueryRows);
+                AttachEditTarget(tab, profile, owner, objectName, statement.Text, metadata, metadataError);
             }
             catch (Exception ex)
             {
@@ -2450,6 +2470,7 @@ namespace MyPlugin
                 }
             }
             RenderResultStrip();
+            RenderEditBar();
             var hasGrid = tab != null && tab.Columns != null && tab.Grid != null;
             _gridPlaceholder.Visibility = hasGrid ? Visibility.Collapsed : Visibility.Visible;
             if (!hasGrid)
@@ -2635,6 +2656,7 @@ namespace MyPlugin
             _run.IsEnabled = tab != null && !running;
             _cancel.IsEnabled = running;
             _target.IsEnabled = tab != null && !running;
+            RenderEditBar();
             RaiseCommandStateChanged();
         }
 
@@ -2760,6 +2782,7 @@ namespace MyPlugin
             RenderTabs();
             RenderTarget();
             RenderStatus();
+            RenderEditBar();
         }
 
         // 대상 목록·상태줄이 의존하는 바깥 상태: 접속마다 연결 여부·끊김, 가져올 행 수

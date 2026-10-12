@@ -673,18 +673,11 @@ namespace MyPlugin
             }
         }
 
-        /// <summary>두 번 누름: 연결 안 된(또는 끊긴) DB는 연결하고 펼친다. 테이블·뷰는 그 DB 탭에 SELECT를 넣는다.</summary>
+        /// <summary>두 번 누름: 연결 안 된(또는 끊긴) DB는 연결하고 펼친다. 테이블·뷰는 아무것도 하지 않는다(SELECT 넣기는 오른쪽 메뉴·Enter).</summary>
         private void DoubleClick(TreeRow row)
         {
-            if (row.Kind == TreeRowKind.Database)
-            {
-                if (NeedsConnect(row.DbId))
-                    ConnectAndExpand(row.DbId);
-            }
-            else if (row.Kind == TreeRowKind.Object && TreeGroups.HasColumns(row.ObjectType))
-            {
-                _host.InsertSelect(row.DbId, row.Owner, row.ObjectName);
-            }
+            if (row.Kind == TreeRowKind.Database && NeedsConnect(row.DbId))
+                ConnectAndExpand(row.DbId);
         }
 
         /// <summary>Enter: 테이블·뷰는 SELECT 넣기, "더 보기"는 불러오기, 연결 안 된 DB는 연결, 그 밖에 펼칠 수 있으면 펼치기·접기.</summary>

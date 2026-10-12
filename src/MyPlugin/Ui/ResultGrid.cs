@@ -15,25 +15,88 @@ using System.Windows.Media;
 
 namespace MyPlugin
 {
-    /// <summary>결과 그리드 한 행. 값은 ValueFormatter.Format 결과(null = NULL).</summary>
+    /// <summary>
+    /// 결과 그리드 한 행. 값은 ValueFormatter.Format 결과(null = NULL).
+    /// 빠른 조회(F1) 결과는 편집할 수 있다: 고친 값은 Values를 통째로 바꾸고(칸은 Values에 바인딩) 원래 값은 Original에 남긴다(저장의 WHERE·되돌리기).
+    /// </summary>
     internal sealed class ResultGridRow : INotifyPropertyChanged
     {
+        private string[] _values;
+        private RowEditState _state;
+
         public ResultGridRow(int number, string[] values)
         {
             Number = number;
-            Values = values ?? Array.Empty<string>();
+            _values = values ?? Array.Empty<string>();
         }
 
         /// <summary>1부터 세는 행 번호.</summary>
         public int Number { get; }
 
-        public string[] Values { get; }
-
-        // 값은 바뀌지 않는다. INotifyPropertyChanged를 구현해 두면 WPF가 PropertyDescriptor 변경 구독(행이 해제되지 않는 누수)을 쓰지 않는다.
-        public event PropertyChangedEventHandler PropertyChanged
+        /// <summary>지금 값(고쳤으면 고친 값).</summary>
+        public string[] Values
         {
-            add { }
-            remove { }
+            get { return _values; }
+            private set
+            {
+                _values = value ?? Array.Empty<string>();
+                Raise(nameof(Values));
+            }
+        }
+
+        /// <summary>조회한 원래 값. 고친 적이 없으면 Values와 같은 배열.</summary>
+        public string[] Original { get; private set; }
+
+        public RowEditState State
+        {
+            get { return _state; }
+            private set
+            {
+                if (_state == value)
+                    return;
+                _state = value;
+                Raise(nameof(State));
+            }
+        }
+
+        /// <summary>고친 값을 넣는다. 원래 값과 같아지면 변경 없음으로 돌아간다(삭제 표시는 그대로).</summary>
+        public void Apply(string[] values)
+        {
+            if (Original == null)
+                Original = _values;
+            Values = values;
+            if (State != RowEditState.Deleted)
+                State = RowEditLogic.SameValues(Original, _values) ? RowEditState.Unchanged : RowEditState.Modified;
+        }
+
+        /// <summary>삭제 표시를 하거나(true) 푼다(false). 풀면 고친 값이 남아 있으면 수정 상태로.</summary>
+        public void MarkDeleted(bool deleted)
+        {
+            if (deleted)
+                State = RowEditState.Deleted;
+            else
+                State = Original != null && !RowEditLogic.SameValues(Original, _values) ? RowEditState.Modified : RowEditState.Unchanged;
+        }
+
+        /// <summary>DB에 보낸 뒤: 지금 값이 원래 값이 된다.</summary>
+        public void Saved()
+        {
+            Original = null;
+            State = RowEditState.Unchanged;
+        }
+
+        /// <summary>WHERE에 쓸 원래 값(고친 적 없으면 지금 값).</summary>
+        public string[] OriginalValues
+        {
+            get { return Original ?? _values; }
+        }
+
+        // INotifyPropertyChanged를 구현해 두면 WPF가 PropertyDescriptor 변경 구독(행이 해제되지 않는 누수)을 쓰지 않는다.
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        private void Raise(string name)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
     }
 
@@ -47,6 +110,7 @@ namespace MyPlugin
     internal sealed class ResultGridView
     {
         private const int SampleRows = 50;
+        private const double EditMarkerWidth = 16;
         private const string SortHint = "누르면 정렬: 오름차순 → 내림차순 → 해제 (가져온 행 안에서)";
 
         private readonly ListView _list;
@@ -60,6 +124,7 @@ namespace MyPlugin
         private bool _stylesApplied;
         private int _sortColumn = -1;
         private bool _sortDescending;
+        private bool _editMarkers;
 
         /// <param name="copy">복사 요청. true = 전체(머리글 포함), false = 선택한 행.</param>
         public ResultGridView(Action<bool> copy)
@@ -130,6 +195,7 @@ namespace MyPlugin
         public void Show(IList<ResultColumn> columns, ObservableCollection<ResultGridRow> rows)
         {
             ApplyThemeStyles();
+            _editMarkers = false;
             // 열을 끌어 옮기면 복사(TSV)의 열 순서와 화면이 달라진다
             var view = new GridView { AllowsColumnReorder = false };
             if (_headerStyle != null)
@@ -147,7 +213,7 @@ namespace MyPlugin
             {
                 Header = numberHeader,
                 CellTemplate = NumberTemplate(),
-                Width = WorkspaceLogic.RowNumberWidth(rows.Count)
+                Width = NumberWidth(rows.Count)
             };
             view.Columns.Add(_numberColumn);
             for (var i = 0; i < columns.Count; i++)
@@ -182,9 +248,21 @@ namespace MyPlugin
         {
             if (_numberColumn == null)
                 return;
-            var width = WorkspaceLogic.RowNumberWidth(rowCount);
+            var width = NumberWidth(rowCount);
             if (double.IsNaN(_numberColumn.Width) || width > _numberColumn.Width)
                 _numberColumn.Width = width;
+        }
+
+        /// <summary>편집할 수 있는 결과: 번호 열에 수정(✎)·삭제(✖) 표시 자리를 둔다.</summary>
+        public void EnableEditMarkers(int rowCount)
+        {
+            _editMarkers = true;
+            FitRowNumbers(rowCount);
+        }
+
+        private double NumberWidth(int rowCount)
+        {
+            return WorkspaceLogic.RowNumberWidth(rowCount) + (_editMarkers ? EditMarkerWidth : 0);
         }
 
         public void ScrollIntoView(ResultGridRow row)
@@ -297,9 +375,18 @@ namespace MyPlugin
             if (_stylesApplied)
                 return;
             _stylesApplied = true;
-            var itemStyle = WorkspaceUi.StretchItemStyle(_list, typeof(ListViewItem));
-            if (itemStyle != null)
-                _list.ItemContainerStyle = itemStyle;
+            var itemStyle = WorkspaceUi.StretchItemStyle(_list, typeof(ListViewItem)) ?? new Style(typeof(ListViewItem));
+            // 수정·삭제 표시한 행은 바탕색으로 드러낸다. 고른 행은 테마 선택색이 앞선다(뒤에 둔 트리거가 이긴다).
+            var modified = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.State)), Value = RowEditState.Modified };
+            modified.Setters.Add(new Setter(Control.BackgroundProperty, Theme.ModifiedRow));
+            var deleted = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.State)), Value = RowEditState.Deleted };
+            deleted.Setters.Add(new Setter(Control.BackgroundProperty, Theme.DeletedRow));
+            var selected = new Trigger { Property = ListBoxItem.IsSelectedProperty, Value = true };
+            selected.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(Theme.Selection)));
+            itemStyle.Triggers.Add(modified);
+            itemStyle.Triggers.Add(deleted);
+            itemStyle.Triggers.Add(selected);
+            _list.ItemContainerStyle = itemStyle;
             var baseHeader = _list.TryFindResource(typeof(GridViewColumnHeader)) as Style;
             if (baseHeader != null)
             {
@@ -332,11 +419,26 @@ namespace MyPlugin
 
         private static DataTemplate NumberTemplate()
         {
+            var panel = new FrameworkElementFactory(typeof(DockPanel));
+            var marker = new FrameworkElementFactory(typeof(TextBlock), "marker");
+            marker.SetBinding(TextBlock.TextProperty, new Binding(nameof(ResultGridRow.State)) { Converter = EditMarkerConverter.Instance, Mode = BindingMode.OneWay });
+            marker.SetBinding(FrameworkElement.ToolTipProperty, new Binding(nameof(ResultGridRow.State)) { Converter = EditMarkerTipConverter.Instance, Mode = BindingMode.OneWay });
+            marker.SetValue(DockPanel.DockProperty, Dock.Left);
+            marker.SetValue(TextBlock.FontWeightProperty, FontWeights.Bold);
+            marker.SetValue(FrameworkElement.MarginProperty, new Thickness(0, 0, 3, 0));
+            panel.AppendChild(marker);
             var text = new FrameworkElementFactory(typeof(TextBlock));
             text.SetBinding(TextBlock.TextProperty, new Binding(nameof(ResultGridRow.Number)) { Mode = BindingMode.OneTime, StringFormat = "{0:N0}" });
             text.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Right);
             text.SetResourceReference(TextBlock.ForegroundProperty, Theme.SecondaryText);
-            var template = new DataTemplate { VisualTree = text };
+            panel.AppendChild(text);
+            var template = new DataTemplate { VisualTree = panel };
+            var modified = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.State)), Value = RowEditState.Modified };
+            modified.Setters.Add(new Setter(TextBlock.ForegroundProperty, Theme.Warning, "marker"));
+            var deleted = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.State)), Value = RowEditState.Deleted };
+            deleted.Setters.Add(new Setter(TextBlock.ForegroundProperty, Theme.Danger, "marker"));
+            template.Triggers.Add(modified);
+            template.Triggers.Add(deleted);
             template.Seal();
             return template;
         }
@@ -344,8 +446,9 @@ namespace MyPlugin
         private static DataTemplate CellTemplate(int index, bool numeric)
         {
             var text = new FrameworkElementFactory(typeof(TextBlock), "cell");
-            text.SetBinding(TextBlock.TextProperty, new Binding { Converter = CellTextConverter.Instance, ConverterParameter = index, Mode = BindingMode.OneWay });
-            text.SetBinding(FrameworkElement.ToolTipProperty, new Binding { Converter = CellTooltipConverter.Instance, ConverterParameter = index, Mode = BindingMode.OneWay });
+            // 행 객체가 아니라 Values에 바인딩한다: 편집으로 Values가 바뀌면 칸이 따라 바뀐다
+            text.SetBinding(TextBlock.TextProperty, new Binding(nameof(ResultGridRow.Values)) { Converter = CellTextConverter.Instance, ConverterParameter = index, Mode = BindingMode.OneWay });
+            text.SetBinding(FrameworkElement.ToolTipProperty, new Binding(nameof(ResultGridRow.Values)) { Converter = CellTooltipConverter.Instance, ConverterParameter = index, Mode = BindingMode.OneWay });
             text.SetValue(FrameworkElement.TagProperty, index);
             text.SetValue(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis);
             text.SetValue(TextBlock.TextWrappingProperty, TextWrapping.NoWrap);
@@ -356,12 +459,15 @@ namespace MyPlugin
             var template = new DataTemplate { VisualTree = text };
             var isNull = new DataTrigger
             {
-                Binding = new Binding { Converter = CellIsNullConverter.Instance, ConverterParameter = index, Mode = BindingMode.OneWay },
+                Binding = new Binding(nameof(ResultGridRow.Values)) { Converter = CellIsNullConverter.Instance, ConverterParameter = index, Mode = BindingMode.OneWay },
                 Value = true
             };
             isNull.Setters.Add(new Setter(TextBlock.FontStyleProperty, FontStyles.Italic, "cell"));
             isNull.Setters.Add(new Setter(TextBlock.ForegroundProperty, new DynamicResourceExtension(Theme.DisabledText), "cell"));
             template.Triggers.Add(isNull);
+            var deleted = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.State)), Value = RowEditState.Deleted };
+            deleted.Setters.Add(new Setter(TextBlock.TextDecorationsProperty, TextDecorations.Strikethrough, "cell"));
+            template.Triggers.Add(deleted);
             template.Seal();
             return template;
         }
@@ -399,11 +505,11 @@ namespace MyPlugin
 
         private static string CellValue(object row, object parameter)
         {
-            var gridRow = row as ResultGridRow;
-            if (gridRow == null || !(parameter is int))
+            var values = row as string[] ?? (row as ResultGridRow)?.Values;
+            if (values == null || !(parameter is int))
                 return null;
             var index = (int)parameter;
-            return index >= 0 && index < gridRow.Values.Length ? gridRow.Values[index] : null;
+            return index >= 0 && index < values.Length ? values[index] : null;
         }
 
         private sealed class CellTextConverter : IValueConverter
@@ -413,7 +519,7 @@ namespace MyPlugin
             public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
             {
                 // 컨테이너를 재사용하는 동안 DataContext가 행이 아닐 수 있다(그때는 NULL로 보이지 않게 빈 칸)
-                if (!(value is ResultGridRow))
+                if (!(value is string[]) && !(value is ResultGridRow))
                     return "";
                 return WorkspaceLogic.CellText(CellValue(value, parameter));
             }
@@ -430,7 +536,53 @@ namespace MyPlugin
 
             public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
             {
-                return value is ResultGridRow && CellValue(value, parameter) == null;
+                return (value is string[] || value is ResultGridRow) && CellValue(value, parameter) == null;
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                return Binding.DoNothing;
+            }
+        }
+
+        private sealed class EditMarkerConverter : IValueConverter
+        {
+            public static readonly EditMarkerConverter Instance = new EditMarkerConverter();
+
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                if (value is RowEditState)
+                {
+                    switch ((RowEditState)value)
+                    {
+                        case RowEditState.Modified: return "✎";
+                        case RowEditState.Deleted: return "✖";
+                    }
+                }
+                return "";
+            }
+
+            public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                return Binding.DoNothing;
+            }
+        }
+
+        private sealed class EditMarkerTipConverter : IValueConverter
+        {
+            public static readonly EditMarkerTipConverter Instance = new EditMarkerTipConverter();
+
+            public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+            {
+                if (value is RowEditState)
+                {
+                    switch ((RowEditState)value)
+                    {
+                        case RowEditState.Modified: return "고친 행 — [저장]하면 UPDATE";
+                        case RowEditState.Deleted: return "삭제 표시한 행 — [저장]하면 DELETE";
+                    }
+                }
+                return null;
             }
 
             public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

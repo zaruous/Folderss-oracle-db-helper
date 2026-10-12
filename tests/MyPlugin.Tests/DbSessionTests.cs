@@ -1558,6 +1558,70 @@ namespace MyPlugin.Tests
             }
         }
 
+        [Fact]
+        public async Task ExecuteDml_WithParameters_RunsInTransactionAndCountsPending()
+        {
+            using (var session = await OpenAsync(new SqliteConnection(Memory)))
+            {
+                await CreateNumbersAsync(session, 5);
+                await SetupAsync(session, "ALTER TABLE nums ADD COLUMN label TEXT");
+
+                var update = new SqlQuery { Sql = "UPDATE nums SET label = :s0 WHERE x = :k0" };
+                update.Parameters.Add(new KeyValuePair<string, object>("s0", "three"));
+                update.Parameters.Add(new KeyValuePair<string, object>("k0", 3m));
+                Assert.Equal(1, await session.ExecuteDmlAsync(update));
+                Assert.True(session.HasPendingChanges);
+                Assert.Equal(1, session.PendingRowCount);
+
+                var delete = new SqlQuery { Sql = "DELETE FROM nums WHERE x = :k0" };
+                delete.Parameters.Add(new KeyValuePair<string, object>("k0", 4m));
+                Assert.Equal(1, await session.ExecuteDmlAsync(delete));
+                Assert.Equal(2, session.PendingRowCount);
+
+                // NULL 바인드(DBNull)도 그대로 간다
+                var toNull = new SqlQuery { Sql = "UPDATE nums SET label = :s0 WHERE x = :k0" };
+                toNull.Parameters.Add(new KeyValuePair<string, object>("s0", DBNull.Value));
+                toNull.Parameters.Add(new KeyValuePair<string, object>("k0", 3m));
+                Assert.Equal(1, await session.ExecuteDmlAsync(toNull));
+
+                // 없는 행은 0행 — 호출한 쪽이 알린다
+                var missing = new SqlQuery { Sql = "DELETE FROM nums WHERE x = :k0" };
+                missing.Parameters.Add(new KeyValuePair<string, object>("k0", 99m));
+                Assert.Equal(0, await session.ExecuteDmlAsync(missing));
+
+                await session.RollbackAsync();
+                Assert.False(session.HasPendingChanges);
+                Assert.Equal(5, await CountAsync(session, "nums"));
+                Assert.False(session.IsBusy);
+            }
+        }
+
+        [Fact]
+        public async Task ExecuteDml_WhileBusy_ThrowsSessionBusy()
+        {
+            using (var session = await OpenAsync(new SqliteConnection(Memory)))
+            {
+                await CreateNumbersAsync(session, 3);
+                var gate = new SemaphoreSlim(0, 1);
+                var running = session.RunAsync((connection, transaction) =>
+                {
+                    gate.Wait(Timeout);
+                    return true;
+                });
+                try
+                {
+                    var query = new SqlQuery { Sql = "DELETE FROM nums WHERE x = :k0" };
+                    query.Parameters.Add(new KeyValuePair<string, object>("k0", 1m));
+                    await Assert.ThrowsAsync<SessionBusyException>(() => session.ExecuteDmlAsync(query));
+                }
+                finally
+                {
+                    gate.Release();
+                    await Within(running);
+                }
+            }
+        }
+
         private static async Task<DbSession> OpenAsync(DbConnection connection)
         {
             var session = new DbSession(connection);

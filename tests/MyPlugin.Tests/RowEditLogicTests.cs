@@ -180,17 +180,17 @@ namespace MyPlugin.Tests
         }
 
         [Fact]
-        public void ReplaceDatePart_KeepsTimeAndFraction()
+        public void DateTimeCompose_KeepsTimeAndFraction()
         {
             var day = new DateTime(2025, 12, 31);
-            Assert.Equal("2025-12-31 13:04:05", RowEditLogic.ReplaceDatePart("2024-03-05 13:04:05", day));
-            Assert.Equal("2025-12-31 13:04:05.123", RowEditLogic.ReplaceDatePart("2024-03-05 13:04:05.123", day));
-            Assert.Equal("2025-12-31 00:00:00", RowEditLogic.ReplaceDatePart("2024-03-05", day));
-            Assert.Equal("2025-12-31 00:00:00", RowEditLogic.ReplaceDatePart("", day));
-            Assert.Equal("2025-12-31 00:00:00", RowEditLogic.ReplaceDatePart(null, day));
-            Assert.Equal("2025-12-31 00:00:00", RowEditLogic.ReplaceDatePart("not a date", day));
+            Assert.Equal("2025-12-31 13:04:05", ReplaceDatePart("2024-03-05 13:04:05", day));
+            Assert.Equal("2025-12-31 13:04:05.123", ReplaceDatePart("2024-03-05 13:04:05.123", day));
+            Assert.Equal("2025-12-31 00:00:00", ReplaceDatePart("2024-03-05", day));
+            Assert.Equal("2025-12-31 00:00:00", ReplaceDatePart("", day));
+            Assert.Equal("2025-12-31 00:00:00", ReplaceDatePart(null, day));
+            Assert.Equal("2025-12-31 00:00:00", ReplaceDatePart("not a date", day));
             // 넘긴 날짜의 시각은 무시한다(달력은 날짜만 고른다)
-            Assert.Equal("2025-12-31 13:04:05", RowEditLogic.ReplaceDatePart("2024-03-05 13:04:05", day.AddHours(9)));
+            Assert.Equal("2025-12-31 13:04:05", ReplaceDatePart("2024-03-05 13:04:05", day.AddHours(9)));
 
             // 2024년 3월: 1일이 금요일 → 2월 25일(일)부터 42일
             var grid = RowEditLogic.MonthGrid(new DateTime(2024, 3, 15));
@@ -202,9 +202,33 @@ namespace MyPlugin.Tests
             // 1일이 일요일인 달은 그 날부터
             Assert.Equal(new DateTime(2024, 9, 1), RowEditLogic.MonthGrid(new DateTime(2024, 9, 1))[0]);
 
+            TimeSpan time;
+            Assert.True(RowEditLogic.TryParseTime("13:04", out time));
+            Assert.Equal(new TimeSpan(13, 4, 0), time);
+            Assert.True(RowEditLogic.TryParseTime("9:05:07", out time));
+            Assert.Equal(new TimeSpan(9, 5, 7), time);
+            Assert.True(RowEditLogic.TryParseTime("23:59:59.5", out time));
+            Assert.Equal(new TimeSpan(23, 59, 59).Add(TimeSpan.FromMilliseconds(500)), time);
+            Assert.False(RowEditLogic.TryParseTime("24:00", out time));
+            Assert.False(RowEditLogic.TryParseTime("13", out time));
+            Assert.False(RowEditLogic.TryParseTime("", out time));
+            Assert.False(RowEditLogic.TryParseTime("1:2:3:4", out time));
+            Assert.Equal("13:04:05", RowEditLogic.TimeText(new TimeSpan(13, 4, 5)));
+            Assert.Equal("13:04:05.5", RowEditLogic.TimeText(new TimeSpan(13, 4, 5).Add(TimeSpan.FromMilliseconds(500))));
+            Assert.Equal("00:00:00", RowEditLogic.TimeText(TimeSpan.Zero));
+            Assert.Equal(new TimeSpan(13, 4, 5), RowEditLogic.TimePartOf("2024-03-05 13:04:05"));
+            Assert.Equal(TimeSpan.Zero, RowEditLogic.TimePartOf("abc"));
+            Assert.Equal("2025-12-31 09:30:00", RowEditLogic.Compose(new DateTime(2025, 12, 31, 5, 5, 5), new TimeSpan(9, 30, 0)));
+
             Assert.Equal(new DateTime(2024, 3, 5), RowEditLogic.DatePartOf("2024-03-05 13:04:05"));
             Assert.Null(RowEditLogic.DatePartOf("abc"));
             Assert.Null(RowEditLogic.DatePartOf(null));
+        }
+
+        // 달력에서 날짜만 고를 때 DateTimeBox가 하는 합성(시각은 칸의 것을 그대로)
+        private static string ReplaceDatePart(string text, DateTime date)
+        {
+            return RowEditLogic.Compose(date, RowEditLogic.TimePartOf(text));
         }
 
         private static List<ResultColumn> Columns(params string[] specs)

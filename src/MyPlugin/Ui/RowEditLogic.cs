@@ -253,14 +253,38 @@ namespace MyPlugin
             return DateTime.TryParseExact((text ?? "").Trim(), DateFormats, Inv, DateTimeStyles.None, out value);
         }
 
-        /// <summary>편집 창 📅: 칸의 글에서 날짜 부분만 date로 바꾼다. 시각(소수점 초 포함)은 그대로, 읽을 수 없는 글이면 00:00:00.</summary>
-        public static string ReplaceDatePart(string text, DateTime date)
+        private static readonly string[] TimeFormats =
         {
-            DateTime current;
-            var time = TryParseDate(text, out current) ? current.TimeOfDay : TimeSpan.Zero;
+            @"hh\:mm\:ss\.FFFFFFF", @"hh\:mm\:ss", @"hh\:mm", @"h\:mm\:ss", @"h\:mm"
+        };
+
+        /// <summary>날짜 + 시각 → 그리드 표시 형식. 초 미만이 있으면 소수점 뒤 끝의 0을 뺀 7자리 이내.</summary>
+        public static string Compose(DateTime date, TimeSpan time)
+        {
             var combined = date.Date + time;
             var format = combined.Ticks % TimeSpan.TicksPerSecond != 0 ? "yyyy-MM-dd HH:mm:ss.FFFFFFF" : "yyyy-MM-dd HH:mm:ss";
             return combined.ToString(format, Inv);
+        }
+
+        /// <summary>칸의 글에서 시각 부분. 읽을 수 없으면 00:00:00.</summary>
+        public static TimeSpan TimePartOf(string text)
+        {
+            DateTime current;
+            return TryParseDate(text, out current) ? current.TimeOfDay : TimeSpan.Zero;
+        }
+
+        /// <summary>시각 글(HH:mm, HH:mm:ss, HH:mm:ss.fff…) → TimeSpan. 24시간제, 24:00 이상은 거부.</summary>
+        public static bool TryParseTime(string text, out TimeSpan time)
+        {
+            return TimeSpan.TryParseExact((text ?? "").Trim(), TimeFormats, Inv, TimeSpanStyles.None, out time) && time < TimeSpan.FromDays(1);
+        }
+
+        /// <summary>시각 TimeSpan → 달력 팝업의 시각 칸 글(HH:mm:ss, 초 미만이 있으면 소수점까지).</summary>
+        public static string TimeText(TimeSpan time)
+        {
+            return time.Ticks % TimeSpan.TicksPerSecond != 0
+                ? time.ToString(@"hh\:mm\:ss\.FFFFFFF", Inv)
+                : time.ToString(@"hh\:mm\:ss", Inv);
         }
 
         /// <summary>편집 창 📅 달력: month가 든 달을 일요일부터 6주(42일)로 편다. 앞뒤 달의 날도 들어간다.</summary>

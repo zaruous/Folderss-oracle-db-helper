@@ -250,7 +250,35 @@ namespace MyPlugin
 
         private static bool TryParseDate(string text, out DateTime value)
         {
-            return DateTime.TryParseExact(text.Trim(), DateFormats, Inv, DateTimeStyles.None, out value);
+            return DateTime.TryParseExact((text ?? "").Trim(), DateFormats, Inv, DateTimeStyles.None, out value);
+        }
+
+        /// <summary>편집 창 📅: 칸의 글에서 날짜 부분만 date로 바꾼다. 시각(소수점 초 포함)은 그대로, 읽을 수 없는 글이면 00:00:00.</summary>
+        public static string ReplaceDatePart(string text, DateTime date)
+        {
+            DateTime current;
+            var time = TryParseDate(text, out current) ? current.TimeOfDay : TimeSpan.Zero;
+            var combined = date.Date + time;
+            var format = combined.Ticks % TimeSpan.TicksPerSecond != 0 ? "yyyy-MM-dd HH:mm:ss.FFFFFFF" : "yyyy-MM-dd HH:mm:ss";
+            return combined.ToString(format, Inv);
+        }
+
+        /// <summary>편집 창 📅 달력: month가 든 달을 일요일부터 6주(42일)로 편다. 앞뒤 달의 날도 들어간다.</summary>
+        public static DateTime[] MonthGrid(DateTime month)
+        {
+            var first = new DateTime(month.Year, month.Month, 1);
+            var start = first.AddDays(-(int)first.DayOfWeek);
+            var days = new DateTime[42];
+            for (var i = 0; i < days.Length; i++)
+                days[i] = start.AddDays(i);
+            return days;
+        }
+
+        /// <summary>편집 창 📅: 달력이 처음 보일 날짜(칸의 글이 날짜면 그 날, 아니면 null).</summary>
+        public static DateTime? DatePartOf(string text)
+        {
+            DateTime value;
+            return TryParseDate(text, out value) ? value.Date : (DateTime?)null;
         }
 
         public static bool SameValues(string[] a, string[] b)

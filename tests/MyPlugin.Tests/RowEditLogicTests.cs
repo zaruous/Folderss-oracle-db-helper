@@ -179,6 +179,34 @@ namespace MyPlugin.Tests
             Assert.False(RowEditLogic.SameValues(new[] { "a", null }, new[] { "a", "" }));
         }
 
+        [Fact]
+        public void ReplaceDatePart_KeepsTimeAndFraction()
+        {
+            var day = new DateTime(2025, 12, 31);
+            Assert.Equal("2025-12-31 13:04:05", RowEditLogic.ReplaceDatePart("2024-03-05 13:04:05", day));
+            Assert.Equal("2025-12-31 13:04:05.123", RowEditLogic.ReplaceDatePart("2024-03-05 13:04:05.123", day));
+            Assert.Equal("2025-12-31 00:00:00", RowEditLogic.ReplaceDatePart("2024-03-05", day));
+            Assert.Equal("2025-12-31 00:00:00", RowEditLogic.ReplaceDatePart("", day));
+            Assert.Equal("2025-12-31 00:00:00", RowEditLogic.ReplaceDatePart(null, day));
+            Assert.Equal("2025-12-31 00:00:00", RowEditLogic.ReplaceDatePart("not a date", day));
+            // 넘긴 날짜의 시각은 무시한다(달력은 날짜만 고른다)
+            Assert.Equal("2025-12-31 13:04:05", RowEditLogic.ReplaceDatePart("2024-03-05 13:04:05", day.AddHours(9)));
+
+            // 2024년 3월: 1일이 금요일 → 2월 25일(일)부터 42일
+            var grid = RowEditLogic.MonthGrid(new DateTime(2024, 3, 15));
+            Assert.Equal(42, grid.Length);
+            Assert.Equal(new DateTime(2024, 2, 25), grid[0]);
+            Assert.Equal(DayOfWeek.Sunday, grid[0].DayOfWeek);
+            Assert.Equal(new DateTime(2024, 3, 1), grid[5]);
+            Assert.Equal(new DateTime(2024, 4, 6), grid[41]);
+            // 1일이 일요일인 달은 그 날부터
+            Assert.Equal(new DateTime(2024, 9, 1), RowEditLogic.MonthGrid(new DateTime(2024, 9, 1))[0]);
+
+            Assert.Equal(new DateTime(2024, 3, 5), RowEditLogic.DatePartOf("2024-03-05 13:04:05"));
+            Assert.Null(RowEditLogic.DatePartOf("abc"));
+            Assert.Null(RowEditLogic.DatePartOf(null));
+        }
+
         private static List<ResultColumn> Columns(params string[] specs)
         {
             return specs.Select(s =>

@@ -53,7 +53,7 @@
   - `$code.attrValues` — 값 목록(`$source.attrNames`와 같은 순서). 열 이름을 모르는 범용 양식에서 `#foreach($v in $code.attrValues)` 로 돈다.
   - `$code.attrText` — `PLANT_CD=P1; LANG=ko`처럼 이름=값을 `; `로 이은 글자(값이 빈 속성은 뺌). 한 칸에 모두 보일 때.
 - **코드 테이블마다 열 이름이 다른 구조(이름/값 짝 열)**: 정의 테이블이 열 이름을 정하고 데이터 테이블이 값을 담는 범용 코드 테이블은 **이름 열과 값 열을 짝으로 나열**한다 — 추가 열 `X`와 `X_NAME`이 함께 있으면 행마다 `X_NAME`의 값이 속성 이름, `X`의 값이 속성 값이 된다(이름이 비어 있는데 값이 있으면 값 열 이름 `DATA_2`가 속성 이름, 둘 다 비면 뺀다). 예: `KEY_1_NAME`/`KEY_1`, `DATA_1_NAME`/`DATA_1` … → 그룹마다 그 그룹의 열 이름이 속성이 된다. 평범한 SELECT 열 나열이라 **어떤 DBMS에서나 같은 SQL**로 된다(본보기는 플러그인 창의 [본보기 SQL] 버튼 — 사내 구조라 문서에는 싣지 않는다). 그래서 그룹 시트에서는 `$group.attrNames`(이 그룹에 있는 속성 이름)·`$code.groupAttrValues`(같은 순서의 값)를 쓰고, 전체 표에서는 `$source.attrNames`·`$code.attrValues`를 쓴다. 펼친 열은 `$source.expandedColumnsText`에 남는다(`KEY_1_NAME→KEY_1, …`).
-- **JSON 객체 열(선택, PostgreSQL 등 JSON 함수가 있는 DBMS)**: 추가 속성 열의 비어 있지 않은 값이 모두 `{"이름": 값, …}` 꼴이면 그 열 대신 키 하나하나가 추가 속성이 된다(값이 객체·배열이면 JSON 글자 그대로, `null`은 뺌). 같은 결과를 내지만 DBMS 고유 함수(`jsonb_build_object`)를 쓰므로 이식성이 필요하면 위의 짝 열 방식을 권한다. 예: [examples/madmtbl_postgresql_json.sql](examples/madmtbl_postgresql_json.sql).
+- **JSON 객체 열(선택, PostgreSQL 등 JSON 함수가 있는 DBMS)**: 추가 속성 열의 비어 있지 않은 값이 모두 `{"이름": 값, …}` 꼴이면 그 열 대신 키 하나하나가 추가 속성이 된다(값이 객체·배열이면 JSON 글자 그대로, `null`은 뺌). 같은 결과를 내지만 DBMS 고유 함수(`jsonb_build_object`)를 쓰므로 이식성이 필요하면 위의 짝 열 방식을 권한다. 예: [examples/gcm_postgresql_json.sql](examples/gcm_postgresql_json.sql)(테이블 이름은 `[데이터 테이블]`·`[정의 테이블]`로 가려 두었고 열 이름은 본보기 그대로).
 - 그룹은 `TABLE_NAME`가 같은 행을 처음 나온 순서로 묶는다. 그룹 명칭·설명은 그 그룹에서 처음 비어 있지 않은 값.
 - `SORT_NO`가 있으면 그룹 안에서 그 값으로 정렬(숫자로 읽히면 수로, 아니면 글자로, 빈 값은 맨 뒤). 없으면 SQL의 순서 그대로 — 순서가 중요하면 SQL에 `ORDER BY`를 둔다.
 

@@ -13,6 +13,7 @@
 
 - [GCM template authoring guide (Markdown, Korean)](https://zaruous.github.io/Folderss-oracle-db-helper/code-spec-templates/guide.md): the SQL alias contract (TABLE_NAME, CODE, CODE_NAME required; GROUP_NAME, GROUP_DESC, CODE_DESC, SORT_NO, USE_YN optional; other columns become extra attributes), every variable (`$doc`, `$db`, `$source`, `$groups`/`$group`, `$codes`/`$code`), validation checklist. The engine rules, syntax and checker are the same as the table-spec guide — read that guide's sections 3–4 too.
 - [Variables (JSON)](https://zaruous.github.io/Folderss-oracle-db-helper/code-spec-templates/variables.json): machine-readable variable schema for GCM templates. Pass it to the checker: `python check_template.py template.xlsx variables.json`.
+- [gcm_postgresql_json.sql](https://zaruous.github.io/Folderss-oracle-db-helper/code-spec-templates/examples/gcm_postgresql_json.sql): example SQL (PostgreSQL) that folds every extra attribute into one JSON object column (`jsonb_build_object` + `jsonb_strip_nulls`); table names are placeholders (`[데이터 테이블]`, `[정의 테이블]`), column names are the real sample.
 
 ## Where templates go
 

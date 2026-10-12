@@ -1,0 +1,309 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+
+namespace MyPlugin
+{
+    /// <summary>
+    /// 빠른 조회(F1) 결과 편집: 그리드 위 편집 막대([편집]·[삭제]·[저장])와 저장(UPDATE·DELETE 실행).
+    /// 고친 행·삭제 표시한 행은 그리드가 바탕색·표시(✎·✖)로 드러내고, [저장]은 기본 키로 행마다 문장 하나를 실행한다(커밋 전 — [커밋]·[롤백]).
+    /// </summary>
+    internal sealed partial class SqlWorkspace
+    {
+        private Border _editBar;
+        private Button _editRow;
+        private Button _deleteRows;
+        private Button _saveEdits;
+        private TextBlock _editInfo;
+
+        private FrameworkElement BuildEditBar()
+        {
+            var bar = new DockPanel { Margin = new Thickness(4, 2, 4, 2) };
+            _editRow = EditBarButton("편집", "고른 행의 값을 고칩니다(편집 창)");
+            _deleteRows = EditBarButton("삭제", "고른 행에 삭제 표시를 합니다(다시 누르면 풂). [저장]하면 DELETE");
+            _saveEdits = EditBarButton("저장", "고친 행은 UPDATE, 삭제 표시한 행은 DELETE로 DB에 보냅니다(커밋 전)");
+            _editRow.Click += (s, e) => Safe(EditSelectedRow);
+            _deleteRows.Click += (s, e) => Safe(ToggleDeleteSelectedRows);
+            _saveEdits.Click += async (s, e) =>
+            {
+                try
+                {
+                    await SaveEditsAsync();
+                }
+                catch (Exception ex)
+                {
+                    ReportUnexpected(ex);
+                }
+            };
+            bar.Children.Add(_editRow);
+            bar.Children.Add(_deleteRows);
+            bar.Children.Add(_saveEdits);
+            _editInfo = Theme.Text("", Theme.SecondaryText);
+            _editInfo.FontSize = 11.5;
+            _editInfo.VerticalAlignment = VerticalAlignment.Center;
+            _editInfo.Margin = new Thickness(8, 0, 4, 0);
+            _editInfo.TextTrimming = TextTrimming.CharacterEllipsis;
+            bar.Children.Add(_editInfo);
+
+            _editBar = new Border { Child = bar, BorderThickness = new Thickness(0, 0, 0, 1), Visibility = Visibility.Collapsed };
+            _editBar.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
+            Theme.Background(_editBar, Theme.SurfaceBackground);
+            AutomationProperties.SetName(_editBar, "결과 편집");
+            DockPanel.SetDock(_editBar, Dock.Top);
+            return _editBar;
+        }
+
+        private static Button EditBarButton(string text, string tip)
+        {
+            var button = new Button
+            {
+                Content = text,
+                Padding = new Thickness(10, 1, 10, 1),
+                Margin = new Thickness(0, 0, 4, 0),
+                IsEnabled = false,
+                ToolTip = tip
+            };
+            DockPanel.SetDock(button, Dock.Left);
+            return button;
+        }
+
+        /// <summary>편집 막대: 지금 결과가 빠른 조회 결과일 때만 보인다. 버튼은 편집할 수 있고 실행 중이 아닐 때만 켠다.</summary>
+        private void RenderEditBar()
+        {
+            if (_editBar == null)
+                return;
+            var tab = _active;
+            var result = tab != null ? tab.ActiveResult : null;
+            var edit = result != null ? result.Edit : null;
+            if (edit == null)
+            {
+                _editBar.Visibility = Visibility.Collapsed;
+                return;
+            }
+            _editBar.Visibility = Visibility.Visible;
+            var profile = Profile(result.ResultDbId);
+            var session = _host.GetSession(result.ResultDbId);
+            string blocked = null;
+            if (!edit.CanEdit)
+                blocked = edit.DisabledReason;
+            else if (profile == null)
+                blocked = "접속이 삭제되어 편집할 수 없습니다.";
+            else if (profile.ReadOnly)
+                blocked = "읽기 전용 접속은 편집할 수 없습니다.";
+            else if (session == null || session.IsBroken)
+                blocked = "연결이 끊겨 저장할 수 없습니다.";
+            var usable = blocked == null && !tab.Running;
+            _editRow.IsEnabled = usable;
+            _deleteRows.IsEnabled = usable;
+            _saveEdits.IsEnabled = usable && result.HasPendingEdits;
+            var target = WorkspaceLogic.QualifiedName(edit.Owner, edit.Name);
+            if (blocked != null)
+            {
+                _editInfo.Text = target + " — " + blocked;
+                return;
+            }
+            var pending = RowEditLogic.PendingSummary(result.ModifiedCount, result.DeletedCount);
+            _editInfo.Text = pending.Length == 0
+                ? target + " — 행을 고르고 [편집]·[삭제], 고친 행은 [저장]으로 DB에 보냅니다(커밋 전)"
+                : target + " — " + pending + " (저장하지 않음)";
+        }
+
+        /// <summary>[편집]: 고른 행(여럿이면 첫 행)의 값을 편집 창에서 고친다. 삭제 표시한 행은 먼저 표시를 풀어야 한다.</summary>
+        private void EditSelectedRow()
+        {
+            var tab = _active;
+            var result = tab != null ? tab.ActiveResult : null;
+            if (result == null || result.Edit == null || !result.Edit.CanEdit || tab.Running || result.Grid == null)
+                return;
+            var row = result.Grid.SelectedRows().FirstOrDefault();
+            if (row == null)
+            {
+                SetStatus(tab, WorkspaceLogic.TextStatus("편집할 행을 고르세요."));
+                return;
+            }
+            if (row.State == RowEditState.Deleted)
+            {
+                SetStatus(tab, WorkspaceLogic.TextStatus("삭제 표시한 행은 고칠 수 없습니다. [삭제]를 다시 눌러 표시를 푸세요."));
+                return;
+            }
+            var values = RowEditDialog.Show(Window.GetWindow(this), Profile(result.ResultDbId), result.Edit, row.Values);
+            if (values == null)
+                return;
+            row.Apply(values);
+            RenderEditBar();
+            SetStatus(tab, WorkspaceLogic.TextStatus(row.State == RowEditState.Modified
+                ? row.Number.ToString(System.Globalization.CultureInfo.InvariantCulture) + "행을 고쳤습니다 — [저장]으로 DB에 보냅니다(커밋 전)."
+                : "원래 값과 같아 변경이 없습니다."));
+        }
+
+        /// <summary>[삭제]: 고른 행에 삭제 표시를 한다. 고른 행이 모두 삭제 표시면 푼다.</summary>
+        private void ToggleDeleteSelectedRows()
+        {
+            var tab = _active;
+            var result = tab != null ? tab.ActiveResult : null;
+            if (result == null || result.Edit == null || !result.Edit.CanEdit || tab.Running || result.Grid == null)
+                return;
+            var rows = result.Grid.SelectedRows();
+            if (rows.Count == 0)
+            {
+                SetStatus(tab, WorkspaceLogic.TextStatus("삭제 표시할 행을 고르세요."));
+                return;
+            }
+            var unmark = rows.All(r => r.State == RowEditState.Deleted);
+            foreach (var row in rows)
+                row.MarkDeleted(!unmark);
+            RenderEditBar();
+            var count = rows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            SetStatus(tab, WorkspaceLogic.TextStatus(unmark
+                ? count + "행의 삭제 표시를 풀었습니다."
+                : count + "행에 삭제 표시를 했습니다 — [저장]하면 DELETE를 실행합니다(커밋 전)."));
+        }
+
+        /// <summary>
+        /// [저장]: 고친 행마다 UPDATE(바뀐 열만), 삭제 표시한 행마다 DELETE를 기본 키로 실행한다. 확인 창에 문장을 보인 뒤 차례로 실행하고,
+        /// 오류나 영향 행 수가 1이 아니면 그 행에서 멈춘다(이미 실행한 문장은 커밋 대기 — [롤백]으로 되돌릴 수 있다).
+        /// </summary>
+        private async Task SaveEditsAsync()
+        {
+            var tab = _active;
+            var result = tab != null ? tab.ActiveResult : null;
+            if (result == null || result.Edit == null || !result.Edit.CanEdit || tab.Running)
+                return;
+            var dbId = result.ResultDbId;
+            var profile = Profile(dbId);
+            if (profile == null)
+                return;
+            if (profile.ReadOnly)
+            {
+                SetStatus(tab, WorkspaceLogic.ReadOnlyStatus());
+                return;
+            }
+            var changes = new List<KeyValuePair<ResultGridRow, SqlQuery>>();
+            foreach (var row in result.Rows.Where(r => r.State != RowEditState.Unchanged).OrderBy(r => r.Number))
+            {
+                var query = row.State == RowEditState.Deleted
+                    ? RowEditLogic.DeleteStatement(result.Edit, row.OriginalValues)
+                    : RowEditLogic.UpdateStatement(result.Edit, row.OriginalValues, row.Values);
+                if (query != null)
+                    changes.Add(new KeyValuePair<ResultGridRow, SqlQuery>(row, query));
+            }
+            if (changes.Count == 0)
+            {
+                SetStatus(tab, WorkspaceLogic.TextStatus("저장할 변경이 없습니다."));
+                RenderEditBar();
+                return;
+            }
+            var updates = changes.Count(c => c.Key.State == RowEditState.Modified);
+            var deletes = changes.Count - updates;
+            var owner = Window.GetWindow(this);
+            if (!Dialogs.ConfirmRowEdits(owner, profile, WorkspaceLogic.QualifiedName(result.Edit.Owner, result.Edit.Name),
+                    string.Join(Environment.NewLine, changes.Select(c => RowEditLogic.Describe(c.Value))), updates, deletes))
+            {
+                AddMessage(dbId, "결과 편집 저장을 취소했습니다.", MessageKind.Info);
+                return;
+            }
+            // 확인 창을 띄운 사이 다른 실행이 시작됐거나 결과가 바뀌었을 수 있다
+            if (tab.Running || tab.ActiveResult != result)
+                return;
+            var session = CheckSession(tab, profile);
+            if (session == null)
+                return;
+
+            BeginRun(tab, session, dbId, false, 0);
+            var watch = tab.RunWatch;
+            var token = tab.RunCancel.Token;
+            var updated = 0;
+            var deleted = 0;
+            var stopped = false;
+            try
+            {
+                foreach (var change in changes)
+                {
+                    if (token.IsCancellationRequested)
+                    {
+                        AddMessage(dbId, "결과 편집 저장을 취소했습니다. 이미 보낸 변경은 커밋 대기입니다.", MessageKind.Error);
+                        stopped = true;
+                        break;
+                    }
+                    var row = change.Key;
+                    var query = change.Value;
+                    var started = watch.Elapsed;
+                    int affected;
+                    try
+                    {
+                        affected = await session.ExecuteDmlAsync(query, token);
+                    }
+                    catch (Exception ex) when (!(ex is SessionBusyException))
+                    {
+                        AddMessage(dbId, (DbSession.IsCancellation(ex) ? "취소됨: " : WorkspaceLogic.ErrorMessage(DbSession.DescribeError(ex), null)) + Environment.NewLine + RowEditLogic.Describe(query), MessageKind.Error);
+                        stopped = true;
+                        break;
+                    }
+                    var elapsed = watch.Elapsed - started;
+                    AddHistory(dbId, RowEditLogic.Describe(query), elapsed);
+                    if (affected != 1)
+                    {
+                        AddMessage(dbId, RowEditLogic.AffectedMismatch(affected) + Environment.NewLine + RowEditLogic.Describe(query), MessageKind.Error);
+                        stopped = true;
+                        break;
+                    }
+                    AddMessage(dbId, WorkspaceLogic.ExecutedMessage("1행 변경됨 (커밋 전)", elapsed, RowEditLogic.Describe(query)), MessageKind.Success);
+                    if (row.State == RowEditState.Deleted)
+                    {
+                        result.Rows.Remove(row);
+                        deleted++;
+                    }
+                    else
+                    {
+                        row.Saved();
+                        updated++;
+                    }
+                }
+                var summary = RowEditLogic.SavedMessage(updated, deleted);
+                AddMessage(dbId, summary + (stopped ? " — 오류가 난 행부터는 보내지 않았습니다(표시는 그대로)." : ""), stopped ? MessageKind.Error : MessageKind.Info);
+                SetStatus(tab, session.IsBroken ? WorkspaceLogic.BrokenStatus(profile.Name) : WorkspaceLogic.TextStatus(stopped ? "오류 — 메시지 탭을 보세요. " + summary : summary));
+                if (stopped)
+                    ShowPane(tab, WorkspacePane.Messages);
+                RefreshCursorStates(dbId);
+            }
+            catch (SessionBusyException)
+            {
+                SetStatus(tab, WorkspaceLogic.BusyOtherStatus(profile.Name));
+            }
+            finally
+            {
+                EndRun(tab);
+                RenderEditBar();
+            }
+        }
+
+        /// <summary>
+        /// 빠른 조회 결과에 편집 대상을 붙인다: 데이터 사전의 기본 키 열을 결과 열에 맞춘다. 조회 전에 읽어 둔 열 정보(metadata)가 없으면 편집 불가로 표시.
+        /// </summary>
+        private void AttachEditTarget(SqlTabState tab, OracleConnectionProfile profile, string owner, string objectName, string sql, List<ColumnInfo> metadata, string metadataError)
+        {
+            var result = tab.ActiveResult;
+            if (result == null || result.Columns == null || !string.Equals(result.Sql, sql, StringComparison.Ordinal))
+                return;
+            var provider = DbProviders.For(profile);
+            result.Edit = metadata == null
+                ? RowEditLogic.Unavailable(owner, objectName, "열 정보를 읽지 못해 편집할 수 없습니다: " + (metadataError ?? ""))
+                : RowEditLogic.Describe(owner, objectName, result.Columns, metadata, RowEditLogic.ParameterPrefix(provider.Kind));
+            if (result.Edit.CanEdit && result.Grid != null)
+                result.Grid.EnableEditMarkers(result.Rows.Count);
+            if (tab == _active)
+                RenderEditBar();
+        }
+
+        /// <summary>조회 전에 열 정보(기본 키)를 읽는다. 실패하면 null(error에 이유) — 조회는 그대로 한다.</summary>
+        private static async Task<List<ColumnInfo>> LoadColumnsAsync(DbSession session, OracleConnectionProfile profile, string owner, string objectName)
+        {
+            var provider = DbProviders.For(profile);
+            return await session.QueryAsync(provider.Metadata.Columns(owner, objectName), provider.Metadata.ReadColumn);
+        }
+    }
+}

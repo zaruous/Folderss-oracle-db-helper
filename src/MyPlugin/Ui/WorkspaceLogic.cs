@@ -261,7 +261,7 @@ namespace MyPlugin
             return string.IsNullOrEmpty(owner) ? QuoteIdentifier(name) : QuoteIdentifier(owner) + "." + QuoteIdentifier(name);
         }
 
-        /// <summary>트리에서 테이블·뷰를 두 번 눌렀을 때 편집기 맨 위에 넣는 문장. FETCH FIRST는 넣지 않는다(넣으면 다음 행을 가져올 수 없음).</summary>
+        /// <summary>트리 [SELECT 문 넣기]·Enter로 편집기 맨 위에 넣는 문장(빠른 조회 F1도 이 문장). FETCH FIRST는 넣지 않는다(넣으면 다음 행을 가져올 수 없음).</summary>
         public static string SelectStatement(string owner, string name)
         {
             return "SELECT *\n  FROM " + QualifiedName(owner, name) + ";\n\n";

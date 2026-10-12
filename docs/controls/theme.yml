@@ -1,0 +1,37 @@
+id: theme
+name: Theme
+title: 테마 연결·공용 화면 조각
+kind: helper
+source:
+  - src/MyPlugin/Ui/Theme.cs
+  - src/MyPlugin/Ui/SqlWorkspaceParts.cs
+  - src/MyPlugin/Ui/DbTreePanel.cs
+summary: >-
+  플러그인 화면 색을 Folderss 테마 키에 연결하는 도우미(Theme)와 여러 컨트롤이 함께 쓰는 화면 조각(WorkspaceUi·ShellUi).
+  새 컨트롤도 색을 직접 쓰지 말고 여기를 거쳐 테마 키에 연결한다.
+features:
+  - name: 테마 키 연결
+    description: >-
+      Foreground·Background·Text·Secondary·ApplyWindow가 SetResourceReference로 테마 키
+      (WindowBackground·PanelBackground·SurfaceBackground·ControlBackground·BorderBrush·PrimaryText·SecondaryText·DisabledTextBrush·AccentBrush·SelectionBrush·RowHoverBrush·AppFontFamily)에 연결한다.
+      테마를 바꾸면 열린 화면도 따라 바뀐다.
+  - name: 고정 의미 색
+    description: >-
+      Danger·Warning·Success, 결과 편집의 ModifiedRow·DeletedRow(반투명), 접속 색 표시(초록·노랑·빨강).
+      어두운·밝은 바탕 모두에서 읽히는 중간 톤으로 고정한다.
+  - name: DB 배지(DbBadge)
+    description: 색 표시가 있으면 그 색 바탕에 흰 글자, 없으면 읽기 전용은 회색 테두리, 그 밖은 강조색 테두리. 접속이 없으면 "대상 없음".
+  - name: WorkspaceUi
+    description: >-
+      고르는 버튼(SelectorButton, 고른 것만 강조색 밑줄), 주 동작 버튼(MakePrimary), 개수 표시(CountPill),
+      테마 항목 스타일을 바탕으로 내용을 가로로 채우는 스타일(StretchItemStyle).
+  - name: ShellUi
+    description: >-
+      테마 색 체크 상자(ThemedCheckBox), 작은 버튼, 주 동작 버튼, 검색어 강조·위험·진행 반투명 색, 파일 끌어다 놓기(EnableFileDrop).
+limits:
+  - >-
+    WPF 기본 템플릿에 색이 고정된 컨트롤(Calendar·DatePicker·CheckBox 체크 표시·MenuItem 하위 메뉴)은 테마 키만으로 바뀌지 않는다.
+    템플릿을 직접 주거나 테마 버튼으로 다시 그린다(date-time-box, shell-menu 참고).
+  - >-
+    Nord·Solarized 테마는 버튼 테두리색과 바탕색이 같아(대비 1.00) 버튼 경계가 보이지 않는다. Folderss 테마 파일의 문제다.
+related: [date-time-box, shell-menu, dialogs]

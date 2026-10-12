@@ -1,0 +1,79 @@
+id: db-tree-panel
+name: DbTreePanel
+title: DB 트리
+kind: composite
+source:
+  - src/MyPlugin/Ui/DbTreePanel.cs
+  - src/MyPlugin/Ui/TreeModel.cs
+  - src/MyPlugin/Ui/TreePanelLogic.cs
+  - src/MyPlugin/Ui/TreeLoaderLogic.cs
+base: System.Windows.Controls.Border
+used_by: [db-helper-view]
+summary: >-
+  왼쪽의 DB → 스키마 → 객체 묶음 → 객체 → 열 트리와 검색 막대.
+  평면 ListBox에 깊이만큼 들여 그리고, 한 줄은 TreeRowView가 그린다(가상화·재사용).
+features:
+  - name: 계층
+    description: >-
+      DB → 스키마(내 스키마 먼저, 내장 스키마는 숨김) → 테이블·뷰·시퀀스·프로시저/함수/패키지 → 열.
+  - name: 펼칠 때 불러오기
+    description: >-
+      펼칠 때 서버에서 읽어 캐시(DbTreeData)에 넣는다. 처음 1,000개를 보이고 [더 보기]로 더 읽는다.
+      그 사이 연결을 끊었거나 다시 연결했으면 결과를 버린다.
+  - name: 자리 지키기
+    description: >-
+      다시 그릴 때 같은 키의 행은 그 자리에서 내용만 바꿔 선택·포커스·스크롤 위치를 지킨다.
+      고르기만 할 때는 다시 그리지 않는다(두 번 누르기가 깨지지 않게).
+  - name: 검색
+    description: >-
+      연결된 DB마다 서버에서 스키마·객체(·열) 이름을 찾는다. 입력이 멈춘 뒤 300ms에 시작하고 이전 검색은 취소한다.
+      일치한 계층만 보이고 검색어 위치를 강조한다. 범위 콤보(스키마·객체 / 스키마·객체·열), [내장] 체크(Oracle 내장 스키마 포함).
+  - name: 여러 줄 고르기
+    description: Ctrl+클릭으로 하나씩, Shift+클릭·Shift+↑↓로 범위를 고른다(테이블 정의서 대상).
+  - name: 두 번 누르기
+    description: >-
+      연결 안 된(또는 끊긴) DB 행만 연결하고 펼친다. 테이블·뷰를 두 번 눌러도 아무것도 하지 않는다.
+  - name: 오른쪽 메뉴
+    description: >-
+      DB 이름(머리), 연결·다시 연결·연결 끊기. DB 행이면 GCM 정의서 만들기, 테이블·뷰면 빠른 조회·테이블 정보·SELECT 문 넣기.
+      테이블 정의서 만들기는 누른 행이 고른 행들 안에 있으면 고른 행 전부(같은 DB), 아니면 누른 행이 대상이다.
+  - name: 행 모양(TreeRowView)
+    description: >-
+      들여쓰기, ▶/▼(누르면 펼치기·접기), 종류 아이콘, 이름(검색어 강조), 보조 글자·배지, 오른쪽 끝 개수.
+      DB 행 왼쪽에 접속 색 띠, INVALID 객체는 위험색.
+keyboard:
+  - keys: Enter
+    action: 테이블·뷰는 SELECT 넣기, 더 보기는 불러오기, 연결 안 된 DB는 연결, 그 밖에는 펼치기·접기.
+  - keys: → / ←
+    action: 펼치기 / 접기.
+  - keys: F1
+    action: 테이블·뷰 빠른 조회(앞 100행, 결과 편집 가능).
+  - keys: F4
+    action: 테이블·뷰 정보 창(Oracle).
+  - keys: Shift+F10 또는 메뉴 키
+    action: 고른 행의 오른쪽 메뉴.
+  - keys: Esc
+    action: 검색 지우기.
+  - keys: 검색 칸에서 Enter / Shift+Enter
+    action: 다음 / 이전 일치로 이동.
+  - keys: 검색 칸에서 ↓
+    action: 트리로 포커스 이동.
+theme:
+  - part: 목록 바탕·글자
+    keys: [PanelBackground, PrimaryText, SecondaryText]
+  - part: 고른 행·마우스 올린 행
+    keys: [SelectionBrush, RowHoverBrush]
+  - part: 검색어 강조
+    keys: [ShellUi.HighlightTint (Theme.Warning 30%)]
+  - part: 커밋 대기·위험 배지 / 진행 중 배지
+    keys: [ShellUi.DangerTint, ShellUi.WarningTint]
+  - part: 내장 체크 상자
+    keys: [ShellUi.ThemedCheckBox (기본 CheckBox는 체크 표시 색이 고정이라 직접 템플릿)]
+limits:
+  - 열 검색은 ALL_TAB_COLUMNS 등을 조회해 느릴 수 있다.
+  - Oracle 11g처럼 ORACLE_MAINTAINED 열이 없으면 알려진 내장 스키마 목록으로 다시 묻는다.
+tests:
+  - tests/MyPlugin.Tests/TreeModelTests.cs
+  - tests/MyPlugin.Tests/TreePanelLogicTests.cs
+  - tests/MyPlugin.Tests/TreeLoaderLogicTests.cs
+related: [db-helper-view, sql-workspace, table-info-window, table-spec-dialog]

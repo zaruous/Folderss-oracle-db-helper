@@ -1,0 +1,44 @@
+# DB Helper 컨트롤 기술서 목록
+# 이 플러그인이 코드로 만드는 화면 컨트롤마다 파일 하나(<id>.yml).
+# 형식 검사: python3 scripts/check_controls_docs.py
+
+schema:
+  version: 1
+  required: [id, name, title, kind, source, summary, features]
+  fields:
+    id: 파일 이름과 같은 kebab-case 식별자.
+    name: 코드의 클래스 이름(여럿이면 대표 이름).
+    title: 화면에서 부르는 이름(한국어).
+    kind: "control | composite | dialog | window | menu | settings-page | helper"
+    source: 구현 파일(저장소 루트 기준 경로). 모두 있어야 한다.
+    base: 상속하거나 감싸는 WPF 형식. 정적 클래스면 생략.
+    used_by: 이 컨트롤을 쓰는 다른 컨트롤의 id.
+    summary: 한두 문장 요약.
+    features: "기능 목록. 항목마다 name·description."
+    keyboard: "단축키 목록. 항목마다 keys·action."
+    theme: "테마 연결. 항목마다 part·keys(Folderss 테마 키 또는 Theme 고정 색 이름)."
+    states: 화면에 드러나는 상태와 표시 방법.
+    limits: 하지 않는 것·알려진 제약.
+    verification: 단위 테스트 밖에서 확인한 것(측정·화면 확인)과 그 범위.
+    tests: 이 컨트롤의 로직을 시험하는 파일(저장소 루트 기준). 화면 자체는 단위 테스트가 없다.
+    related: 관련 컨트롤 id.
+
+controls:
+  - {id: db-helper-view, name: DbHelperView, kind: composite, title: DB Helper 창}
+  - {id: shell-menu, name: ShellMenu, kind: menu, title: 메뉴 막대·아이콘 막대}
+  - {id: db-tree-panel, name: DbTreePanel, kind: composite, title: DB 트리}
+  - {id: sql-workspace, name: SqlWorkspace, kind: composite, title: SQL 작업 영역}
+  - {id: result-grid, name: ResultGridView, kind: control, title: 결과 그리드}
+  - {id: result-edit-bar, name: SqlWorkspace (편집 막대), kind: control, title: 결과 편집 막대}
+  - {id: row-edit-dialog, name: RowEditDialog, kind: dialog, title: 행 편집 창}
+  - {id: date-time-box, name: DateTimeBox, kind: control, title: 날짜·시각 입력}
+  - {id: result-message-list, name: ResultMessageList, kind: control, title: 메시지 탭}
+  - {id: result-history-list, name: ResultHistoryList, kind: control, title: 기록 탭}
+  - {id: dialogs, name: Dialogs, kind: dialog, title: 확인·안내 대화상자}
+  - {id: table-info-window, name: TableInfoWindow, kind: window, title: 테이블 정보 창}
+  - {id: table-spec-dialog, name: TableSpecDialog, kind: dialog, title: 테이블 정의서 만들기}
+  - {id: code-spec-dialog, name: CodeSpecDialog, kind: dialog, title: GCM 정의서 만들기}
+  - {id: connection-manager, name: ConnectionManager, kind: dialog, title: 접속 관리}
+  - {id: connection-settings-page, name: ConnectionSettingsPage, kind: settings-page, title: 설정 창 DB 접속 탭}
+  - {id: help-window, name: HelpWindow, kind: window, title: 도움말 창}
+  - {id: theme, name: Theme, kind: helper, title: 테마 연결·공용 화면 조각}

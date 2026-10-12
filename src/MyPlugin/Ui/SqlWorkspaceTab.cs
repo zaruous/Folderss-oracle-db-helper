@@ -287,6 +287,25 @@ namespace MyPlugin
         /// <summary>이 결과에서 "가져온 행 안에서만 정렬" 안내를 이미 했음.</summary>
         public bool SortNoticeShown { get; set; }
 
+        /// <summary>빠른 조회(F1) 결과의 편집 대상. 편집할 수 없는 결과(일반 실행)는 null.</summary>
+        public EditableTable Edit { get; set; }
+
+        public int ModifiedCount
+        {
+            get { return Rows.Count(r => r.State == RowEditState.Modified); }
+        }
+
+        public int DeletedCount
+        {
+            get { return Rows.Count(r => r.State == RowEditState.Deleted); }
+        }
+
+        /// <summary>DB에 보내지 않은 수정·삭제 표시가 있음.</summary>
+        public bool HasPendingEdits
+        {
+            get { return Rows.Any(r => r.State != RowEditState.Unchanged); }
+        }
+
         public bool HasMoreRows
         {
             get { return Cursor != null && !CursorReleased && !Cursor.IsClosed && Cursor.HasMore; }

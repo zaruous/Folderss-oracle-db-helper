@@ -1,0 +1,1 @@
+- 화면 컨트롤을 추가·변경하면 `docs/controls/<id>.yml`(형식은 `docs/controls/index.yml`)을 함께 갱신하고 `python3 scripts/check_controls_docs.py`로 검사한다.

@@ -4,13 +4,14 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 
 namespace MyPlugin
 {
     /// <summary>
     /// 이 플러그인 전용 날짜·시각 입력 컨트롤: 글 칸(그리드 표시 형식 "yyyy-MM-dd HH:mm:ss[.fffffff]", 값의 원본) + 📅 버튼 + 팝업.
-    /// 팝업은 달력(◀◀ 1년 · ◀ 1달 · 오늘 강조 · 고른 날 선택색), 시각 칸(HH:mm:ss[.fff]), [오늘]·[지금]·[확인].
+    /// 팝업은 달력(◀◀ 1년 · ◀ 1달 · 오늘은 밑줄 · 고른 날은 선택색 바탕 + 강조색 테두리), 시각 칸(HH:mm:ss[.fff]), [오늘]·[지금]·[확인].
     /// WPF 기본 Calendar·DatePicker는 템플릿에 색이 고정돼 Folderss 테마를 입힐 수 없어 테마 Button·글자색·선택색으로 직접 그린다.
     /// 값 검사는 하지 않는다(편집 창이 [확인] 때 RowEditLogic.Validate로 한다). 팝업에서 값을 넣으면 Picked를 올린다.
     /// </summary>
@@ -80,7 +81,8 @@ namespace MyPlugin
             var root = new StackPanel { Margin = new Thickness(8) };
             var border = new Border { Child = root, BorderThickness = new Thickness(1), SnapsToDevicePixels = true };
             Theme.Background(border, Theme.SurfaceBackground);
-            border.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
+            // 팝업 바탕(Surface)과 창 바탕의 대비가 1.1~1.5라 BorderBrush 테두리로는 팝업 가장자리가 안 보인다(7개 테마 측정) — 흐린 글자색으로 둘러 2.0~3.9로
+            border.SetResourceReference(Border.BorderBrushProperty, Theme.DisabledText);
 
             // ◀◀ ◀ yyyy년 M월 ▶ ▶▶
             var header = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
@@ -158,8 +160,9 @@ namespace MyPlugin
             timeRow.Children.Add(_time);
             root.Children.Add(timeRow);
 
-            _error = Theme.Text("", Theme.SecondaryText);
-            _error.Foreground = Theme.Danger;
+            // 오류 글은 테마 글자색, 앞의 ⚠만 위험색: 고정 위험색 글자는 밝은 테마(Light·GitHub) 바탕에서 대비 3.0으로 읽기 어렵다
+            _error = Theme.Text("");
+            _error.TextWrapping = TextWrapping.Wrap;
             _error.FontSize = 11.5;
             _error.Margin = new Thickness(2, 4, 0, 0);
             _error.Visibility = Visibility.Collapsed;
@@ -207,9 +210,10 @@ namespace MyPlugin
             foreach (var day in RowEditLogic.MonthGrid(month))
             {
                 var date = day;
+                var label = new TextBlock { Text = date.Day.ToString(CultureInfo.InvariantCulture) };
                 var button = new Button
                 {
-                    Content = date.Day.ToString(CultureInfo.InvariantCulture),
+                    Content = label,
                     Padding = new Thickness(0),
                     Margin = new Thickness(1),
                     MinWidth = 30,
@@ -219,11 +223,18 @@ namespace MyPlugin
                 };
                 if (date.Month != month.Month)
                     Theme.Foreground(button, Theme.SecondaryText);
+                // 고른 날: 선택색 바탕만으로는 버튼 바탕과의 대비가 1.0~1.9라(Nord·Solarized는 거의 같음) 강조색 2px 테두리와 굵은 글자를 함께 쓴다
                 if (_selected.HasValue && date == _selected.Value.Date)
+                {
                     button.SetResourceReference(Control.BackgroundProperty, Theme.Selection);
+                    button.SetResourceReference(Control.BorderBrushProperty, Theme.Accent);
+                    button.BorderThickness = new Thickness(2);
+                    label.FontWeight = FontWeights.SemiBold;
+                }
+                // 오늘: 밑줄(색에 기대지 않아 고른 날의 강조색 테두리와 겹쳐도 구분된다)
                 if (date == DateTime.Today)
                 {
-                    button.SetResourceReference(Control.BorderBrushProperty, Theme.Accent);
+                    label.TextDecorations = TextDecorations.Underline;
                     button.ToolTip = "오늘";
                 }
                 button.Click += (s, e) => Apply(date);
@@ -237,7 +248,9 @@ namespace MyPlugin
             TimeSpan time;
             if (!RowEditLogic.TryParseTime(_time.Text, out time))
             {
-                _error.Text = "시각 형식이 아닙니다(HH:mm:ss): " + _time.Text;
+                _error.Inlines.Clear();
+                _error.Inlines.Add(new Run("⚠ ") { Foreground = Theme.Danger });
+                _error.Inlines.Add(new Run("시각 형식이 아닙니다(HH:mm:ss): " + _time.Text));
                 _error.Visibility = Visibility.Visible;
                 _time.Focus();
                 _time.SelectAll();

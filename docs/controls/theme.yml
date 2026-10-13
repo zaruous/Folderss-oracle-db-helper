@@ -17,7 +17,7 @@ features:
       테마를 바꾸면 열린 화면도 따라 바뀐다.
   - name: 고정 의미 색
     description: >-
-      Danger·Warning·Success, 결과 편집의 ModifiedRow·DeletedRow(반투명), 접속 색 표시(초록·노랑·빨강).
+      Danger·Warning·Success, 결과 편집의 ModifiedRow·DeletedRow·InsertedRow(반투명), 접속 색 표시(초록·노랑·빨강).
       어두운·밝은 바탕 모두에서 읽히는 중간 톤으로 고정한다.
   - name: DB 배지(DbBadge)
     description: 색 표시가 있으면 그 색 바탕에 흰 글자, 없으면 읽기 전용은 회색 테두리, 그 밖은 강조색 테두리. 접속이 없으면 "대상 없음".

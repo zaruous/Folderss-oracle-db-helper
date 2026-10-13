@@ -11,6 +11,7 @@ namespace MyPlugin
     /// <summary>
     /// 결과 행 편집 창(빠른 조회 F1의 [편집]). 열마다 이름(기본 키는 🔑)·형식과 값 칸, NULL 체크. 편집할 수 없는 칸(LOB 등 형식, 잘려 보이는 값)은 읽기 전용.
     /// [확인]은 숫자·날짜 형식을 검사해 틀리면 그 칸에 머문다. 돌려주는 값은 그리드 표시 문자열(null = NULL) — 저장할 때 형식에 맞춰 바인드한다.
+    /// 새 행([행 추가]·[복제], insert = true)은 NULL 칸도 바로 입력할 수 있게 비워 두고, 빈 칸은 NULL로 돌려준다(INSERT에서 빠져 DB 기본값).
     /// </summary>
     internal static class RowEditDialog
     {
@@ -24,16 +25,18 @@ namespace MyPlugin
             public bool Editable;
         }
 
-        /// <summary>고친 값(열 순서, NULL은 null). 취소면 null.</summary>
-        public static string[] Show(Window owner, OracleConnectionProfile profile, EditableTable table, string[] values)
+        /// <summary>고친 값(열 순서, NULL은 null). 취소면 null. title은 창 제목 앞머리("행 편집"·"행 추가"·"행 복제").</summary>
+        public static string[] Show(Window owner, OracleConnectionProfile profile, EditableTable table, string[] values, bool insert = false, string title = "행 편집")
         {
             if (table == null || values == null)
                 return null;
-            var window = DialogKit.Create(owner, DialogKit.TitleFor("행 편집 · " + WorkspaceLogic.QualifiedName(table.Owner, table.Name), profile), 620);
+            var window = DialogKit.Create(owner, DialogKit.TitleFor(title + " · " + WorkspaceLogic.QualifiedName(table.Owner, table.Name), profile), 620);
             window.ResizeMode = ResizeMode.CanResize;
             window.MinWidth = 480;
             var body = DialogKit.Body(window);
             // 접속 이름은 창 제목(행 편집 · 스키마.테이블 · 접속)에 있으므로 본문에는 설명을 두지 않는다
+            if (insert)
+                body.Children.Add(DialogKit.Hint("빈 칸·NULL인 열은 INSERT에서 빼어 DB 기본값(자동 번호 포함, 없으면 NULL)이 들어갑니다. 🔑 기본 키 값을 확인하세요.", 0));
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MaxWidth = 220 });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -75,7 +78,7 @@ namespace MyPlugin
                     VerticalScrollBarVisibility = multiline ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled,
                     VerticalContentAlignment = VerticalAlignment.Center,
                     IsReadOnly = blocked != null,
-                    IsEnabled = value != null || blocked != null
+                    IsEnabled = value != null || blocked != null || insert
                 };
                 if (kind == ColumnValueKind.Number)
                     box.HorizontalContentAlignment = HorizontalAlignment.Right;
@@ -95,7 +98,7 @@ namespace MyPlugin
                 var isNull = new CheckBox
                 {
                     Content = "NULL",
-                    IsChecked = value == null,
+                    IsChecked = value == null && !insert,
                     IsEnabled = blocked == null,
                     Margin = new Thickness(8, 6, 0, 0),
                     VerticalAlignment = VerticalAlignment.Top
@@ -145,7 +148,7 @@ namespace MyPlugin
                 {
                     if (!field.Editable)
                         continue;
-                    var text = field.Null.IsChecked == true ? null : field.Box.Text;
+                    var text = field.Null.IsChecked == true || (insert && field.Box.Text.Length == 0) ? null : field.Box.Text;
                     var reason = RowEditLogic.Validate(table.KindAt(field.Index), text);
                     if (reason != null)
                     {

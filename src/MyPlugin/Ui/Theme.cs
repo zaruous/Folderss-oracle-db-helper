@@ -39,6 +39,7 @@ namespace MyPlugin
         /// <summary>결과 편집: 고친 행·삭제 표시한 행의 바탕(반투명이라 어두운·밝은 테마 모두에서 드러난다).</summary>
         public static readonly Brush ModifiedRow = Frozen(0x66, 0xD1, 0x9A, 0x66);
         public static readonly Brush DeletedRow = Frozen(0x66, 0xE0, 0x6C, 0x75);
+        public static readonly Brush InsertedRow = Frozen(0x66, 0x3F, 0xB2, 0x7F);
 
         private static readonly Brush Green = Frozen(0x2E, 0xA0, 0x5B);
         private static readonly Brush Yellow = Frozen(0xC9, 0x93, 0x0A);

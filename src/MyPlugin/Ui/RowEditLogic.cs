@@ -14,7 +14,9 @@ namespace MyPlugin
         /// <summary>값을 고쳤고 아직 DB에 보내지 않음.</summary>
         Modified,
         /// <summary>삭제 표시(저장하면 DELETE).</summary>
-        Deleted
+        Deleted,
+        /// <summary>[행 추가]·[복제]로 만든 새 행(저장하면 INSERT).</summary>
+        Inserted
     }
 
     /// <summary>결과 열의 값을 어떤 .NET 값으로 바인드할지(표시 문자열 → DB 값).</summary>
@@ -345,6 +347,110 @@ namespace MyPlugin
             return query;
         }
 
+        /// <summary>
+        /// 새 행의 INSERT 문(바인드 i0, i1 …). 값이 NULL인 열과 편집할 수 없는 형식(LOB 등)의 열은 빼서
+        /// DB 기본값·자동 번호(없으면 NULL)가 들어가게 한다. 넣을 값이 하나도 없으면 null.
+        /// </summary>
+        public static SqlQuery InsertStatement(EditableTable table, string[] values)
+        {
+            if (table == null || !table.CanEdit || values == null)
+                return null;
+            var names = new List<string>();
+            var binds = new List<string>();
+            var query = new SqlQuery();
+            for (var i = 0; i < table.Columns.Count && i < values.Length; i++)
+            {
+                if (values[i] == null || table.KindAt(i) == ColumnValueKind.Unsupported)
+                    continue;
+                var name = "i" + binds.Count.ToString(Inv);
+                names.Add(WorkspaceLogic.QuoteIdentifier(table.Columns[i].Name));
+                binds.Add(table.ParameterPrefix + name);
+                query.Parameters.Add(new KeyValuePair<string, object>(name, ToDbValue(table.KindAt(i), values[i])));
+            }
+            if (names.Count == 0)
+                return null;
+            query.Sql = "INSERT INTO " + WorkspaceLogic.QualifiedName(table.Owner, table.Name) + " (" + string.Join(", ", names) + ") VALUES (" + string.Join(", ", binds) + ")";
+            return query;
+        }
+
+        /// <summary>
+        /// [복제]: 새 행의 처음 값. 편집할 수 없는 형식(LOB 등)과 잘려 보이는 값은 원래 값을 알 수 없으므로 NULL로 비운다
+        /// (그대로 두면 "…(전체 n자)"가 붙은 표시 글이 INSERT된다).
+        /// </summary>
+        public static string[] CopyForInsert(EditableTable table, string[] values)
+        {
+            var copy = new string[table != null ? table.Columns.Count : 0];
+            for (var i = 0; i < copy.Length; i++)
+            {
+                var value = values != null && i < values.Length ? values[i] : null;
+                copy[i] = value != null && CanEditValue(table.KindAt(i), value) ? value : null;
+            }
+            return copy;
+        }
+
+        /// <summary>
+        /// 오른쪽 메뉴 [INSERT 문 만들기]: 행마다 값을 글자로 쓴 INSERT 문 한 줄(끝에 ';'). 행을 그대로 옮기는 용도라 NULL도 NULL로 쓴다.
+        /// 편집할 수 없는 형식(LOB 등)과 잘려 보이는 값은 원래 값을 몰라 빼고, 줄 끝 주석에 뺀 열과 이유를 적는다. 넣을 열이 없는 행은 주석 한 줄.
+        /// </summary>
+        public static string InsertScript(string owner, string name, IList<ResultColumn> columns, IEnumerable<string[]> rows, string providerKind)
+        {
+            var text = new StringBuilder();
+            var table = WorkspaceLogic.QualifiedName(owner, name);
+            foreach (var values in rows ?? Enumerable.Empty<string[]>())
+            {
+                var names = new List<string>();
+                var literals = new List<string>();
+                var skipped = new List<string>();
+                for (var i = 0; i < columns.Count; i++)
+                {
+                    var value = values != null && i < values.Length ? values[i] : null;
+                    var kind = KindOf(columns[i].TypeLabel);
+                    if (kind == ColumnValueKind.Unsupported)
+                    {
+                        skipped.Add(columns[i].Name + "(" + columns[i].TypeLabel + ")");
+                        continue;
+                    }
+                    if (value != null && IsTruncated(value))
+                    {
+                        skipped.Add(columns[i].Name + "(잘린 값)");
+                        continue;
+                    }
+                    names.Add(WorkspaceLogic.QuoteIdentifier(columns[i].Name));
+                    literals.Add(SqlLiteral(kind, columns[i].TypeLabel, value, providerKind));
+                }
+                var note = skipped.Count > 0 ? "  -- 뺀 열: " + string.Join(", ", skipped) : "";
+                if (names.Count == 0)
+                    text.Append("-- 넣을 수 있는 열이 없는 행").Append(note).Append('\n');
+                else
+                    text.Append("INSERT INTO ").Append(table).Append(" (").Append(string.Join(", ", names)).Append(") VALUES (")
+                        .Append(string.Join(", ", literals)).Append(");").Append(note).Append('\n');
+            }
+            return text.ToString();
+        }
+
+        /// <summary>
+        /// 값 하나의 SQL 글자: NULL, 숫자는 그대로, 글은 '…'(작은따옴표 두 번, SQL Server는 N'…'),
+        /// 날짜는 Oracle TO_DATE·TO_TIMESTAMP(초 미만이 있을 때), SQL Server CAST('…' AS DATETIME2)(DATETIME 열에 7자리 초 미만 글을 바로 넣으면 실패), 그 밖은 '…'.
+        /// </summary>
+        public static string SqlLiteral(ColumnValueKind kind, string typeLabel, string value, string providerKind)
+        {
+            if (value == null)
+                return "NULL";
+            if (kind == ColumnValueKind.Number)
+                return value;
+            var quoted = "'" + value.Replace("'", "''") + "'";
+            var mssql = string.Equals(providerKind, "mssql", StringComparison.OrdinalIgnoreCase);
+            if (kind == ColumnValueKind.DateTime)
+            {
+                if (string.Equals(providerKind, "oracle", StringComparison.OrdinalIgnoreCase))
+                    return value.IndexOf('.') >= 0
+                        ? "TO_TIMESTAMP(" + quoted + ", 'YYYY-MM-DD HH24:MI:SS.FF')"
+                        : "TO_DATE(" + quoted + ", 'YYYY-MM-DD HH24:MI:SS')";
+                return mssql ? "CAST(" + quoted + " AS DATETIME2)" : quoted;
+            }
+            return mssql ? "N" + quoted : quoted;
+        }
+
         /// <summary>기본 키의 원래 값으로 행 하나를 지우는 DELETE 문.</summary>
         public static SqlQuery DeleteStatement(EditableTable table, string[] original)
         {
@@ -400,10 +506,12 @@ namespace MyPlugin
             return Convert.ToString(value, Inv);
         }
 
-        /// <summary>편집 막대의 요약: "수정 2 · 삭제 1" (아무것도 없으면 "").</summary>
-        public static string PendingSummary(int modified, int deleted)
+        /// <summary>편집 막대의 요약: "추가 1 · 수정 2 · 삭제 1" (아무것도 없으면 "").</summary>
+        public static string PendingSummary(int modified, int deleted, int inserted = 0)
         {
             var parts = new List<string>();
+            if (inserted > 0)
+                parts.Add("추가 " + inserted.ToString(Inv));
             if (modified > 0)
                 parts.Add("수정 " + modified.ToString(Inv));
             if (deleted > 0)
@@ -411,14 +519,16 @@ namespace MyPlugin
             return string.Join(" · ", parts);
         }
 
-        /// <summary>저장 뒤 상태줄·메시지: "저장: UPDATE 2행 · DELETE 1행 (커밋 전 — [커밋]으로 확정, [롤백]으로 취소)".</summary>
-        public static string SavedMessage(int updated, int deleted)
+        /// <summary>저장 뒤 상태줄·메시지: "저장: DELETE 1행 · UPDATE 2행 · INSERT 1행 (커밋 전 — [커밋]으로 확정, [롤백]으로 취소)".</summary>
+        public static string SavedMessage(int updated, int deleted, int inserted = 0)
         {
             var parts = new List<string>();
-            if (updated > 0)
-                parts.Add("UPDATE " + updated.ToString(Inv) + "행");
             if (deleted > 0)
                 parts.Add("DELETE " + deleted.ToString(Inv) + "행");
+            if (updated > 0)
+                parts.Add("UPDATE " + updated.ToString(Inv) + "행");
+            if (inserted > 0)
+                parts.Add("INSERT " + inserted.ToString(Inv) + "행");
             return "저장: " + (parts.Count == 0 ? "변경 없음" : string.Join(" · ", parts) + " (커밋 전 — [커밋]으로 확정, [롤백]으로 취소)");
         }
 

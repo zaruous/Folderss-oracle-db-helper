@@ -25,13 +25,17 @@ features:
       Ctrl+C·오른쪽 메뉴로 선택한 행, 오른쪽 메뉴로 전체(머리글 포함)를 TSV로 복사한다. 화면 순서를 따른다.
       오른쪽 메뉴 [셀 복사 (열 이름)]는 오른쪽 클릭한 칸 하나의 원래 값을 복사한다(줄바꿈·탭 유지, NULL은 빈 글).
       칸 밖이나 키보드(Shift+F10)로 연 메뉴에서는 꺼진다.
+  - name: 메뉴 확장(AddMenuAction)
+    description: >-
+      쓰는 쪽이 오른쪽 메뉴 끝(구분선 뒤)에 고른 행으로 하는 동작을 붙인다. 조건이 거짓이면 숨기고 고른 행이 없으면 꺼진다.
+      SQL 작업 영역은 빠른 조회(F1) 결과에만 [INSERT 문 만들기 (선택한 행 → 클립보드)]를 붙인다.
   - name: 찾기 강조(ShowFound)
     description: >-
       찾기 팝업이 가리킨 칸: 그 행만 고르고 보이게 세로로, 칸이 보이게 가로로 스크롤한 뒤 칸 바탕을 강조한다(ResultGridRow.FoundColumn).
       키보드 포커스는 찾기 상자에 두고, 닫을 때 찾은 행으로 옮긴다(FocusFound).
   - name: 편집 상태(ResultGridRow)
     description: >-
-      행은 지금 값(Values)과 원래 값(Original), 상태(변경 없음·수정·삭제)를 가진다.
+      행은 지금 값(Values)과 원래 값(Original), 상태(변경 없음·수정·삭제·새 행)를 가진다.
       칸은 Values에 바인딩해 편집하면 바로 바뀐다. 편집할 수 있는 결과면 번호 열에 표시 자리(✎·✖)를 둔다.
 keyboard:
   - keys: Ctrl+C
@@ -55,6 +59,8 @@ theme:
     keys: [ShellUi.HighlightTint (경고색 30%)]
   - part: 삭제 표시한 행 바탕 / ✖·취소선
     keys: [Theme.DeletedRow (위험색 40% 반투명), Theme.Danger]
+  - part: 새 행 바탕 / ＋
+    keys: [Theme.InsertedRow (성공색 40% 반투명), Theme.Success]
 states:
   - 수정한 행은 주황 바탕과 번호 앞 ✎, 삭제 표시한 행은 빨강 바탕과 ✖·취소선.
   - 고른 행은 선택색이 바탕색보다 앞서지만 번호 열 표시(✎·✖)는 남는다.

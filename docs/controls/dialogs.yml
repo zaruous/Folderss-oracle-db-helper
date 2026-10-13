@@ -21,7 +21,7 @@ features:
     description: 탭을 닫기 전 [저장]·[저장 안 함]·[취소]. 기본 버튼은 [취소].
   - name: 결과 편집 저장(ConfirmRowEdits)
     description: >-
-      제목 "결과 편집 저장 · 접속"(본문에 배지 없음), 보낼 문장들(바인드 값 포함), 롤백 안내.
+      제목 "결과 편집 저장 · 접속"(본문에 배지 없음), "DELETE m행 · UPDATE n행 · INSERT k행", 보낼 문장들(바인드 값 포함, 실행 순서대로), 롤백 안내.
       삭제가 있으면 경고 + 확인 체크.
   - name: 다시 조회 전 변경 버리기(ConfirmDiscardEdits)
     description: >-

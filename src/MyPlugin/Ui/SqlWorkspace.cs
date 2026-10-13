@@ -2457,6 +2457,9 @@ namespace MyPlugin
                 var owner = tab;
                 tab.Grid = new ResultGridView(all => CopyRows(owner, all), text => CopyText(text, null));
                 tab.Grid.Sorted += (s, e) => Safe(() => OnGridSorted(owner));
+                // 그리드는 결과마다 하나 — 메뉴는 이 결과가 빠른 조회(F1, 테이블 하나)일 때만
+                var result = tab.ActiveResult;
+                tab.Grid.AddMenuAction("INSERT 문 만들기 (선택한 행 → 클립보드)", () => result.Edit != null, () => Safe(() => CopyInsertScript(result)));
                 tab.Grid.View.Visibility = Visibility.Collapsed;
                 _gridHost.Children.Add(tab.Grid.View);
             }

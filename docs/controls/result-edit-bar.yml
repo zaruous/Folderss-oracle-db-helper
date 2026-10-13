@@ -38,6 +38,12 @@ features:
       DELETE·UPDATE의 WHERE는 기본 키의 원래 값이고 값은 바인드 변수로 보낸다(Oracle·PostgreSQL ':', SQL Server '@').
       INSERT는 NULL(빈 칸)인 열과 LOB 같은 편집할 수 없는 형식의 열을 빼서 DB 기본값·자동 번호가 들어가게 한다.
       실행한 변경은 편집기 DML과 같이 커밋 대기로 센다.
+  - name: INSERT 문 만들기(오른쪽 메뉴)
+    description: >-
+      빠른 조회(F1, 테이블 하나) 결과에서 행을 고르고 오른쪽 메뉴 → 고른 행(화면 순서, 고친 값 그대로)마다 값을 글자로 쓴
+      INSERT 문 한 줄을 클립보드에 넣는다. 기본 키가 없어 편집할 수 없는 테이블에서도 된다.
+      NULL은 NULL로, 글은 '…'(SQL Server N'…'), 날짜는 Oracle TO_DATE·TO_TIMESTAMP, SQL Server CAST(… AS DATETIME2).
+      LOB 같은 편집할 수 없는 형식·잘려 보이는 값은 빼고 줄 끝 주석에 적는다.
   - name: WHERE 칸·다시 조회
     description: >-
       조건을 넣고 Enter나 [다시 조회]를 누르면 "SELECT * FROM 테이블 WHERE (조건)"을 빠른 조회처럼 실행한다(앞 100행, 편집 대상 다시 정함).

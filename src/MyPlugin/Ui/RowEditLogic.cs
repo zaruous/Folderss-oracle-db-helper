@@ -388,6 +388,69 @@ namespace MyPlugin
             return copy;
         }
 
+        /// <summary>
+        /// 오른쪽 메뉴 [INSERT 문 만들기]: 행마다 값을 글자로 쓴 INSERT 문 한 줄(끝에 ';'). 행을 그대로 옮기는 용도라 NULL도 NULL로 쓴다.
+        /// 편집할 수 없는 형식(LOB 등)과 잘려 보이는 값은 원래 값을 몰라 빼고, 줄 끝 주석에 뺀 열과 이유를 적는다. 넣을 열이 없는 행은 주석 한 줄.
+        /// </summary>
+        public static string InsertScript(string owner, string name, IList<ResultColumn> columns, IEnumerable<string[]> rows, string providerKind)
+        {
+            var text = new StringBuilder();
+            var table = WorkspaceLogic.QualifiedName(owner, name);
+            foreach (var values in rows ?? Enumerable.Empty<string[]>())
+            {
+                var names = new List<string>();
+                var literals = new List<string>();
+                var skipped = new List<string>();
+                for (var i = 0; i < columns.Count; i++)
+                {
+                    var value = values != null && i < values.Length ? values[i] : null;
+                    var kind = KindOf(columns[i].TypeLabel);
+                    if (kind == ColumnValueKind.Unsupported)
+                    {
+                        skipped.Add(columns[i].Name + "(" + columns[i].TypeLabel + ")");
+                        continue;
+                    }
+                    if (value != null && IsTruncated(value))
+                    {
+                        skipped.Add(columns[i].Name + "(잘린 값)");
+                        continue;
+                    }
+                    names.Add(WorkspaceLogic.QuoteIdentifier(columns[i].Name));
+                    literals.Add(SqlLiteral(kind, columns[i].TypeLabel, value, providerKind));
+                }
+                var note = skipped.Count > 0 ? "  -- 뺀 열: " + string.Join(", ", skipped) : "";
+                if (names.Count == 0)
+                    text.Append("-- 넣을 수 있는 열이 없는 행").Append(note).Append('\n');
+                else
+                    text.Append("INSERT INTO ").Append(table).Append(" (").Append(string.Join(", ", names)).Append(") VALUES (")
+                        .Append(string.Join(", ", literals)).Append(");").Append(note).Append('\n');
+            }
+            return text.ToString();
+        }
+
+        /// <summary>
+        /// 값 하나의 SQL 글자: NULL, 숫자는 그대로, 글은 '…'(작은따옴표 두 번, SQL Server는 N'…'),
+        /// 날짜는 Oracle TO_DATE·TO_TIMESTAMP(초 미만이 있을 때), SQL Server CAST('…' AS DATETIME2)(DATETIME 열에 7자리 초 미만 글을 바로 넣으면 실패), 그 밖은 '…'.
+        /// </summary>
+        public static string SqlLiteral(ColumnValueKind kind, string typeLabel, string value, string providerKind)
+        {
+            if (value == null)
+                return "NULL";
+            if (kind == ColumnValueKind.Number)
+                return value;
+            var quoted = "'" + value.Replace("'", "''") + "'";
+            var mssql = string.Equals(providerKind, "mssql", StringComparison.OrdinalIgnoreCase);
+            if (kind == ColumnValueKind.DateTime)
+            {
+                if (string.Equals(providerKind, "oracle", StringComparison.OrdinalIgnoreCase))
+                    return value.IndexOf('.') >= 0
+                        ? "TO_TIMESTAMP(" + quoted + ", 'YYYY-MM-DD HH24:MI:SS.FF')"
+                        : "TO_DATE(" + quoted + ", 'YYYY-MM-DD HH24:MI:SS')";
+                return mssql ? "CAST(" + quoted + " AS DATETIME2)" : quoted;
+            }
+            return mssql ? "N" + quoted : quoted;
+        }
+
         /// <summary>기본 키의 원래 값으로 행 하나를 지우는 DELETE 문.</summary>
         public static SqlQuery DeleteStatement(EditableTable table, string[] original)
         {

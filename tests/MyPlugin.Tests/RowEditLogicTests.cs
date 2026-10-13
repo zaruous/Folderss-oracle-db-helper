@@ -182,6 +182,40 @@ namespace MyPlugin.Tests
         }
 
         [Fact]
+        public void InsertScript_WritesLiteralsPerProvider()
+        {
+            var columns = Columns("ID:NUMBER", "NAME:VARCHAR2(10)", "HIRED:DATE", "AT:TIMESTAMP(6)", "MEMO:VARCHAR2(10)");
+            var rows = new[]
+            {
+                new[] { "7", "O'Neil", "2024-01-02 03:04:05", "2024-01-02 03:04:05.123", null },
+                new[] { "8", "줄\n바꿈", null, null, "x" }
+            };
+
+            var oracle = RowEditLogic.InsertScript("HR", "EMP", columns, rows, "oracle");
+            Assert.Equal(
+                "INSERT INTO HR.EMP (ID, NAME, HIRED, AT, MEMO) VALUES (7, 'O''Neil', TO_DATE('2024-01-02 03:04:05', 'YYYY-MM-DD HH24:MI:SS'), TO_TIMESTAMP('2024-01-02 03:04:05.123', 'YYYY-MM-DD HH24:MI:SS.FF'), NULL);\n"
+                + "INSERT INTO HR.EMP (ID, NAME, HIRED, AT, MEMO) VALUES (8, '줄\n바꿈', NULL, NULL, 'x');\n", oracle);
+
+            // SQL Server: 글은 N'…', 날짜는 DATETIME2로 바꿔 넣는다
+            var mssql = RowEditLogic.InsertScript("dbo", "EMP", Columns("ID:int", "NAME:nvarchar(10)", "HIRED:datetime"), new[] { new[] { "1", "김", "2024-01-02 00:00:00.0033333" } }, "mssql");
+            Assert.Equal("INSERT INTO \"dbo\".EMP (ID, NAME, HIRED) VALUES (1, N'김', CAST('2024-01-02 00:00:00.0033333' AS DATETIME2));\n", mssql);
+
+            // PostgreSQL: 날짜도 '…'
+            Assert.Equal("'2024-01-02 03:04:05'", RowEditLogic.SqlLiteral(ColumnValueKind.DateTime, "timestamp", "2024-01-02 03:04:05", "postgres"));
+        }
+
+        [Fact]
+        public void InsertScript_SkipsLobAndTruncatedValuesWithNote()
+        {
+            var columns = Columns("ID:NUMBER", "PHOTO:BLOB", "NOTE:VARCHAR2(4000)");
+            var script = RowEditLogic.InsertScript("HR", "EMP", columns, new[] { new[] { "7", "(BLOB 10바이트)", "abc…(전체 9000자)" } }, "oracle");
+            Assert.Equal("INSERT INTO HR.EMP (ID) VALUES (7);  -- 뺀 열: PHOTO(BLOB), NOTE(잘린 값)\n", script);
+
+            var none = RowEditLogic.InsertScript("HR", "T", Columns("PHOTO:BLOB"), new[] { new[] { "(BLOB)" } }, "oracle");
+            Assert.Equal("-- 넣을 수 있는 열이 없는 행  -- 뺀 열: PHOTO(BLOB)\n", none);
+        }
+
+        [Fact]
         public void Describe_ShowsBindValues()
         {
             var table = RowEditLogic.Describe("HR", "EMP", Columns("ID:NUMBER", "NAME:VARCHAR2(10)", "HIRED:DATE"), Meta("ID", true), ":");

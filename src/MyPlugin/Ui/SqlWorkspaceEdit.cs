@@ -440,6 +440,25 @@ namespace MyPlugin
             }
         }
 
+        /// <summary>
+        /// 오른쪽 메뉴 [INSERT 문 만들기]: 빠른 조회 결과에서 고른 행(화면 순서, 고친 값 그대로)의 INSERT 문을 클립보드에 넣는다.
+        /// 기본 키가 없어 편집할 수 없는 테이블에서도 된다(테이블 이름과 결과 열만 쓴다).
+        /// </summary>
+        private void CopyInsertScript(ResultSetState result)
+        {
+            if (result == null || result.Edit == null || result.Grid == null || result.Columns == null)
+                return;
+            var rows = result.Grid.SelectedRows();
+            if (rows.Count == 0)
+                return;
+            var profile = Profile(result.ResultDbId);
+            var kind = profile != null ? DbProviders.For(profile).Kind : null;
+            var script = RowEditLogic.InsertScript(result.Edit.Owner, result.Edit.Name, result.Columns, rows.Select(r => r.Values), kind);
+            // 줄 끝은 \n 그대로: 바꾸면 글 값 안의 줄바꿈까지 바뀐다
+            CopyText(script, "INSERT 문 " + rows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + "개를 클립보드에 복사했습니다(" + WorkspaceLogic.QualifiedName(result.Edit.Owner, result.Edit.Name) + ").");
+        }
+
         private static int SaveOrder(RowEditState state)
         {
             return state == RowEditState.Deleted ? 0 : state == RowEditState.Modified ? 1 : 2;

@@ -154,6 +154,14 @@ namespace MyPlugin
         private bool _sortDescending;
         private bool _editMarkers;
         private ResultGridRow _found;
+        private readonly List<MenuAction> _menuActions = new List<MenuAction>();
+
+        private sealed class MenuAction
+        {
+            public MenuItem Item;
+            public Separator Separator;
+            public Func<bool> Visible;
+        }
 
         /// <param name="copy">복사 요청. true = 전체(머리글 포함), false = 선택한 행.</param>
         /// <param name="copyText">오른쪽 메뉴 [셀 복사]로 칸 값 하나를 복사할 때. null이면 그 메뉴를 두지 않는다.</param>
@@ -208,6 +216,12 @@ namespace MyPlugin
             {
                 copySelected.IsEnabled = _list.SelectedItems.Count > 0;
                 copyAll.IsEnabled = _list.Items.Count > 0;
+                foreach (var extra in _menuActions)
+                {
+                    var shown = extra.Visible();
+                    extra.Separator.Visibility = extra.Item.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+                    extra.Item.IsEnabled = _list.SelectedItems.Count > 0;
+                }
             };
             _list.ContextMenu = menu;
             // 메뉴를 연 자리의 칸을 기억한다(칸 TextBlock의 Tag가 결과 열 위치). 칸 밖·키보드로 열면 [셀 복사]는 꺼짐
@@ -324,6 +338,19 @@ namespace MyPlugin
         private double NumberWidth(int rowCount)
         {
             return WorkspaceLogic.RowNumberWidth(rowCount) + (_editMarkers ? EditMarkerWidth : 0);
+        }
+
+        /// <summary>
+        /// 오른쪽 메뉴 끝에 선택한 행으로 하는 동작을 붙인다(구분선 뒤). visible이 false면 메뉴를 열 때 숨기고, 고른 행이 없으면 꺼진다.
+        /// </summary>
+        public void AddMenuAction(string header, Func<bool> visible, Action run)
+        {
+            var menu = _list.ContextMenu;
+            var action = new MenuAction { Item = new MenuItem { Header = header }, Separator = new Separator(), Visible = visible };
+            action.Item.Click += (s, e) => run();
+            menu.Items.Add(action.Separator);
+            menu.Items.Add(action.Item);
+            _menuActions.Add(action);
         }
 
         // 결과 칸 TextBlock(Tag = 결과 열 위치)까지 화면 트리를 거슬러 올라간다. 행(ListViewItem)에 닿으면 칸 밖.

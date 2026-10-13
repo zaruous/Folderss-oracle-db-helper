@@ -2455,7 +2455,7 @@ namespace MyPlugin
             if (tab.Grid == null)
             {
                 var owner = tab;
-                tab.Grid = new ResultGridView(all => CopyRows(owner, all));
+                tab.Grid = new ResultGridView(all => CopyRows(owner, all), text => CopyText(text, null));
                 tab.Grid.Sorted += (s, e) => Safe(() => OnGridSorted(owner));
                 tab.Grid.View.Visibility = Visibility.Collapsed;
                 _gridHost.Children.Add(tab.Grid.View);

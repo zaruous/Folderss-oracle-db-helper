@@ -117,7 +117,7 @@ namespace MyPlugin
     /// <summary>
     /// 조회 결과 그리드(ListView + GridView, 가상화). 열 머리는 이름(굵게) 위·형식(작은 고정폭) 아래,
     /// NULL은 흐린 기울임꼴, 숫자 열은 오른쪽 정렬, 긴 값은 한 줄로 줄이고 툴팁으로 전체를 보인다.
-    /// Ctrl+C는 선택한 행, 오른쪽 메뉴로 전체 복사. 복사(클립보드·메시지)는 만든 쪽이 copy 콜백으로 한다.
+    /// Ctrl+C는 선택한 행, 오른쪽 메뉴로 누른 칸 하나·전체 복사. 복사(클립보드·메시지)는 만든 쪽이 copy 콜백으로 한다.
     /// 열 머리를 누르면 가져온 행을 정렬한다(오름차순 → 내림차순 → 해제, # 열은 해제). 행 번호는 원래 순서 그대로 보이고,
     /// 더 가져온 행도 정렬 위치에 들어간다(ListCollectionView.CustomSort). 복사는 화면 순서를 따른다.
     /// </summary>
@@ -129,6 +129,9 @@ namespace MyPlugin
 
         private readonly ListView _list;
         private readonly Action<bool> _copy;
+        // 오른쪽 메뉴를 연 칸(셀 복사 대상)
+        private ResultGridRow _menuRow;
+        private int _menuColumn = -1;
         private readonly List<TextBlock> _titles = new List<TextBlock>();
         private readonly List<string> _names = new List<string>();
         private IList<ResultColumn> _columns;
@@ -142,7 +145,8 @@ namespace MyPlugin
         private ResultGridRow _found;
 
         /// <param name="copy">복사 요청. true = 전체(머리글 포함), false = 선택한 행.</param>
-        public ResultGridView(Action<bool> copy)
+        /// <param name="copyText">오른쪽 메뉴 [셀 복사]로 칸 값 하나를 복사할 때. null이면 그 메뉴를 두지 않는다.</param>
+        public ResultGridView(Action<bool> copy, Action<string> copyText = null)
         {
             _copy = copy;
             _list = new ListView
@@ -172,6 +176,17 @@ namespace MyPlugin
                 }));
 
             var menu = new ContextMenu();
+            MenuItem copyCell = null;
+            if (copyText != null)
+            {
+                copyCell = new MenuItem { Header = "셀 복사" };
+                copyCell.Click += (s, e) =>
+                {
+                    if (_menuRow != null && _menuColumn >= 0)
+                        copyText(WorkspaceLogic.CellCopyText(_menuRow.Values, _menuColumn));
+                };
+                menu.Items.Add(copyCell);
+            }
             var copySelected = new MenuItem { Header = "선택한 행 복사", InputGestureText = "Ctrl+C" };
             copySelected.Click += (s, e) => _copy(false);
             var copyAll = new MenuItem { Header = "모두 복사 (머리글 포함)" };
@@ -184,6 +199,25 @@ namespace MyPlugin
                 copyAll.IsEnabled = _list.Items.Count > 0;
             };
             _list.ContextMenu = menu;
+            // 메뉴를 연 자리의 칸을 기억한다(칸 TextBlock의 Tag가 결과 열 위치). 칸 밖·키보드로 열면 [셀 복사]는 꺼짐
+            _list.ContextMenuOpening += (s, e) =>
+            {
+                _menuRow = null;
+                _menuColumn = -1;
+                var cell = CellAt(e.OriginalSource as DependencyObject);
+                if (cell != null)
+                {
+                    _menuRow = cell.DataContext as ResultGridRow;
+                    _menuColumn = _menuRow != null ? (int)cell.Tag : -1;
+                }
+                if (copyCell != null)
+                {
+                    copyCell.IsEnabled = _menuColumn >= 0;
+                    copyCell.Header = _menuColumn >= 0 && _columns != null && _menuColumn < _columns.Count
+                        // 메뉴 글의 '_'는 단축 밑줄이라 두 번 쓴다(ORDER_ID가 ORDERID로 보이지 않게)
+                        ? "셀 복사 (" + (_columns[_menuColumn].Name ?? "").Replace("_", "__") + ")" : "셀 복사";
+                }
+            };
             _list.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(Header_Click));
         }
 
@@ -279,6 +313,18 @@ namespace MyPlugin
         private double NumberWidth(int rowCount)
         {
             return WorkspaceLogic.RowNumberWidth(rowCount) + (_editMarkers ? EditMarkerWidth : 0);
+        }
+
+        // 결과 칸 TextBlock(Tag = 결과 열 위치)까지 화면 트리를 거슬러 올라간다. 행(ListViewItem)에 닿으면 칸 밖.
+        private static TextBlock CellAt(DependencyObject source)
+        {
+            for (var node = source; node != null && !(node is ListViewItem); node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
+            {
+                var text = node as TextBlock;
+                if (text != null && text.Tag is int)
+                    return text;
+            }
+            return null;
         }
 
         /// <summary>찾기로 가리키는 행(없으면 null).</summary>

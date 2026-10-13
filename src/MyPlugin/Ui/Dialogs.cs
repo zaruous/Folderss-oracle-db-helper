@@ -134,6 +134,23 @@ namespace MyPlugin
         }
 
         /// <summary>
+        /// 편집 막대 [다시 조회] 전: 저장하지 않은 수정·삭제 표시를 버릴지. 기본 버튼은 [취소](Enter를 잘못 눌러도 버리지 않게). 버리면 true.
+        /// </summary>
+        public static bool ConfirmDiscardEdits(Window owner, OracleConnectionProfile profile, string table, string pendingText)
+        {
+            var window = DialogKit.Create(owner, DialogKit.TitleFor("다시 조회", profile), 440);
+            var body = DialogKit.Body(window);
+            body.Children.Add(DialogKit.Text((table ?? "") + "에 저장하지 않은 변경(" + (pendingText ?? "") + ")이 있습니다. 버리고 다시 조회할까요?", 0));
+            body.Children.Add(DialogKit.Hint("버리지 않으려면 [취소]한 뒤 [저장]하세요.", 8));
+            var discard = DialogKit.PrimaryButton("버리고 조회");
+            var cancel = DialogKit.CancelButton("취소", true);
+            discard.Click += (s, e) => window.DialogResult = true;
+            body.Children.Add(DialogKit.Buttons(discard, cancel));
+            DialogKit.FocusOnLoad(window, cancel);
+            return window.ShowDialog() == true;
+        }
+
+        /// <summary>
         /// 연결을 끊거나 창을 닫기 전 커밋 대기 변경 처리. action은 "연결을 끊기" / "창을 닫기" 같은 동사구.
         /// 라디오: 롤백(기본, "변경을 버립니다") / 커밋("변경을 DB에 반영합니다"), 버튼 [확인] [돌아가기].
         /// </summary>

@@ -5,11 +5,12 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace MyPlugin
 {
     /// <summary>
-    /// 빠른 조회(F1) 결과 편집: 그리드 위 편집 막대([편집]·[삭제]·[저장])와 저장(UPDATE·DELETE 실행).
+    /// 빠른 조회(F1) 결과 편집: 그리드 위 편집 막대([편집]·[삭제]·[저장]·WHERE 칸·[다시 조회])와 저장(UPDATE·DELETE 실행).
     /// 고친 행·삭제 표시한 행은 그리드가 바탕색·표시(✎·✖)로 드러내고, [저장]은 기본 키로 행마다 문장 하나를 실행한다(커밋 전 — [커밋]·[롤백]).
     /// </summary>
     internal sealed partial class SqlWorkspace
@@ -19,6 +20,10 @@ namespace MyPlugin
         private Button _deleteRows;
         private Button _saveEdits;
         private TextBlock _editInfo;
+        private TextBox _editWhere;
+        private Button _requery;
+        // WHERE 칸을 마지막으로 채운 결과: 같은 결과를 다시 그릴 때 입력 중인 조건을 덮어쓰지 않게
+        private ResultSetState _editWhereResult;
 
         private FrameworkElement BuildEditBar()
         {
@@ -42,6 +47,35 @@ namespace MyPlugin
             bar.Children.Add(_editRow);
             bar.Children.Add(_deleteRows);
             bar.Children.Add(_saveEdits);
+            var whereLabel = Theme.Text("WHERE", Theme.SecondaryText);
+            whereLabel.FontSize = 11.5;
+            whereLabel.VerticalAlignment = VerticalAlignment.Center;
+            whereLabel.Margin = new Thickness(8, 0, 4, 0);
+            DockPanel.SetDock(whereLabel, Dock.Left);
+            bar.Children.Add(whereLabel);
+            _editWhere = new TextBox
+            {
+                Width = 280,
+                FontFamily = Theme.Mono,
+                Margin = new Thickness(0, 0, 4, 0),
+                VerticalContentAlignment = VerticalAlignment.Center,
+                ToolTip = "조건을 넣고 Enter·[다시 조회] — 예: ORDER_ID = 1001, STATUS IN ('A','B'). 비우면 조건 없이 조회.\n';'·주석·짝 안 맞는 괄호는 쓸 수 없습니다(조건은 WHERE ( … ) 괄호 안에서만 실행)."
+            };
+            SpellCheck.SetIsEnabled(_editWhere, false);
+            AutomationProperties.SetName(_editWhere, "WHERE 조건");
+            DockPanel.SetDock(_editWhere, Dock.Left);
+            _editWhere.KeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Enter)
+                {
+                    e.Handled = true;
+                    Safe(RequeryWithWhere);
+                }
+            };
+            bar.Children.Add(_editWhere);
+            _requery = EditBarButton("다시 조회", "WHERE 조건으로 이 테이블을 다시 조회합니다(앞 " + WorkspaceLogic.QuickQueryRows.ToString(System.Globalization.CultureInfo.InvariantCulture) + "행)");
+            _requery.Click += (s, e) => Safe(RequeryWithWhere);
+            bar.Children.Add(_requery);
             _editInfo = Theme.Text("", Theme.SecondaryText);
             _editInfo.FontSize = 11.5;
             _editInfo.VerticalAlignment = VerticalAlignment.Center;
@@ -85,7 +119,14 @@ namespace MyPlugin
                 return;
             }
             _editBar.Visibility = Visibility.Visible;
+            if (!ReferenceEquals(_editWhereResult, result))
+            {
+                _editWhereResult = result;
+                _editWhere.Text = edit.Where ?? "";
+            }
             var profile = Profile(result.ResultDbId);
+            _editWhere.IsEnabled = !tab.Running;
+            _requery.IsEnabled = !tab.Running && profile != null;
             var session = _host.GetSession(result.ResultDbId);
             string blocked = null;
             if (!edit.CanEdit)
@@ -110,6 +151,34 @@ namespace MyPlugin
             _editInfo.Text = pending.Length == 0
                 ? target + " — 행을 고르고 [편집]·[삭제], 고친 행은 [저장]으로 DB에 보냅니다(커밋 전)"
                 : target + " — " + pending + " (저장하지 않음)";
+        }
+
+        /// <summary>
+        /// WHERE 칸 Enter·[다시 조회]: 조건을 검사하고(<see cref="WorkspaceLogic.QuickQueryWhere"/>) 같은 테이블을 빠른 조회로 다시 조회한다.
+        /// 저장하지 않은 수정·삭제 표시가 있으면 버릴지 먼저 묻는다.
+        /// </summary>
+        private void RequeryWithWhere()
+        {
+            var tab = _active;
+            var result = tab != null ? tab.ActiveResult : null;
+            var edit = result != null ? result.Edit : null;
+            if (edit == null || tab.Running)
+                return;
+            string error;
+            var where = WorkspaceLogic.QuickQueryWhere(_editWhere.Text, out error);
+            if (where == null)
+            {
+                SetStatus(tab, WorkspaceLogic.TextStatus("WHERE 조건을 쓸 수 없습니다: " + error));
+                _editWhere.Focus();
+                return;
+            }
+            var profile = Profile(result.ResultDbId);
+            if (profile == null)
+                return;
+            if (result.HasPendingEdits && !Dialogs.ConfirmDiscardEdits(Window.GetWindow(this), profile,
+                    WorkspaceLogic.QualifiedName(edit.Owner, edit.Name), RowEditLogic.PendingSummary(result.ModifiedCount, result.DeletedCount)))
+                return;
+            QuickQuery(result.ResultDbId, edit.Owner, edit.Name, where);
         }
 
         /// <summary>[편집]: 고른 행(여럿이면 첫 행)의 값을 편집 창에서 고친다. 삭제 표시한 행은 먼저 표시를 풀어야 한다.</summary>
@@ -284,7 +353,7 @@ namespace MyPlugin
         /// <summary>
         /// 빠른 조회 결과에 편집 대상을 붙인다: 데이터 사전의 기본 키 열을 결과 열에 맞춘다. 조회 전에 읽어 둔 열 정보(metadata)가 없으면 편집 불가로 표시.
         /// </summary>
-        private void AttachEditTarget(SqlTabState tab, OracleConnectionProfile profile, string owner, string objectName, string sql, List<ColumnInfo> metadata, string metadataError)
+        private void AttachEditTarget(SqlTabState tab, OracleConnectionProfile profile, string owner, string objectName, string sql, List<ColumnInfo> metadata, string metadataError, string where)
         {
             var result = tab.ActiveResult;
             if (result == null || result.Columns == null || !string.Equals(result.Sql, sql, StringComparison.Ordinal))
@@ -293,6 +362,7 @@ namespace MyPlugin
             result.Edit = metadata == null
                 ? RowEditLogic.Unavailable(owner, objectName, "열 정보를 읽지 못해 편집할 수 없습니다: " + (metadataError ?? ""))
                 : RowEditLogic.Describe(owner, objectName, result.Columns, metadata, RowEditLogic.ParameterPrefix(provider.Kind));
+            result.Edit.Where = where ?? "";
             if (result.Edit.CanEdit && result.Grid != null)
                 result.Grid.EnableEditMarkers(result.Rows.Count);
             if (tab == _active)

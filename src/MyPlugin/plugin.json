@@ -1,7 +1,7 @@
 {
   "id": "zaruous.folderss-db-helper",
   "name": "DB Helper",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Oracle·PostgreSQL·SQL Server 접속·조회 도우미 (DB·스키마 트리, SQL 실행, 조회 결과, 테이블 정의서·GCM 정의서 엑셀/JSON/CSV)",
   "assembly": "MyPlugin.dll",
   "type": "MyPlugin.MyPlugin",

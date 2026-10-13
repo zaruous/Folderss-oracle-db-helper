@@ -1,5 +1,5 @@
 # 플러그인 빌드와 릴리스.
-# - main 푸시·PR: publish해서 플러그인 zip을 Actions 아티팩트로 올린다 (확인용)
+# - main 푸시·PR: publish해서 플러그인을 Actions 아티팩트로 올린다 (확인용 — 받은 zip을 그대로 설치)
 # - v* 태그 푸시(예: v1.0.0): 태그 버전과 plugin.json의 version이 같은지 확인한 뒤 GitHub 릴리스에 zip을 첨부한다
 # 플러그인 폴더 이름을 바꿔도(src/<이름>/) 그대로 동작한다. src 아래 plugin.json은 하나여야 한다.
 name: build
@@ -88,10 +88,19 @@ jobs:
           unzip -l "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
+      # 아티팩트는 GitHub가 한 번 더 zip으로 감싼다 — zip을 그대로 올리면 받은 파일 맨 위에 plugin.json이 없어 설치되지 않는다.
+      # 풀어서 내용을 올리면 받은 아티팩트 zip이 곧 플러그인 zip이다(맨 위에 plugin.json).
+      - name: 아티팩트용으로 풀기
+        shell: bash
+        run: |
+          rm -rf artifact
+          unzip -q "${{ steps.zip.outputs.path }}" -d artifact
+          test -f artifact/plugin.json || { echo "::error::zip 맨 위에 plugin.json이 없습니다"; exit 1; }
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.plugin.outputs.id }}-${{ steps.plugin.outputs.version }}
-          path: ${{ steps.zip.outputs.path }}
+          path: artifact/
 
       - name: GitHub 릴리스
         if: startsWith(github.ref, 'refs/tags/v')

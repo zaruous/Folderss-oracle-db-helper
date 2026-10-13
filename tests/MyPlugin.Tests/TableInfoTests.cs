@@ -179,6 +179,66 @@ namespace MyPlugin.Tests
         public void QuickQueryMessage()
         {
             Assert.Equal("빠른 조회: SAMPLE1.ORDERS 앞 100행 → 'SQL 2' 탭 (편집기는 그대로, 실행 기록에 남음)", WorkspaceLogic.QuickQueryMessage("SAMPLE1.ORDERS", "SQL 2"));
+            Assert.Equal("빠른 조회: SAMPLE1.ORDERS WHERE ID = 1 앞 100행 → 'SQL 2' 탭 (편집기는 그대로, 실행 기록에 남음)", WorkspaceLogic.QuickQueryMessage("SAMPLE1.ORDERS", "SQL 2", "ID = 1"));
+        }
+
+        [Theory]
+        [InlineData("", "")]
+        [InlineData("   ", "")]
+        [InlineData("ID = 1", "ID = 1")]
+        [InlineData("  where ID = 1 ", "ID = 1")]
+        [InlineData("WHERE", "")]
+        [InlineData("WHEREVER = 1", "WHEREVER = 1")]
+        [InlineData("NAME = 'a;b -- /* ) ('", "NAME = 'a;b -- /* ) ('")]
+        [InlineData("NAME = 'it''s'", "NAME = 'it''s'")]
+        [InlineData("\"odd;name\" = 1", "\"odd;name\" = 1")]
+        [InlineData("STATUS IN ('A', 'B') AND (QTY > 0 OR QTY IS NULL)", "STATUS IN ('A', 'B') AND (QTY > 0 OR QTY IS NULL)")]
+        [InlineData("DEPT_ID IN (SELECT ID FROM DEPT WHERE NAME LIKE 'S%')", "DEPT_ID IN (SELECT ID FROM DEPT WHERE NAME LIKE 'S%')")]
+        [InlineData("NAME = N'가나'", "NAME = N'가나'")]
+        [InlineData("SID IN (SELECT SID FROM V$SESSION)", "SID IN (SELECT SID FROM V$SESSION)")]
+        [InlineData("A / 2 > 1", "A / 2 > 1")]
+        public void QuickQueryWhere_Accepts(string input, string expected)
+        {
+            string error;
+            Assert.Equal(expected, WorkspaceLogic.QuickQueryWhere(input, out error));
+            Assert.Null(error);
+        }
+
+        [Theory]
+        [InlineData("1=1; DELETE FROM ORDERS")]
+        [InlineData("1=1) ; DELETE FROM ORDERS; --")]
+        [InlineData("1=1) UNION SELECT * FROM SECRET WHERE (1=1")]
+        [InlineData("1=1) FOR UPDATE --")]
+        [InlineData("ID = 1 -- 나머지")]
+        [InlineData("ID = 1 /* x */")]
+        [InlineData("(ID = 1")]
+        [InlineData("NAME = 'abc")]
+        [InlineData("\"NAME = 1")]
+        [InlineData("NAME = q'[a' ) ; DELETE FROM T; --]'")]
+        [InlineData("NAME = E'\\'' ) ; DELETE FROM T; SELECT '")]
+        [InlineData("NAME = U&'x'")]
+        [InlineData("[x'] = 1) ; DROP TABLE T; --'")]
+        [InlineData("ARR[']'] = 1) ; DELETE FROM T; --'")]
+        [InlineData("NAME = $$a$$")]
+        [InlineData("NAME = $t$')$t$")]
+        [InlineData("NAME = 1$$'$$ ) ; DELETE FROM T; SELECT '1")]
+        public void QuickQueryWhere_RejectsEscapes(string input)
+        {
+            string error;
+            Assert.Null(WorkspaceLogic.QuickQueryWhere(input, out error));
+            Assert.False(string.IsNullOrEmpty(error));
+        }
+
+        [Fact]
+        public void QuickQueryStatement_WrapsConditionAndStaysOneQuery()
+        {
+            Assert.Equal(WorkspaceLogic.SelectStatement("SAMPLE1", "ORDERS"), WorkspaceLogic.QuickQueryStatement("SAMPLE1", "ORDERS", ""));
+            var sql = WorkspaceLogic.QuickQueryStatement("SAMPLE1", "ORDERS", "STATUS = 'A'");
+            Assert.Equal("SELECT *\n  FROM SAMPLE1.ORDERS\n WHERE (STATUS = 'A')", sql);
+            var statement = SqlScript.Parse(sql);
+            Assert.Equal(SqlKind.Query, statement.Kind);
+            Assert.False(statement.ForUpdate);
+            Assert.True(WorkspaceLogic.AllowedOnReadOnly(statement));
         }
     }
 }

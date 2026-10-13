@@ -1248,8 +1248,9 @@ namespace MyPlugin
         /// 결과는 지금처럼 하나로 보인다. [다음 행 가져오기]는 툴바의 가져올 행 수로 이어 읽는다.
         /// 결과는 편집할 수 있다(편집 막대 [편집]·[삭제]·[저장]): 조회 전에 데이터 사전에서 기본 키 열을 읽어 둔다
         /// (조회 뒤에 읽으면 리더가 하나뿐인 PostgreSQL에서 결과 커서가 닫혀 [다음 행 가져오기]를 못 한다).
+        /// where는 편집 막대 WHERE 칸에서 다시 조회할 때의 조건(<see cref="WorkspaceLogic.QuickQueryWhere"/>로 검사한 것).
         /// </summary>
-        public async void QuickQuery(string dbId, string owner, string objectName)
+        public async void QuickQuery(string dbId, string owner, string objectName, string where = null)
         {
             try
             {
@@ -1283,10 +1284,10 @@ namespace MyPlugin
                 session = CheckSession(tab, profile);
                 if (session == null)
                     return;
-                var statement = SqlScript.Parse(WorkspaceLogic.SelectStatement(owner, objectName));
-                AddMessage(dbId, WorkspaceLogic.QuickQueryMessage(WorkspaceLogic.QualifiedName(owner, objectName), tab.Title), MessageKind.Info);
+                var statement = SqlScript.Parse(WorkspaceLogic.QuickQueryStatement(owner, objectName, where));
+                AddMessage(dbId, WorkspaceLogic.QuickQueryMessage(WorkspaceLogic.QualifiedName(owner, objectName), tab.Title, where), MessageKind.Info);
                 await RunSingleAsync(tab, profile, session, statement, WorkspaceLogic.QuickQueryRows);
-                AttachEditTarget(tab, profile, owner, objectName, statement.Text, metadata, metadataError);
+                AttachEditTarget(tab, profile, owner, objectName, statement.Text, metadata, metadataError, where);
             }
             catch (Exception ex)
             {

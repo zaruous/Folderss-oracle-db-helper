@@ -368,9 +368,103 @@ namespace MyPlugin
         /// <summary>트리 F1 빠른 조회로 처음 가져올 행 수.</summary>
         public const int QuickQueryRows = 100;
 
-        public static string QuickQueryMessage(string qualifiedName, string tabTitle)
+        public static string QuickQueryMessage(string qualifiedName, string tabTitle, string where = null)
         {
-            return "빠른 조회: " + qualifiedName + " 앞 " + QuickQueryRows.ToString(Inv) + "행 → '" + tabTitle + "' 탭 (편집기는 그대로, 실행 기록에 남음)";
+            return "빠른 조회: " + qualifiedName + (string.IsNullOrEmpty(where) ? "" : " WHERE " + where) + " 앞 " + QuickQueryRows.ToString(Inv)
+                + "행 → '" + tabTitle + "' 탭 (편집기는 그대로, 실행 기록에 남음)";
+        }
+
+        /// <summary>
+        /// 빠른 조회 SELECT. 조건이 있으면 "WHERE (조건)"으로 괄호에 가둔다 — 조건은 <see cref="QuickQueryWhere"/>로 검사한 것이어야 한다.
+        /// </summary>
+        public static string QuickQueryStatement(string owner, string name, string where)
+        {
+            if (string.IsNullOrEmpty(where))
+                return SelectStatement(owner, name);
+            return "SELECT *\n  FROM " + QualifiedName(owner, name) + "\n WHERE (" + where + ")";
+        }
+
+        /// <summary>
+        /// 편집 막대의 WHERE 칸 검사. 앞의 "WHERE"는 떼고 앞뒤 공백을 지운 조건을 돌려준다(비었으면 "" — 조건 없이 조회).
+        /// 조건은 괄호 안에 넣어 실행하므로, 괄호를 벗어나 문장을 바꿀 수 있는 것을 막는다:
+        /// 문자열·따옴표 이름 밖의 ';'·주석(--, /*)·짝이 안 맞는 괄호·닫히지 않은 문자열과 따옴표 이름,
+        /// DB마다 해석이 달라 검사를 속일 수 있는 것(대괄호, 접두가 붙은 문자열 q'·E'·U&amp;' 등 — N'만 허용, '$'로 시작하는 달러 인용).
+        /// 막으면 null(error에 이유).
+        /// </summary>
+        public static string QuickQueryWhere(string input, out string error)
+        {
+            error = null;
+            var text = (input ?? "").Trim();
+            if (text.Length >= 5 && string.Compare(text, 0, "WHERE", 0, 5, StringComparison.OrdinalIgnoreCase) == 0
+                && (text.Length == 5 || char.IsWhiteSpace(text[5])))
+                text = text.Substring(5).Trim();
+            var depth = 0;
+            for (var i = 0; i < text.Length; i++)
+            {
+                var c = text[i];
+                if (c == '\'' || c == '"')
+                {
+                    var prefix = WordBefore(text, i);
+                    if (c == '\'' && ((i > 0 && text[i - 1] == '&') || (prefix.Length > 0 && !string.Equals(prefix, "N", StringComparison.OrdinalIgnoreCase))))
+                    {
+                        error = "접두가 붙은 문자열(q'·E'·U&' 등)은 쓸 수 없습니다. 보통 문자열 '…'을 쓰세요.";
+                        return null;
+                    }
+                    var end = i + 1;
+                    while (true)
+                    {
+                        end = text.IndexOf(c, end);
+                        if (end < 0)
+                        {
+                            error = c == '\'' ? "닫히지 않은 문자열(')이 있습니다." : "닫히지 않은 따옴표 이름(\")이 있습니다.";
+                            return null;
+                        }
+                        if (end + 1 < text.Length && text[end + 1] == c)
+                        {
+                            end += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    i = end;
+                    continue;
+                }
+                if (c == ';')
+                    error = "';'는 쓸 수 없습니다(조건 하나만 넣으세요).";
+                else if ((c == '-' && i + 1 < text.Length && text[i + 1] == '-') || (c == '/' && i + 1 < text.Length && text[i + 1] == '*'))
+                    error = "주석(--, /*)은 쓸 수 없습니다.";
+                else if (c == '[' || c == ']')
+                    error = "대괄호([ ])는 쓸 수 없습니다. 이름은 큰따옴표(\"…\")로 감싸세요.";
+                else if (c == '$' && !IsIdentifierStart(WordBefore(text, i)))
+                    error = "'$'로 시작하는 인용·변수는 쓸 수 없습니다.";
+                else if (c == '(')
+                    depth++;
+                else if (c == ')' && --depth < 0)
+                    error = "짝이 없는 ')'가 있습니다.";
+                if (error != null)
+                    return null;
+            }
+            if (depth != 0)
+            {
+                error = "닫히지 않은 '('가 있습니다.";
+                return null;
+            }
+            return text;
+        }
+
+        // text[i] 바로 앞에 붙은 낱말(글자·숫자·_·$·#). 없으면 "".
+        private static string WordBefore(string text, int i)
+        {
+            var start = i;
+            while (start > 0 && (char.IsLetterOrDigit(text[start - 1]) || text[start - 1] == '_' || text[start - 1] == '$' || text[start - 1] == '#'))
+                start--;
+            return text.Substring(start, i - start);
+        }
+
+        // 이름 안의 '$'(V$SESSION)만 허용: 글자나 _로 시작하는 낱말 뒤여야 한다(숫자 뒤·단독 '$'는 PostgreSQL 달러 인용·변수).
+        private static bool IsIdentifierStart(string word)
+        {
+            return word.Length > 0 && (char.IsLetter(word[0]) || word[0] == '_');
         }
 
         // ---- 여러 문장 실행(결과 하위 탭) ----

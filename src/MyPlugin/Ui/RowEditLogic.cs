@@ -35,6 +35,8 @@ namespace MyPlugin
     {
         public string Owner { get; set; }
         public string Name { get; set; }
+        /// <summary>이 결과를 조회한 WHERE 조건(편집 막대의 WHERE 칸). 없으면 "".</summary>
+        public string Where { get; set; } = "";
         /// <summary>바인드 변수 접두: Oracle·PostgreSQL ':', SQL Server '@'.</summary>
         public string ParameterPrefix { get; set; } = ":";
         public IReadOnlyList<ResultColumn> Columns { get; set; }

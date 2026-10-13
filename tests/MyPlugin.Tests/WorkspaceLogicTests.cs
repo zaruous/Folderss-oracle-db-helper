@@ -410,6 +410,11 @@ namespace MyPlugin.Tests
             Assert.Equal("NULL", WorkspaceLogic.CellText(null));
             Assert.Equal("KING", WorkspaceLogic.CellText("KING"));
             Assert.Equal("a↵b↵c↵d e", WorkspaceLogic.CellText("a\r\nb\nc\rd\te"));
+            // [셀 복사]는 표시 글이 아니라 원래 값: 줄바꿈·탭 유지, NULL은 빈 글
+            Assert.Equal("a\r\nb\td", WorkspaceLogic.CellCopyText(new[] { "x", "a\r\nb\td" }, 1));
+            Assert.Equal("", WorkspaceLogic.CellCopyText(new string[] { null }, 0));
+            Assert.Equal("", WorkspaceLogic.CellCopyText(new[] { "x" }, 3));
+            Assert.Equal("", WorkspaceLogic.CellCopyText(null, 0));
             Assert.True(WorkspaceLogic.HasLineBreak("a\nb"));
             Assert.False(WorkspaceLogic.HasLineBreak("a\tb"));
             Assert.False(WorkspaceLogic.HasLineBreak(null));

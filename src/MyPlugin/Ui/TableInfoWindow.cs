@@ -174,7 +174,7 @@ namespace MyPlugin
             {
                 var rows = all ? grid.RowsInViewOrder() : grid.SelectedRows();
                 copy(WorkspaceLogic.ToTsv(all ? table.Columns.Select(c => c.Name) : null, rows.Select(r => r.Values)));
-            });
+            }, copy);
             grid.View.Visibility = Visibility.Collapsed;
             return new KeyValuePair<InfoTable, ResultGridView>(table, grid);
         }

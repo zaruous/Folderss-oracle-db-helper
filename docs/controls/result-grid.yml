@@ -23,6 +23,8 @@ features:
   - name: 복사
     description: >-
       Ctrl+C·오른쪽 메뉴로 선택한 행, 오른쪽 메뉴로 전체(머리글 포함)를 TSV로 복사한다. 화면 순서를 따른다.
+      오른쪽 메뉴 [셀 복사 (열 이름)]는 오른쪽 클릭한 칸 하나의 원래 값을 복사한다(줄바꿈·탭 유지, NULL은 빈 글).
+      칸 밖이나 키보드(Shift+F10)로 연 메뉴에서는 꺼진다.
   - name: 찾기 강조(ShowFound)
     description: >-
       찾기 팝업이 가리킨 칸: 그 행만 고르고 보이게 세로로, 칸이 보이게 가로로 스크롤한 뒤 칸 바탕을 강조한다(ResultGridRow.FoundColumn).
@@ -58,7 +60,7 @@ states:
   - 고른 행은 선택색이 바탕색보다 앞서지만 번호 열 표시(✎·✖)는 남는다.
 limits:
   - 정렬은 가져온 행 안에서만 한다(전체 순서는 ORDER BY로).
-  - 긴 값은 ValueFormatter가 잘라 보인다(글 4,000자, 이진 2,000바이트).
+  - 긴 값은 ValueFormatter가 잘라 보인다(글 4,000자, 이진 2,000바이트). 셀 복사·행 복사도 이 잘린 값을 복사한다.
 tests:
   - tests/MyPlugin.Tests/WorkspaceLogicTests.cs
   - tests/MyPlugin.Tests/ValueFormatterTests.cs

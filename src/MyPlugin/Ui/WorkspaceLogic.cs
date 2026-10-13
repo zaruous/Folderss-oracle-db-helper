@@ -923,6 +923,12 @@ namespace MyPlugin
         }
 
         /// <summary>그리드 칸 표시: NULL은 "NULL", 줄바꿈은 "↵", 탭은 공백(행 높이가 한 줄로 유지되게).</summary>
+        /// <summary>[셀 복사]로 클립보드에 넣을 값: 원래 값 그대로(줄바꿈·탭 유지), NULL은 빈 글. 열이 없으면 빈 글.</summary>
+        public static string CellCopyText(string[] values, int column)
+        {
+            return values != null && column >= 0 && column < values.Length ? values[column] ?? "" : "";
+        }
+
         public static string CellText(string value)
         {
             if (value == null)

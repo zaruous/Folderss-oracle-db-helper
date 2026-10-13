@@ -23,6 +23,7 @@ namespace MyPlugin
     {
         private string[] _values;
         private RowEditState _state;
+        private int _foundColumn = -1;
 
         public ResultGridRow(int number, string[] values)
         {
@@ -78,6 +79,19 @@ namespace MyPlugin
                 State = Original != null && !RowEditLogic.SameValues(Original, _values) ? RowEditState.Modified : RowEditState.Unchanged;
         }
 
+        /// <summary>찾기(Ctrl+F)로 지금 가리키는 칸의 결과 열 위치. 없으면 -1(그 칸을 강조색 바탕으로 보인다).</summary>
+        public int FoundColumn
+        {
+            get { return _foundColumn; }
+            set
+            {
+                if (_foundColumn == value)
+                    return;
+                _foundColumn = value;
+                Raise(nameof(FoundColumn));
+            }
+        }
+
         /// <summary>DB에 보낸 뒤: 지금 값이 원래 값이 된다.</summary>
         public void Saved()
         {
@@ -125,6 +139,7 @@ namespace MyPlugin
         private int _sortColumn = -1;
         private bool _sortDescending;
         private bool _editMarkers;
+        private ResultGridRow _found;
 
         /// <param name="copy">복사 요청. true = 전체(머리글 포함), false = 선택한 행.</param>
         public ResultGridView(Action<bool> copy)
@@ -196,6 +211,7 @@ namespace MyPlugin
         {
             ApplyThemeStyles();
             _editMarkers = false;
+            _found = null;
             // 열을 끌어 옮기면 복사(TSV)의 열 순서와 화면이 달라진다
             var view = new GridView { AllowsColumnReorder = false };
             if (_headerStyle != null)
@@ -263,6 +279,59 @@ namespace MyPlugin
         private double NumberWidth(int rowCount)
         {
             return WorkspaceLogic.RowNumberWidth(rowCount) + (_editMarkers ? EditMarkerWidth : 0);
+        }
+
+        /// <summary>찾기로 가리키는 행(없으면 null).</summary>
+        public ResultGridRow FoundRow
+        {
+            get { return _found; }
+        }
+
+        /// <summary>
+        /// 찾기: 그 행을 고르고(하나만) 보이게 세로로 스크롤한 뒤, 그 칸이 보이게 가로로 스크롤하고 칸을 강조한다.
+        /// 키보드 포커스는 옮기지 않는다(찾기 상자에서 Enter로 계속 찾게) — 닫을 때 <see cref="FocusFound"/>.
+        /// </summary>
+        public void ShowFound(ResultGridRow row, int column)
+        {
+            if (row == null)
+                return;
+            if (_found != null && _found != row)
+                _found.FoundColumn = -1;
+            _found = row;
+            row.FoundColumn = column;
+            _list.SelectedItem = row;
+            _list.ScrollIntoView(row);
+            var view = _list.View as GridView;
+            var scroller = WorkspaceUi.FindDescendant<ScrollViewer>(_list);
+            if (view == null || scroller == null || column < 0 || column + 1 >= view.Columns.Count)
+                return;
+            // 가로 스크롤은 픽셀 단위다(가상화는 세로 행 단위만): # 열부터 그 칸 앞까지의 너비가 칸의 왼쪽
+            var left = 0.0;
+            for (var i = 0; i <= column; i++)
+                left += view.Columns[i].ActualWidth;
+            var right = left + view.Columns[column + 1].ActualWidth;
+            if (left < scroller.HorizontalOffset)
+                scroller.ScrollToHorizontalOffset(left);
+            else if (right > scroller.HorizontalOffset + scroller.ViewportWidth)
+                scroller.ScrollToHorizontalOffset(Math.Min(left, right - scroller.ViewportWidth));
+        }
+
+        /// <summary>찾기 강조를 지운다.</summary>
+        public void ClearFound()
+        {
+            if (_found != null)
+                _found.FoundColumn = -1;
+            _found = null;
+        }
+
+        /// <summary>찾기를 닫을 때: 찾은 행에 키보드 포커스(↑↓·Ctrl+C로 이어 쓰게). 없으면 그리드에.</summary>
+        public void FocusFound()
+        {
+            var item = _found == null ? null : _list.ItemContainerGenerator.ContainerFromItem(_found) as ListViewItem;
+            if (item != null)
+                item.Focus();
+            else
+                _list.Focus();
         }
 
         public void ScrollIntoView(ResultGridRow row)
@@ -468,6 +537,9 @@ namespace MyPlugin
             var deleted = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.State)), Value = RowEditState.Deleted };
             deleted.Setters.Add(new Setter(TextBlock.TextDecorationsProperty, TextDecorations.Strikethrough, "cell"));
             template.Triggers.Add(deleted);
+            var found = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.FoundColumn)), Value = index };
+            found.Setters.Add(new Setter(TextBlock.BackgroundProperty, ShellUi.HighlightTint, "cell"));
+            template.Triggers.Add(found);
             template.Seal();
             return template;
         }

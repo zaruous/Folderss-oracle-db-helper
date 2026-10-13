@@ -242,7 +242,7 @@ namespace MyPlugin.Tests
         [Fact]
         public void ShortcutsText_ListsEveryShortcut()
         {
-            foreach (var shortcut in new[] { "Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+W", "Ctrl+Enter", "Ctrl+/", "Ctrl+Shift+U", "Ctrl+Shift+L", "Shift+F10", "F5" })
+            foreach (var shortcut in new[] { "Ctrl+N", "Ctrl+O", "Ctrl+S", "Ctrl+Shift+S", "Ctrl+W", "Ctrl+Enter", "Ctrl+/", "Ctrl+Shift+U", "Ctrl+Shift+L", "Shift+F10", "F5", "Ctrl+F", "F3" })
                 Assert.Contains(shortcut, ShellLogic.ShortcutsText);
         }
     }

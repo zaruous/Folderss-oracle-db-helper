@@ -97,4 +97,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "${{ steps.zip.outputs.path }}" --title "$GITHUB_REF_NAME" --generate-notes
+        # 웹에서 [Draft a new release]로 태그를 만들면 릴리스가 이미 있다 — 그때는 zip만 그 릴리스에 올린다(같은 이름이면 바꿈)
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${{ steps.zip.outputs.path }}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${{ steps.zip.outputs.path }}" --title "$GITHUB_REF_NAME" --generate-notes
+          fi

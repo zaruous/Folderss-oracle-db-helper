@@ -1,6 +1,8 @@
 # 플러그인 빌드와 릴리스.
 # - main 푸시·PR: publish해서 플러그인을 Actions 아티팩트로 올린다 (확인용 — 받은 zip을 그대로 설치)
 # - v* 태그 푸시(예: v1.0.0): 태그 버전과 plugin.json의 version이 같은지 확인한 뒤 GitHub 릴리스에 zip을 첨부한다
+# - 태그가 아닌 빌드는 버전 뒤에 브랜치·커밋을 붙인다(예: 1.7.0-main.fad0bb6) — 설치한 테스트 빌드를 정식 릴리스와 구분하려고.
+#   CI 작업 공간의 plugin.json만 바꾸고 저장소 파일은 그대로다.
 # 플러그인 폴더 이름을 바꿔도(src/<이름>/) 그대로 동작한다. src 아래 plugin.json은 하나여야 한다.
 name: build
 
@@ -28,6 +30,10 @@ jobs:
       - name: 플러그인 찾기
         id: plugin
         shell: bash
+        # 브랜치 이름은 누구나 정할 수 있는 글이라 스크립트에 직접 넣지 않고 환경 변수로 넘긴다
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           shopt -s nullglob
           manifests=(src/*/plugin.json)
@@ -42,6 +48,12 @@ jobs:
           if [ -z "$id" ]; then
             echo "::error::$manifest 에 id가 없습니다"
             exit 1
+          fi
+          # 태그가 아니면 "버전-브랜치.커밋7자리". 브랜치의 영문·숫자·. - 밖의 글자는 -로
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            branch="$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9.-' '-')"
+            version="${version}-${branch}.${COMMIT:0:7}"
+            jq --arg v "$version" '.version = $v' "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
           fi
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
           echo "id=$id" >> "$GITHUB_OUTPUT"

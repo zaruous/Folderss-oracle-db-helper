@@ -29,6 +29,7 @@ controls:
   - {id: db-tree-panel, name: DbTreePanel, kind: composite, title: DB 트리}
   - {id: sql-workspace, name: SqlWorkspace, kind: composite, title: SQL 작업 영역}
   - {id: result-grid, name: ResultGridView, kind: control, title: 결과 그리드}
+  - {id: find-bar, name: FindBar, kind: control, title: 찾기 팝업}
   - {id: result-edit-bar, name: SqlWorkspace (편집 막대), kind: control, title: 결과 편집 막대}
   - {id: row-edit-dialog, name: RowEditDialog, kind: dialog, title: 행 편집 창}
   - {id: date-time-box, name: DateTimeBox, kind: control, title: 날짜·시각 입력}

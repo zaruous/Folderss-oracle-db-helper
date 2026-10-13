@@ -498,6 +498,7 @@ namespace MyPlugin
 
             _editorHost = new Grid();
             Grid.SetColumn(_editorHost, 1);
+            _editorHost.Children.Add(BuildEditorFind());
             grid.Children.Add(_editorHost);
             return grid;
         }
@@ -567,6 +568,7 @@ namespace MyPlugin
             _gridPlaceholder.TextWrapping = TextWrapping.Wrap;
             _gridPlaceholder.Margin = new Thickness(16);
             _gridHost.Children.Add(_gridPlaceholder);
+            _gridHost.Children.Add(BuildResultFind());
             _resultTabs = new StackPanel { Orientation = Orientation.Horizontal };
             _resultStrip = new Border
             {
@@ -1078,10 +1080,23 @@ namespace MyPlugin
                 DescribeAtCaret();
                 return;
             }
+            if (key == Key.F3 && (modifiers & ~ModifierKeys.Shift) == 0)
+            {
+                // F3·Shift+F3: 찾기 다음·이전
+                e.Handled = true;
+                Safe(() => EditorFindAgain(modifiers == ModifierKeys.None));
+                return;
+            }
             if ((modifiers & ModifierKeys.Control) == 0 || (modifiers & ModifierKeys.Alt) != 0)
                 return;
             var shift = (modifiers & ModifierKeys.Shift) != 0;
-            if (key == Key.Enter && !shift)
+            if (key == Key.F && !shift)
+            {
+                // Ctrl+F: 찾기
+                e.Handled = true;
+                Safe(OpenEditorFind);
+            }
+            else if (key == Key.Enter && !shift)
             {
                 e.Handled = true;
                 RunActive();

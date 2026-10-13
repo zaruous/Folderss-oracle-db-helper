@@ -1,0 +1,49 @@
+id: find-bar
+name: FindBar
+title: 찾기 팝업
+kind: control
+source:
+  - src/MyPlugin/Ui/FindBar.cs
+  - src/MyPlugin/Ui/FindLogic.cs
+  - src/MyPlugin/Ui/SqlWorkspaceFind.cs
+base: System.Windows.Controls.Border
+used_by: [sql-workspace]
+summary: >-
+  SQL 편집기와 결과 그리드 오른쪽 위에 하나씩 뜨는 찾기 막대(Ctrl+F).
+  입력하는 대로 찾고, 찾은 위치로 스크롤해 보이게 한다.
+features:
+  - name: 막대
+    description: 찾는 말 · 개수(3/12, 없으면 위험색 "결과 없음") · [▲] 이전 · [▼] 다음 · [✕] 닫기. 대소문자를 무시하고 끝에서 처음으로 돈다.
+  - name: 편집기 찾기
+    description: >-
+      찾은 글자를 고르고(포커스는 찾기 상자에 둔 채 흐린 선택색으로 보임) 그 줄이 보이게 세로로, 글자가 보이게 가로로 스크롤한다.
+      한 줄 안에서 고른 글이 있으면 Ctrl+F 때 그것을 찾는 말로 쓴다. 기준은 지금 커서·선택 위치.
+  - name: 결과 찾기
+    description: >-
+      지금 결과의 가져온 행(화면 순서 — 정렬했으면 정렬한 순서)의 값에서 찾는다(NULL 칸 제외, 행 → 열 순).
+      찾은 칸의 행을 고르고 세로·가로로 스크롤해 칸을 강조한다(result-grid 찾기 강조). 기준은 지금 찾은 칸, 없으면 고른 행.
+  - name: 닫기
+    description: Esc·[✕]. 편집기는 편집기로(찾은 글자 선택 유지), 결과는 찾은 행으로 포커스를 돌리고 강조를 지운다.
+keyboard:
+  - keys: Ctrl+F
+    action: 포커스가 있는 쪽(편집기·결과 영역)의 찾기를 연다.
+  - keys: Enter · F3
+    action: 다음.
+  - keys: Shift+Enter · Shift+F3
+    action: 이전.
+  - keys: Esc
+    action: 닫기.
+theme:
+  - part: 막대 바탕·테두리
+    keys: [SurfaceBackground, BorderBrush]
+  - part: 개수
+    keys: [SecondaryText, Theme.Danger]
+states:
+  - 입력하는 동안은 지금 가리킨 일치가 여전히 맞으면 제자리에 머문다.
+limits:
+  - 결과는 가져온 행 안에서만 찾는다(DB를 다시 조회하지 않음). 줄인 긴 값은 ValueFormatter가 자른 표시 값 안에서만 찾는다.
+  - 대소문자 구분·정규식·바꾸기는 없다.
+  - 편집기 글 전체를 입력마다 다시 훑는다(수 MB 글에서는 느릴 수 있음).
+tests:
+  - tests/MyPlugin.Tests/FindLogicTests.cs
+related: [sql-workspace, result-grid]

@@ -23,6 +23,10 @@ features:
   - name: 복사
     description: >-
       Ctrl+C·오른쪽 메뉴로 선택한 행, 오른쪽 메뉴로 전체(머리글 포함)를 TSV로 복사한다. 화면 순서를 따른다.
+  - name: 찾기 강조(ShowFound)
+    description: >-
+      찾기 팝업이 가리킨 칸: 그 행만 고르고 보이게 세로로, 칸이 보이게 가로로 스크롤한 뒤 칸 바탕을 강조한다(ResultGridRow.FoundColumn).
+      키보드 포커스는 찾기 상자에 두고, 닫을 때 찾은 행으로 옮긴다(FocusFound).
   - name: 편집 상태(ResultGridRow)
     description: >-
       행은 지금 값(Values)과 원래 값(Original), 상태(변경 없음·수정·삭제)를 가진다.
@@ -32,6 +36,8 @@ keyboard:
     action: 선택한 행 복사(TSV).
   - keys: Ctrl·Shift+클릭
     action: 여러 행 고르기.
+  - keys: Ctrl+F · F3 / Shift+F3
+    action: 찾기 팝업 열기 · 다음 / 이전(find-bar).
 theme:
   - part: 바탕·글자
     keys: [PanelBackground, PrimaryText]
@@ -43,6 +49,8 @@ theme:
     keys: [SelectionBrush, RowHoverBrush]
   - part: 수정한 행 바탕 / ✎
     keys: [Theme.ModifiedRow (경고색 40% 반투명), Theme.Warning]
+  - part: 찾은 칸 바탕
+    keys: [ShellUi.HighlightTint (경고색 30%)]
   - part: 삭제 표시한 행 바탕 / ✖·취소선
     keys: [Theme.DeletedRow (위험색 40% 반투명), Theme.Danger]
 states:
@@ -54,4 +62,4 @@ limits:
 tests:
   - tests/MyPlugin.Tests/WorkspaceLogicTests.cs
   - tests/MyPlugin.Tests/ValueFormatterTests.cs
-related: [sql-workspace, result-edit-bar]
+related: [sql-workspace, result-edit-bar, find-bar]

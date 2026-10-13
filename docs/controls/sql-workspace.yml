@@ -61,6 +61,8 @@ keyboard:
     action: 선택 영역 대문자 / 소문자.
   - keys: F4
     action: 커서가 있는 테이블 이름의 정보.
+  - keys: Ctrl+F · F3 / Shift+F3
+    action: 편집기·결과 찾기 팝업 열기 · 다음 / 이전(find-bar).
   - keys: Ctrl+C
     action: 결과 그리드에서 선택한 행 복사(TSV).
 theme:
@@ -86,4 +88,4 @@ tests:
   - tests/MyPlugin.Tests/SqlFileLogicTests.cs
   - tests/MyPlugin.Tests/SqlDraftLogicTests.cs
   - tests/MyPlugin.Tests/SqlScriptTests.cs
-related: [result-grid, result-edit-bar, result-message-list, result-history-list, dialogs]
+related: [find-bar, result-grid, result-edit-bar, result-message-list, result-history-list, dialogs]

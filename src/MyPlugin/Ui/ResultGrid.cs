@@ -31,6 +31,12 @@ namespace MyPlugin
             _values = values ?? Array.Empty<string>();
         }
 
+        /// <summary>[행 추가]·[복제]로 만든 새 행(저장하면 INSERT).</summary>
+        public static ResultGridRow NewInserted(int number, string[] values)
+        {
+            return new ResultGridRow(number, values) { _state = RowEditState.Inserted };
+        }
+
         /// <summary>1부터 세는 행 번호.</summary>
         public int Number { get; }
 
@@ -60,9 +66,14 @@ namespace MyPlugin
             }
         }
 
-        /// <summary>고친 값을 넣는다. 원래 값과 같아지면 변경 없음으로 돌아간다(삭제 표시는 그대로).</summary>
+        /// <summary>고친 값을 넣는다. 원래 값과 같아지면 변경 없음으로 돌아간다(삭제 표시·새 행은 그대로).</summary>
         public void Apply(string[] values)
         {
+            if (State == RowEditState.Inserted)
+            {
+                Values = values;
+                return;
+            }
             if (Original == null)
                 Original = _values;
             Values = values;
@@ -496,10 +507,13 @@ namespace MyPlugin
             modified.Setters.Add(new Setter(Control.BackgroundProperty, Theme.ModifiedRow));
             var deleted = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.State)), Value = RowEditState.Deleted };
             deleted.Setters.Add(new Setter(Control.BackgroundProperty, Theme.DeletedRow));
+            var inserted = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.State)), Value = RowEditState.Inserted };
+            inserted.Setters.Add(new Setter(Control.BackgroundProperty, Theme.InsertedRow));
             var selected = new Trigger { Property = ListBoxItem.IsSelectedProperty, Value = true };
             selected.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension(Theme.Selection)));
             itemStyle.Triggers.Add(modified);
             itemStyle.Triggers.Add(deleted);
+            itemStyle.Triggers.Add(inserted);
             itemStyle.Triggers.Add(selected);
             _list.ItemContainerStyle = itemStyle;
             var baseHeader = _list.TryFindResource(typeof(GridViewColumnHeader)) as Style;
@@ -552,8 +566,11 @@ namespace MyPlugin
             modified.Setters.Add(new Setter(TextBlock.ForegroundProperty, Theme.Warning, "marker"));
             var deleted = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.State)), Value = RowEditState.Deleted };
             deleted.Setters.Add(new Setter(TextBlock.ForegroundProperty, Theme.Danger, "marker"));
+            var inserted = new DataTrigger { Binding = new Binding(nameof(ResultGridRow.State)), Value = RowEditState.Inserted };
+            inserted.Setters.Add(new Setter(TextBlock.ForegroundProperty, Theme.Success, "marker"));
             template.Triggers.Add(modified);
             template.Triggers.Add(deleted);
+            template.Triggers.Add(inserted);
             template.Seal();
             return template;
         }
@@ -675,6 +692,7 @@ namespace MyPlugin
                     {
                         case RowEditState.Modified: return "✎";
                         case RowEditState.Deleted: return "✖";
+                        case RowEditState.Inserted: return "＋";
                     }
                 }
                 return "";
@@ -698,6 +716,7 @@ namespace MyPlugin
                     {
                         case RowEditState.Modified: return "고친 행 — [저장]하면 UPDATE";
                         case RowEditState.Deleted: return "삭제 표시한 행 — [저장]하면 DELETE";
+                        case RowEditState.Inserted: return "추가한 행 — [저장]하면 INSERT";
                     }
                 }
                 return null;

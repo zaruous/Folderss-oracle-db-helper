@@ -300,7 +300,12 @@ namespace MyPlugin
             get { return Rows.Count(r => r.State == RowEditState.Deleted); }
         }
 
-        /// <summary>DB에 보내지 않은 수정·삭제 표시가 있음.</summary>
+        public int InsertedCount
+        {
+            get { return Rows.Count(r => r.State == RowEditState.Inserted); }
+        }
+
+        /// <summary>DB에 보내지 않은 추가·수정·삭제 표시가 있음.</summary>
         public bool HasPendingEdits
         {
             get { return Rows.Any(r => r.State != RowEditState.Unchanged); }

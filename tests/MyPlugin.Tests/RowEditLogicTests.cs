@@ -155,6 +155,33 @@ namespace MyPlugin.Tests
         }
 
         [Fact]
+        public void InsertStatement_SkipsNullAndUnsupportedColumns()
+        {
+            var table = RowEditLogic.Describe("HR", "EMP", Columns("ID:NUMBER", "NAME:VARCHAR2(10)", "PHOTO:BLOB", "HIRED:DATE"), Meta("ID", true), ":");
+
+            var query = RowEditLogic.InsertStatement(table, new[] { "8", null, "(BLOB 10바이트)", "2024-01-02" });
+            // NULL(NAME)·LOB(PHOTO)는 빼서 DB 기본값이 들어가게
+            Assert.Equal("INSERT INTO HR.EMP (ID, HIRED) VALUES (:i0, :i1)", query.Sql);
+            Assert.Equal(8m, query.Parameters[0].Value);
+            Assert.Equal(new DateTime(2024, 1, 2), query.Parameters[1].Value);
+
+            // 키를 비우면(자동 번호) 키 없이
+            Assert.Equal("INSERT INTO HR.EMP (NAME) VALUES (:i0)", RowEditLogic.InsertStatement(table, new[] { null, "LEE", null, null }).Sql);
+            // 넣을 값이 없으면 null(Oracle에는 DEFAULT VALUES가 없다)
+            Assert.Null(RowEditLogic.InsertStatement(table, new string[4]));
+            Assert.Null(RowEditLogic.InsertStatement(RowEditLogic.Unavailable("HR", "EMP", "x"), new[] { "1" }));
+        }
+
+        [Fact]
+        public void CopyForInsert_ClearsUnsupportedAndTruncatedValues()
+        {
+            var table = RowEditLogic.Describe("HR", "EMP", Columns("ID:NUMBER", "NOTE:VARCHAR2(4000)", "PHOTO:BLOB", "NAME:VARCHAR2(10)"), Meta("ID", true), ":");
+            var copy = RowEditLogic.CopyForInsert(table, new[] { "7", "abc…(전체 9000자)", "(BLOB 10바이트)", null });
+            // 잘린 표시 글·LOB 표시를 그대로 INSERT하지 않게 NULL로
+            Assert.Equal(new[] { "7", null, null, null }, copy);
+        }
+
+        [Fact]
         public void Describe_ShowsBindValues()
         {
             var table = RowEditLogic.Describe("HR", "EMP", Columns("ID:NUMBER", "NAME:VARCHAR2(10)", "HIRED:DATE"), Meta("ID", true), ":");
@@ -168,7 +195,10 @@ namespace MyPlugin.Tests
         {
             Assert.Equal("", RowEditLogic.PendingSummary(0, 0));
             Assert.Equal("수정 2 · 삭제 1", RowEditLogic.PendingSummary(2, 1));
-            Assert.Equal("저장: UPDATE 2행 · DELETE 1행 (커밋 전 — [커밋]으로 확정, [롤백]으로 취소)", RowEditLogic.SavedMessage(2, 1));
+            // 실행 순서(DELETE → UPDATE → INSERT)대로
+            Assert.Equal("저장: DELETE 1행 · UPDATE 2행 (커밋 전 — [커밋]으로 확정, [롤백]으로 취소)", RowEditLogic.SavedMessage(2, 1));
+            Assert.Equal("저장: DELETE 1행 · UPDATE 2행 · INSERT 3행 (커밋 전 — [커밋]으로 확정, [롤백]으로 취소)", RowEditLogic.SavedMessage(2, 1, 3));
+            Assert.Equal("추가 3 · 수정 2 · 삭제 1", RowEditLogic.PendingSummary(2, 1, 3));
             Assert.Equal("저장: 변경 없음", RowEditLogic.SavedMessage(0, 0));
             Assert.Contains("0행", RowEditLogic.AffectedMismatch(0));
             Assert.Contains("2행", RowEditLogic.AffectedMismatch(2));

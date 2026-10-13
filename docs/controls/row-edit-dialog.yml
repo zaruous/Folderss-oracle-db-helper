@@ -7,11 +7,15 @@ source:
   - src/MyPlugin/Ui/RowEditLogic.cs
 used_by: [result-edit-bar]
 summary: >-
-  결과 편집 막대의 [편집]으로 여는 모달 창. 한 행의 열마다 값 칸과 NULL 체크를 보이고,
+  결과 편집 막대의 [편집]·[행 추가]·[복제]로 여는 모달 창. 한 행의 열마다 값 칸과 NULL 체크를 보이고,
   [확인]하면 고친 값을 돌려준다(DB에 보내는 것은 [저장]).
 features:
   - name: 제목
     description: "\"행 편집 · 스키마.테이블 · 접속 이름\". 본문에는 설명·접속 배지를 두지 않는다."
+  - name: 새 행 모드
+    description: >-
+      [행 추가]·[복제]·저장 전 새 행의 [편집]. 제목 앞머리가 "행 추가"·"행 복제"·"새 행 편집"이고 위에 안내 한 줄.
+      NULL 체크는 꺼진 채 칸을 바로 입력할 수 있고, 빈 칸은 NULL로 돌려준다(INSERT에서 빠져 DB 기본값).
   - name: 열 줄
     description: >-
       왼쪽 열 이름(기본 키는 🔑)과 형식, 가운데 값 칸, 오른쪽 NULL 체크.

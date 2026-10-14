@@ -154,6 +154,108 @@ namespace MyPlugin.Tests
             Assert.Null(RowEditLogic.DeleteStatement(RowEditLogic.Unavailable("HR", "EMP", "x"), new[] { "1" }));
         }
 
+        // DBMS마다 이름이 다른 큰 데이터·이진 형식: 모두 편집할 수 없는 형식이다
+        [Theory]
+        [InlineData("CLOB")]
+        [InlineData("NCLOB")]
+        [InlineData("BLOB")]
+        [InlineData("RAW(2000)")]
+        [InlineData("LONG")]
+        [InlineData("LONG RAW")]
+        [InlineData("XMLTYPE")]
+        [InlineData("bytea")]
+        [InlineData("xml")]
+        [InlineData("jsonb")]
+        [InlineData("varbinary(max)")]
+        [InlineData("image")]
+        public void LobTypes_AreUnsupported(string label)
+        {
+            Assert.Equal(ColumnValueKind.Unsupported, RowEditLogic.KindOf(label));
+            Assert.NotNull(RowEditLogic.EditBlockReason(RowEditLogic.KindOf(label), "x"));
+        }
+
+        [Theory]
+        [InlineData("NOTE:CLOB")]
+        [InlineData("DOC:XMLTYPE")]
+        [InlineData("data:bytea")]
+        [InlineData("doc:xml")]
+        [InlineData("BIN:varbinary(max)")]
+        public void UpdateStatement_RejectsChangedLobColumn(string spec)
+        {
+            var table = RowEditLogic.Describe("HR", "T", Columns("ID:NUMBER", spec, "NAME:VARCHAR2(10)"), Meta("ID", true), ":");
+            var original = new[] { "1", "abc…(전체 5000자)", "KIM" };
+            var current = new[] { "1", "abc", "LEE" };
+
+            var reason = RowEditLogic.UpdateBlockReason(table, original, current);
+            Assert.NotNull(reason);
+            Assert.Contains("'" + spec.Substring(0, spec.IndexOf(':')) + "'", reason);
+            Assert.Contains("이 형식은 편집할 수 없습니다", reason);
+            var ex = Assert.Throws<InvalidOperationException>(() => RowEditLogic.UpdateStatement(table, original, current));
+            Assert.Equal(reason, ex.Message);
+
+            // NULL로 바꾸거나 NULL에서 채워도 거부(원래 값을 모른다)
+            Assert.NotNull(RowEditLogic.UpdateBlockReason(table, original, new[] { "1", null, "KIM" }));
+            Assert.NotNull(RowEditLogic.UpdateBlockReason(table, new[] { "1", null, "KIM" }, new[] { "1", "x", "KIM" }));
+        }
+
+        [Fact]
+        public void UpdateStatement_LeavesUnchangedLobOutOfSet()
+        {
+            var table = RowEditLogic.Describe("HR", "T", Columns("ID:NUMBER", "NOTE:CLOB", "PHOTO:BLOB", "NAME:VARCHAR2(10)"), Meta("ID", true), ":");
+            var original = new[] { "1", "abc…(전체 5000자)", "(BLOB 10바이트)", "KIM" };
+            var current = new[] { "1", "abc…(전체 5000자)", "(BLOB 10바이트)", "LEE" };
+
+            Assert.Null(RowEditLogic.UpdateBlockReason(table, original, current));
+            var query = RowEditLogic.UpdateStatement(table, original, current);
+            Assert.Equal("UPDATE HR.T SET NAME = :s0 WHERE ID = :k0", query.Sql);
+            Assert.Equal("LEE", query.Parameters[0].Value);
+            // LOB만 그대로면 바꿀 것이 없다
+            Assert.Null(RowEditLogic.UpdateStatement(table, original, (string[])original.Clone()));
+        }
+
+        [Fact]
+        public void UpdateStatement_RejectsTruncatedTextValue()
+        {
+            var table = RowEditLogic.Describe("HR", "T", Columns("ID:NUMBER", "MEMO:VARCHAR2(4000)", "BODY:text"), Meta("ID", true), ":");
+
+            // 원래 값이 잘려 보이던 칸을 바꿈
+            var reason = RowEditLogic.UpdateBlockReason(table, new[] { "1", "abc…(전체 4000자)", "x" }, new[] { "1", "abc", "x" });
+            Assert.Contains("'MEMO'", reason);
+            Assert.Contains("값이 잘려 보여", reason);
+            // 다른 행의 잘린 표시 글이 새 값으로 들어옴(다른 경로로 값을 바꾼 경우)
+            Assert.Throws<InvalidOperationException>(() => RowEditLogic.UpdateStatement(table, new[] { "1", "a", "x" }, new[] { "1", "a", "y…(전체 9000자)" }));
+            // 잘린 값이 그대로면 SET에서 빠진다
+            var query = RowEditLogic.UpdateStatement(table, new[] { "1", "abc…(전체 4000자)", "x" }, new[] { "1", "abc…(전체 4000자)", "y" });
+            Assert.Equal("UPDATE HR.T SET BODY = :s0 WHERE ID = :k0", query.Sql);
+        }
+
+        [Fact]
+        public void InsertStatement_RejectsTruncatedValue_SkipsLob()
+        {
+            var table = RowEditLogic.Describe("HR", "T", Columns("ID:NUMBER", "MEMO:VARCHAR2(4000)", "NOTE:CLOB"), Meta("ID", true), ":");
+
+            var reason = RowEditLogic.InsertBlockReason(table, new[] { "2", "abc…(전체 4000자)", null });
+            Assert.Contains("'MEMO'", reason);
+            Assert.Throws<InvalidOperationException>(() => RowEditLogic.InsertStatement(table, new[] { "2", "abc…(전체 4000자)", null }));
+            // LOB 열은 값이 있어도 INSERT에서 빠진다(거부하지 않음)
+            Assert.Null(RowEditLogic.InsertBlockReason(table, new[] { "2", "abc", "x…(전체 5000자)" }));
+            Assert.Equal("INSERT INTO HR.T (ID, MEMO) VALUES (:i0, :i1)", RowEditLogic.InsertStatement(table, new[] { "2", "abc", "x…(전체 5000자)" }).Sql);
+            // [복제]의 처음 값은 언제나 통과
+            Assert.Null(RowEditLogic.InsertBlockReason(table, RowEditLogic.CopyForInsert(table, new[] { "1", "abc…(전체 4000자)", "x…(전체 5000자)" })));
+        }
+
+        [Fact]
+        public void UpdateBlockReason_PassesOrdinaryColumns()
+        {
+            var table = RowEditLogic.Describe("HR", "EMP", Columns("ID:NUMBER", "NAME:VARCHAR2(10)", "HIRED:DATE", "SAL:NUMBER(7,2)"), Meta("ID", true), ":");
+            var original = new[] { "1", "KIM", "2024-01-02 00:00:00", "100" };
+            var current = new[] { "1", null, "2024-02-03 00:00:00", "200.5" };
+
+            Assert.Null(RowEditLogic.UpdateBlockReason(table, original, current));
+            Assert.Equal("UPDATE HR.EMP SET NAME = :s0, HIRED = :s1, SAL = :s2 WHERE ID = :k0", RowEditLogic.UpdateStatement(table, original, current).Sql);
+            Assert.Null(RowEditLogic.InsertBlockReason(table, current));
+        }
+
         [Fact]
         public void InsertStatement_SkipsNullAndUnsupportedColumns()
         {

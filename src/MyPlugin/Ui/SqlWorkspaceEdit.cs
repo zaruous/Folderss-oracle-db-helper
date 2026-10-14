@@ -230,6 +230,12 @@ namespace MyPlugin
             // 편집 창을 띄운 사이 결과가 바뀌었을 수 있다
             if (tab.Running || tab.ActiveResult != result || result.Grid == null)
                 return;
+            var blocked = RowEditLogic.InsertBlockReason(result.Edit, values);
+            if (blocked != null)
+            {
+                SetStatus(tab, WorkspaceLogic.TextStatus(blocked));
+                return;
+            }
             if (RowEditLogic.InsertStatement(result.Edit, values) == null)
             {
                 SetStatus(tab, WorkspaceLogic.TextStatus(NoInsertValues));
@@ -267,6 +273,12 @@ namespace MyPlugin
             var values = RowEditDialog.Show(Window.GetWindow(this), Profile(result.ResultDbId), result.Edit, row.Values, inserted, inserted ? "새 행 편집" : "행 편집");
             if (values == null)
                 return;
+            var blocked = inserted ? RowEditLogic.InsertBlockReason(result.Edit, values) : RowEditLogic.UpdateBlockReason(result.Edit, row.OriginalValues, values);
+            if (blocked != null)
+            {
+                SetStatus(tab, WorkspaceLogic.TextStatus(blocked));
+                return;
+            }
             if (inserted && RowEditLogic.InsertStatement(result.Edit, values) == null)
             {
                 SetStatus(tab, WorkspaceLogic.TextStatus(NoInsertValues));
@@ -337,6 +349,17 @@ namespace MyPlugin
             var changes = new List<KeyValuePair<ResultGridRow, SqlQuery>>();
             foreach (var row in result.Rows.Where(r => r.State != RowEditState.Unchanged).OrderBy(r => SaveOrder(r.State)).ThenBy(r => r.Number))
             {
+                // 편집 창과 같은 기준으로 한 번 더: 고칠 수 없는 칸(LOB·잘린 값)이 바뀌었으면 아무것도 보내지 않는다
+                var blocked = row.State == RowEditState.Inserted ? RowEditLogic.InsertBlockReason(result.Edit, row.Values)
+                    : row.State == RowEditState.Modified ? RowEditLogic.UpdateBlockReason(result.Edit, row.OriginalValues, row.Values)
+                    : null;
+                if (blocked != null)
+                {
+                    var text = row.Number.ToString(System.Globalization.CultureInfo.InvariantCulture) + "행: " + blocked;
+                    AddMessage(dbId, "결과 편집을 저장하지 않았습니다. " + text, MessageKind.Error);
+                    SetStatus(tab, WorkspaceLogic.TextStatus(text));
+                    return;
+                }
                 var query = row.State == RowEditState.Deleted ? RowEditLogic.DeleteStatement(result.Edit, row.OriginalValues)
                     : row.State == RowEditState.Inserted ? RowEditLogic.InsertStatement(result.Edit, row.Values)
                     : RowEditLogic.UpdateStatement(result.Edit, row.OriginalValues, row.Values);

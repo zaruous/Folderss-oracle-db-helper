@@ -324,12 +324,62 @@ namespace MyPlugin
         }
 
         /// <summary>
+        /// 저장 단계 검사(UPDATE): 편집 창과 같은 기준(EditBlockReason)으로 고칠 수 없는 칸 — 편집할 수 없는 형식(LOB 등)이거나
+        /// 원래 값·새 값이 잘려 보이는 칸 — 의 값이 원래 값과 다르면 저장을 거부할 이유("열 'X'(형식): …"). 문제가 없으면 null.
+        /// 값이 그대로인 칸은 UpdateStatement가 SET에서 빼므로 통과한다(조용히 빼지 않는다 — 잘린 표시 글이 LOB에 들어가는 일을 막는다).
+        /// </summary>
+        public static string UpdateBlockReason(EditableTable table, string[] original, string[] current)
+        {
+            if (table == null || original == null || current == null)
+                return null;
+            for (var i = 0; i < table.Columns.Count && i < current.Length; i++)
+            {
+                var before = i < original.Length ? original[i] : null;
+                if (string.Equals(before, current[i], StringComparison.Ordinal))
+                    continue;
+                var reason = EditBlockReason(table.KindAt(i), before) ?? EditBlockReason(table.KindAt(i), current[i]);
+                if (reason != null)
+                    return ColumnBlockMessage(table, i, reason);
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 저장 단계 검사(INSERT): 넣을 값이 잘려 보이면("…(전체 n자)") 거부할 이유. 문제가 없으면 null.
+        /// 편집할 수 없는 형식(LOB 등)의 열은 InsertStatement가 값과 상관없이 빼므로(DB 기본값·NULL) 여기서 막지 않는다.
+        /// </summary>
+        public static string InsertBlockReason(EditableTable table, string[] values)
+        {
+            if (table == null || values == null)
+                return null;
+            for (var i = 0; i < table.Columns.Count && i < values.Length; i++)
+            {
+                if (values[i] == null || table.KindAt(i) == ColumnValueKind.Unsupported)
+                    continue;
+                var reason = EditBlockReason(table.KindAt(i), values[i]);
+                if (reason != null)
+                    return ColumnBlockMessage(table, i, reason);
+            }
+            return null;
+        }
+
+        private static string ColumnBlockMessage(EditableTable table, int index, string reason)
+        {
+            var column = table.Columns[index];
+            return "열 '" + (column.Name ?? "") + "'(" + (column.TypeLabel ?? "") + "): " + reason + " — 바뀐 값을 저장하지 않습니다. 다시 조회(F1)한 뒤 고치세요.";
+        }
+
+        /// <summary>
         /// 바뀐 열만 SET에 넣는 UPDATE 문(바인드 s0, s1 … / 키 k0, k1 …). WHERE는 기본 키의 원래 값. 바뀐 열이 없으면 null.
+        /// 고칠 수 없는 칸(UpdateBlockReason)의 값이 바뀌었으면 InvalidOperationException(이유).
         /// </summary>
         public static SqlQuery UpdateStatement(EditableTable table, string[] original, string[] current)
         {
             if (table == null || !table.CanEdit || original == null || current == null)
                 return null;
+            var blocked = UpdateBlockReason(table, original, current);
+            if (blocked != null)
+                throw new InvalidOperationException(blocked);
             var sets = new List<string>();
             var query = new SqlQuery();
             for (var i = 0; i < table.Columns.Count && i < current.Length; i++)
@@ -350,11 +400,15 @@ namespace MyPlugin
         /// <summary>
         /// 새 행의 INSERT 문(바인드 i0, i1 …). 값이 NULL인 열과 편집할 수 없는 형식(LOB 등)의 열은 빼서
         /// DB 기본값·자동 번호(없으면 NULL)가 들어가게 한다. 넣을 값이 하나도 없으면 null.
+        /// 잘려 보이는 값(InsertBlockReason)이 있으면 InvalidOperationException(이유).
         /// </summary>
         public static SqlQuery InsertStatement(EditableTable table, string[] values)
         {
             if (table == null || !table.CanEdit || values == null)
                 return null;
+            var blocked = InsertBlockReason(table, values);
+            if (blocked != null)
+                throw new InvalidOperationException(blocked);
             var names = new List<string>();
             var binds = new List<string>();
             var query = new SqlQuery();

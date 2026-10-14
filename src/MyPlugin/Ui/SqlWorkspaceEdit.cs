@@ -11,7 +11,8 @@ namespace MyPlugin
 {
     /// <summary>
     /// 빠른 조회(F1) 결과 편집: 그리드 위 편집 막대([행 추가]·[복제]·[편집]·[삭제] │ [저장] │ WHERE 칸·[다시 조회])와 저장(DELETE·UPDATE·INSERT 실행).
-    /// 고친 행·삭제 표시한 행은 그리드가 바탕색·표시(✎·✖)로 드러내고, [저장]은 기본 키로 행마다 문장 하나를 실행한다(커밋 전 — [커밋]·[롤백]).
+    /// 고친 행·삭제 표시한 행은 그리드가 바탕색·표시(✎·✖)로 드러내고, [저장]은 행을 찾는 키(기본 키 → NOT NULL 고유 키 → Oracle ROWID)로
+    /// 행마다 문장 하나를 실행한다(커밋 전 — [커밋]·[롤백]).
     /// </summary>
     internal sealed partial class SqlWorkspace
     {
@@ -161,6 +162,9 @@ namespace MyPlugin
                 return;
             }
             var pending = RowEditLogic.PendingSummary(result.ModifiedCount, result.DeletedCount, result.InsertedCount);
+            // 기본 키가 아닌 키(고유 키·ROWID)로 행을 찾으면 대상 뒤에 밝힌다
+            if (edit.KeyNote != null)
+                target += " (" + edit.KeyNote + "로 행을 찾음)";
             _editInfo.Text = pending.Length == 0
                 ? target + " — 바꾼 행은 [저장]으로 DB에 보냅니다(커밋 전)"
                 : target + " — " + pending + " (저장하지 않음)";
@@ -270,6 +274,12 @@ namespace MyPlugin
                 return;
             }
             var inserted = row.State == RowEditState.Inserted;
+            var rowBlocked = inserted ? null : RowEditLogic.RowBlockReason(result.Edit, row.RowId);
+            if (rowBlocked != null)
+            {
+                SetStatus(tab, WorkspaceLogic.TextStatus(rowBlocked));
+                return;
+            }
             var values = RowEditDialog.Show(Window.GetWindow(this), Profile(result.ResultDbId), result.Edit, row.Values, inserted, inserted ? "새 행 편집" : "행 편집",
                 inserted ? null : row.OriginalValues);
             if (values == null)
@@ -317,6 +327,13 @@ namespace MyPlugin
                 SetStatus(tab, WorkspaceLogic.TextStatus(added.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) + "개 새 행을 뺐습니다(저장 전이라 DB와 무관)."));
                 return;
             }
+            var rowBlocked = rows.Select(r => RowEditLogic.RowBlockReason(result.Edit, r.RowId)).FirstOrDefault(r => r != null);
+            if (rowBlocked != null)
+            {
+                RenderEditBar();
+                SetStatus(tab, WorkspaceLogic.TextStatus(rowBlocked));
+                return;
+            }
             var unmark = rows.All(r => r.State == RowEditState.Deleted);
             foreach (var row in rows)
                 row.MarkDeleted(!unmark);
@@ -328,7 +345,7 @@ namespace MyPlugin
         }
 
         /// <summary>
-        /// [저장]: 고친 행마다 UPDATE(바뀐 열만), 삭제 표시한 행마다 DELETE를 기본 키로 실행한다. 확인 창에 문장을 보인 뒤 차례로 실행하고,
+        /// [저장]: 고친 행마다 UPDATE(바뀐 열만), 삭제 표시한 행마다 DELETE를 키(기본 키·고유 키·ROWID)로 실행한다. 확인 창에 문장을 보인 뒤 차례로 실행하고,
         /// 오류나 영향 행 수가 1이 아니면 그 행에서 멈춘다(이미 실행한 문장은 커밋 대기 — [롤백]으로 되돌릴 수 있다).
         /// </summary>
         private async Task SaveEditsAsync()
@@ -361,9 +378,9 @@ namespace MyPlugin
                     SetStatus(tab, WorkspaceLogic.TextStatus(text));
                     return;
                 }
-                var query = row.State == RowEditState.Deleted ? RowEditLogic.DeleteStatement(result.Edit, row.OriginalValues)
+                var query = row.State == RowEditState.Deleted ? RowEditLogic.DeleteStatement(result.Edit, row.OriginalValues, row.RowId)
                     : row.State == RowEditState.Inserted ? RowEditLogic.InsertStatement(result.Edit, row.Values)
-                    : RowEditLogic.UpdateStatement(result.Edit, row.OriginalValues, row.Values);
+                    : RowEditLogic.UpdateStatement(result.Edit, row.OriginalValues, row.Values, row.RowId);
                 if (query != null)
                     changes.Add(new KeyValuePair<ResultGridRow, SqlQuery>(row, query));
             }
@@ -489,17 +506,33 @@ namespace MyPlugin
         }
 
         /// <summary>
-        /// 빠른 조회 결과에 편집 대상을 붙인다: 데이터 사전의 기본 키 열을 결과 열에 맞춘다. 조회 전에 읽어 둔 열 정보(metadata)가 없으면 편집 불가로 표시.
+        /// 빠른 조회 결과에 편집 대상을 붙인다: 조회 전에 고른 키(key)의 열을 결과 열에 맞춘다. 조회 전에 읽어 둔 열 정보(metadata)가 없으면 편집 불가로 표시.
+        /// ROWID 키면 SELECT 끝에 붙인 ROWID 열을 결과 열에서 빼고 행마다 RowId로 떼어 둔 뒤 그리드를 다시 그린다.
         /// </summary>
-        private void AttachEditTarget(SqlTabState tab, OracleConnectionProfile profile, string owner, string objectName, string sql, List<ColumnInfo> metadata, string metadataError, string where)
+        private void AttachEditTarget(SqlTabState tab, OracleConnectionProfile profile, string owner, string objectName, string sql, List<ColumnInfo> metadata, RowKey key, string metadataError, string where)
         {
             var result = tab.ActiveResult;
             if (result == null || result.Columns == null || !string.Equals(result.Sql, sql, StringComparison.Ordinal))
                 return;
             var provider = DbProviders.For(profile);
-            result.Edit = metadata == null
-                ? RowEditLogic.Unavailable(owner, objectName, "열 정보를 읽지 못해 편집할 수 없습니다: " + (metadataError ?? ""))
-                : RowEditLogic.Describe(owner, objectName, result.Columns, metadata, RowEditLogic.ParameterPrefix(provider.Kind));
+            var rowId = key != null && key.Kind == RowKeyKind.RowId;
+            var last = result.Columns.Count - 1;
+            if (metadata == null)
+                result.Edit = RowEditLogic.Unavailable(owner, objectName, "열 정보를 읽지 못해 편집할 수 없습니다: " + (metadataError ?? ""));
+            else if (rowId && (last < 0 || !string.Equals(result.Columns[last].Name, RowEditLogic.RowIdAlias, StringComparison.OrdinalIgnoreCase)))
+                result.Edit = RowEditLogic.Unavailable(owner, objectName, "ROWID를 함께 조회하지 못해 편집할 수 없습니다.");
+            else
+            {
+                if (rowId)
+                {
+                    result.Columns.RemoveAt(last);
+                    foreach (var row in result.Rows)
+                        row.TakeRowId();
+                    if (result.Grid != null)
+                        result.Grid.Show(result.Columns, result.Rows);
+                }
+                result.Edit = RowEditLogic.Describe(owner, objectName, result.Columns, metadata, RowEditLogic.ParameterPrefix(provider.Kind), key);
+            }
             result.Edit.Where = where ?? "";
             if (result.Edit.CanEdit && result.Grid != null)
                 result.Grid.EnableEditMarkers(result.Rows.Count);
@@ -507,11 +540,32 @@ namespace MyPlugin
                 RenderEditBar();
         }
 
-        /// <summary>조회 전에 열 정보(기본 키)를 읽는다. 실패하면 null(error에 이유) — 조회는 그대로 한다.</summary>
+        /// <summary>조회 전에 열 정보(기본 키·NOT NULL)를 읽는다. 실패하면 예외 — 부르는 쪽이 편집 불가로 표시하고 조회는 그대로 한다.</summary>
         private static async Task<List<ColumnInfo>> LoadColumnsAsync(DbSession session, OracleConnectionProfile profile, string owner, string objectName)
         {
             var provider = DbProviders.For(profile);
             return await session.QueryAsync(provider.Metadata.Columns(owner, objectName), provider.Metadata.ReadColumn);
+        }
+
+        /// <summary>
+        /// 조회 전에 행을 찾을 키를 고른다(<see cref="RowEditLogic.ChooseKey"/>). 기본 키가 있으면 더 묻지 않고,
+        /// 없을 때만 고유 키 후보를, 그것도 없으면 ROWID를 쓸 수 있는 테이블인지(Oracle만 — 다른 DBMS는 조회가 null) 묻는다.
+        /// </summary>
+        private static async Task<RowKey> LoadRowKeyAsync(DbSession session, OracleConnectionProfile profile, string owner, string objectName, List<ColumnInfo> columns)
+        {
+            var provider = DbProviders.For(profile);
+            var key = RowEditLogic.ChooseKey(columns, null, provider.Kind, false);
+            if (key.Kind != RowKeyKind.None)
+                return key;
+            var unique = await session.QueryAsync(provider.Metadata.UniqueKeys(owner, objectName), provider.Metadata.ReadUniqueKey);
+            key = RowEditLogic.ChooseKey(columns, unique, provider.Kind, false);
+            if (key.Kind != RowKeyKind.None)
+                return key;
+            var rowIdQuery = provider.Metadata.RowIdTable(owner, objectName);
+            if (rowIdQuery == null)
+                return key;
+            var tables = await session.QueryAsync(rowIdQuery, record => true);
+            return RowEditLogic.ChooseKey(columns, unique, provider.Kind, tables.Count > 0);
         }
     }
 }

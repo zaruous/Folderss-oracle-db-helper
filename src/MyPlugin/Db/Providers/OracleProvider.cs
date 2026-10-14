@@ -91,6 +91,9 @@ namespace MyPlugin
             public DbObjectInfo ReadObject(IDataRecord record) { return OracleMetadata.ReadObject(record); }
             public SqlQuery Columns(string owner, string objectName) { return OracleMetadata.Columns(owner, objectName); }
             public ColumnInfo ReadColumn(IDataRecord record) { return OracleMetadata.ReadColumn(record); }
+            public SqlQuery UniqueKeys(string owner, string objectName) { return OracleMetadata.UniqueKeys(owner, objectName); }
+            public UniqueKeyColumn ReadUniqueKey(IDataRecord record) { return OracleMetadata.ReadUniqueKey(record); }
+            public SqlQuery RowIdTable(string owner, string objectName) { return OracleMetadata.RowIdTable(owner, objectName); }
             public SqlQuery SearchSchemas(string pattern, bool includeSystem, bool hasMaintainedFlag, int limit) { return OracleMetadata.SearchSchemas(pattern, includeSystem, hasMaintainedFlag, limit); }
             public SqlQuery SearchObjects(string pattern, bool includeSystem, bool hasMaintainedFlag, int limit) { return OracleMetadata.SearchObjects(pattern, includeSystem, hasMaintainedFlag, limit); }
             public SearchHit ReadObjectHit(IDataRecord record) { return OracleMetadata.ReadObjectHit(record); }

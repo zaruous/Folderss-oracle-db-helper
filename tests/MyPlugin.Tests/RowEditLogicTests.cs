@@ -397,6 +397,176 @@ namespace MyPlugin.Tests
             return RowEditLogic.Compose(date, RowEditLogic.TimePartOf(text));
         }
 
+        // ---- 기본 키가 없는 테이블: 고유 키 → Oracle ROWID ----
+
+        [Fact]
+        public void ChooseKey_PrefersPrimaryKeyOverUniqueKeys()
+        {
+            var meta = new List<ColumnInfo> { Col("ID", false, "NUMBER", pk: true), Col("CODE", false, "VARCHAR2(10)") };
+            var key = RowEditLogic.ChooseKey(meta, Keys("UK_CODE:CODE"), "oracle", true);
+            Assert.Equal(RowKeyKind.PrimaryKey, key.Kind);
+            Assert.Equal(new[] { "ID" }, key.Columns);
+            Assert.Null(key.Name);
+        }
+
+        [Fact]
+        public void ChooseKey_UniqueKey_SkipsNullable_ThenFewestColumns_ThenName()
+        {
+            var meta = new List<ColumnInfo>
+            {
+                Col("A", false, "NUMBER"), Col("B", false, "VARCHAR2(10)"), Col("C", false, "DATE"),
+                Col("EMAIL", true, "VARCHAR2(100)"), Col("PHOTO", false, "BLOB")
+            };
+            // UK_EMAIL은 열 하나지만 NULL 허용, UK_PHOTO는 바인드할 수 없는 형식, IX_EXPR는 사전에 없는 숨은 열(식 인덱스) → 뺀다
+            // 남은 것: UK_ABC(3열), UK_Z_AB(2열), UK_A_BC(2열) → 열이 적은 둘 중 이름순으로 UK_A_BC
+            var unique = Keys("UK_EMAIL:EMAIL", "UK_PHOTO:PHOTO", "IX_EXPR:SYS_NC00005$", "UK_ABC:A,B,C", "UK_Z_AB:A,B", "UK_A_BC:C,B");
+            var key = RowEditLogic.ChooseKey(meta, unique, "postgres", false);
+            Assert.Equal(RowKeyKind.UniqueKey, key.Kind);
+            Assert.Equal("UK_A_BC", key.Name);
+            // 열은 키 안의 순서(POSITION)대로
+            Assert.Equal(new[] { "C", "B" }, key.Columns);
+
+            // NULL 허용 고유 키만 있으면 고르지 않는다
+            var onlyNullable = RowEditLogic.ChooseKey(meta, Keys("UK_EMAIL:EMAIL"), "mssql", false);
+            Assert.Equal(RowKeyKind.None, onlyNullable.Kind);
+            Assert.Equal(RowEditLogic.NoKeyReason, onlyNullable.Reason);
+        }
+
+        [Fact]
+        public void ChooseKey_RowIdOnlyForOracleTables()
+        {
+            var meta = new List<ColumnInfo> { Col("NAME", true, "VARCHAR2(10)") };
+            Assert.Equal(RowKeyKind.RowId, RowEditLogic.ChooseKey(meta, null, "oracle", true).Kind);
+            Assert.Equal(RowKeyKind.RowId, RowEditLogic.ChooseKey(meta, null, "Oracle", true).Kind);
+            // 고유 키가 있으면 ROWID보다 고유 키
+            Assert.Equal(RowKeyKind.UniqueKey, RowEditLogic.ChooseKey(new List<ColumnInfo> { Col("NAME", false, "VARCHAR2(10)") }, Keys("UK:NAME"), "oracle", true).Kind);
+            // Oracle이라도 뷰 등(ROWID를 쓸 수 있는 테이블이 아님)은 거부
+            Assert.Equal(RowKeyKind.None, RowEditLogic.ChooseKey(meta, null, "oracle", false).Kind);
+            // PostgreSQL(ctid)·SQL Server·모르는 DBMS는 행 주소를 쓰지 않는다
+            foreach (var kind in new[] { "postgres", "mssql", "generic", null })
+            {
+                var key = RowEditLogic.ChooseKey(meta, null, kind, true);
+                Assert.Equal(RowKeyKind.None, key.Kind);
+                Assert.Equal("기본 키나 NOT NULL 고유 키가 없어 편집할 수 없습니다.", key.Reason);
+            }
+        }
+
+        [Fact]
+        public void Describe_NoKey_ShowsReadableReason()
+        {
+            var columns = Columns("NAME:text");
+            var meta = new List<ColumnInfo> { Col("NAME", true, "text") };
+            var table = RowEditLogic.Describe("public", "log", columns, meta, ":", RowEditLogic.ChooseKey(meta, null, "postgres", true));
+            Assert.False(table.CanEdit);
+            Assert.Equal(RowEditLogic.NoKeyReason, table.DisabledReason);
+            Assert.Null(RowEditLogic.UpdateStatement(table, new[] { "a" }, new[] { "b" }));
+        }
+
+        [Fact]
+        public void Describe_UniqueKey_UsesKeyColumnsInWhere()
+        {
+            var columns = Columns("NAME:VARCHAR2(10)", "CODE:VARCHAR2(10)", "SEQ:NUMBER");
+            var meta = new List<ColumnInfo> { Col("NAME", true, "VARCHAR2(10)"), Col("CODE", false, "VARCHAR2(10)"), Col("SEQ", false, "NUMBER") };
+            var key = RowEditLogic.ChooseKey(meta, Keys("UK_CODE_SEQ:CODE,SEQ"), "oracle", true);
+            var table = RowEditLogic.Describe("HR", "T", columns, meta, ":", key);
+            Assert.True(table.CanEdit);
+            Assert.Equal(RowKeyKind.UniqueKey, table.KeyKind);
+            Assert.Equal(new[] { 1, 2 }, table.KeyIndexes);
+            Assert.True(table.IsKey(1));
+            Assert.Equal("고유 키 UK_CODE_SEQ", table.KeyNote);
+
+            var update = RowEditLogic.UpdateStatement(table, new[] { "a", "X", "1" }, new[] { "b", "X", "1" });
+            Assert.Equal("UPDATE HR.T SET NAME = :s0 WHERE CODE = :k0 AND SEQ = :k1", update.Sql);
+            Assert.Equal(1m, update.Parameters[2].Value);
+
+            // 결과에 고유 키 열이 빠졌으면 편집 불가
+            var missing = RowEditLogic.Describe("HR", "T", Columns("NAME:VARCHAR2(10)", "CODE:VARCHAR2(10)"), meta, ":", key);
+            Assert.False(missing.CanEdit);
+            Assert.Contains("고유 키 열 'SEQ'", missing.DisabledReason);
+        }
+
+        [Fact]
+        public void RowIdKey_WhereByRowId_AndRowsWithoutRowIdAreBlocked()
+        {
+            var columns = Columns("NAME:VARCHAR2(10)", "QTY:NUMBER");
+            var meta = new List<ColumnInfo> { Col("NAME", true, "VARCHAR2(10)"), Col("QTY", true, "NUMBER") };
+            var table = RowEditLogic.Describe("HR", "LOG", columns, meta, ":", RowEditLogic.ChooseKey(meta, null, "oracle", true));
+            Assert.True(table.CanEdit);
+            Assert.True(table.UsesRowId);
+            Assert.Empty(table.KeyIndexes);
+            Assert.False(table.IsKey(0));
+            Assert.Equal("ROWID", table.KeyNote);
+
+            const string rid = "AAAR3sAAEAAAACXAAA";
+            var update = RowEditLogic.UpdateStatement(table, new[] { "a", "1" }, new[] { "b", "1" }, rid);
+            Assert.Equal("UPDATE HR.LOG SET NAME = :s0 WHERE ROWID = :rid", update.Sql);
+            Assert.Equal(new[] { "s0", "rid" }, update.Parameters.Select(p => p.Key));
+            Assert.Equal(rid, update.Parameters[1].Value);
+
+            var delete = RowEditLogic.DeleteStatement(table, new[] { "a", "1" }, rid);
+            Assert.Equal("DELETE FROM HR.LOG WHERE ROWID = :rid", delete.Sql);
+            Assert.Equal(rid, Assert.Single(delete.Parameters).Value);
+
+            // ROWID를 모르는 행(저장한 새 행)은 문장을 만들지 않고 막는다
+            Assert.Null(RowEditLogic.UpdateStatement(table, new[] { "a", "1" }, new[] { "b", "1" }));
+            Assert.Null(RowEditLogic.DeleteStatement(table, new[] { "a", "1" }));
+            Assert.Contains("ROWID", RowEditLogic.RowBlockReason(table, null));
+            Assert.Null(RowEditLogic.RowBlockReason(table, rid));
+            // 다른 키는 ROWID가 없어도 막지 않는다
+            Assert.Null(RowEditLogic.RowBlockReason(RowEditLogic.Describe("HR", "EMP", Columns("ID:NUMBER"), Meta("ID", true), ":"), null));
+
+            // INSERT는 ROWID와 무관
+            Assert.Equal("INSERT INTO HR.LOG (NAME, QTY) VALUES (:i0, :i1)", RowEditLogic.InsertStatement(table, new[] { "c", "2" }).Sql);
+        }
+
+        [Fact]
+        public void QuickQueryStatement_RowId_AppendsRowIdAsLastColumn()
+        {
+            Assert.Equal("SELECT HR.LOG.*, ROWIDTOCHAR(ROWID) AS \"DBH$ROWID\"\n  FROM HR.LOG", WorkspaceLogic.QuickQueryStatement("HR", "LOG", "", true));
+            var sql = WorkspaceLogic.QuickQueryStatement("HR", "LOG", "QTY > 1", true);
+            Assert.Equal("SELECT HR.LOG.*, ROWIDTOCHAR(ROWID) AS \"DBH$ROWID\"\n  FROM HR.LOG\n WHERE (QTY > 1)", sql);
+            var statement = SqlScript.Parse(sql);
+            Assert.Equal(SqlKind.Query, statement.Kind);
+            Assert.True(WorkspaceLogic.AllowedOnReadOnly(statement));
+            // ROWID를 쓰지 않으면 지금 그대로
+            Assert.Equal(WorkspaceLogic.SelectStatement("HR", "LOG"), WorkspaceLogic.QuickQueryStatement("HR", "LOG", "", false));
+        }
+
+        [Fact]
+        public void UniqueKeyQueries_PerProvider()
+        {
+            var oracle = DbProviders.Oracle.Metadata;
+            Assert.Contains("CONSTRAINT_TYPE = 'U'", oracle.UniqueKeys("HR", "T").Sql);
+            Assert.Contains("UNIQUENESS = 'UNIQUE'", oracle.UniqueKeys("HR", "T").Sql);
+            Assert.Contains("ALL_TABLES", oracle.RowIdTable("HR", "T").Sql);
+            Assert.Contains("indisunique", DbProviders.Postgres.Metadata.UniqueKeys("public", "t").Sql);
+            Assert.Contains("is_unique = 1", DbProviders.SqlServer.Metadata.UniqueKeys("dbo", "t").Sql);
+            // 행 주소는 Oracle만
+            Assert.Null(DbProviders.Postgres.Metadata.RowIdTable("public", "t"));
+            Assert.Null(DbProviders.SqlServer.Metadata.RowIdTable("dbo", "t"));
+        }
+
+        private static ColumnInfo Col(string name, bool nullable, string type, bool pk = false)
+        {
+            return new ColumnInfo { Name = name, Nullable = nullable, TypeLabel = type, PrimaryKey = pk };
+        }
+
+        /// <summary>"키이름:열1,열2" → 고유 키 열 행(POSITION은 쓴 순서).</summary>
+        private static List<UniqueKeyColumn> Keys(params string[] specs)
+        {
+            var list = new List<UniqueKeyColumn>();
+            foreach (var spec in specs)
+            {
+                var colon = spec.IndexOf(':');
+                var names = spec.Substring(colon + 1).Split(',');
+                for (var i = 0; i < names.Length; i++)
+                    list.Add(new UniqueKeyColumn { KeyName = spec.Substring(0, colon), ColumnName = names[i], Position = i + 1 });
+            }
+            // 데이터 사전이 돌려주는 순서와 무관하게 고르는지 보려고 섞는다
+            list.Reverse();
+            return list;
+        }
+
         private static List<ResultColumn> Columns(params string[] specs)
         {
             return specs.Select(s =>

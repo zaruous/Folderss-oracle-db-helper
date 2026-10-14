@@ -46,6 +46,16 @@ namespace MyPlugin
         public int Position { get; set; }
     }
 
+    /// <summary>고유 키(UNIQUE 제약·고유 인덱스)의 열 하나. 기본 키가 없을 때 결과 편집이 행을 찾는 키 후보.</summary>
+    public sealed class UniqueKeyColumn
+    {
+        /// <summary>제약 또는 인덱스 이름</summary>
+        public string KeyName { get; set; }
+        public string ColumnName { get; set; }
+        /// <summary>키 안의 열 순서(1부터)</summary>
+        public int Position { get; set; }
+    }
+
     /// <summary>트리 검색 결과 한 건. 객체 검색이면 ColumnName이 null.</summary>
     public sealed class SearchHit
     {
@@ -260,6 +270,59 @@ namespace MyPlugin
                 PrimaryKey = (Number(record, "IS_PK") ?? 0) != 0,
                 Position = (int)(Number(record, "COLUMN_ID") ?? 0)
             };
+        }
+
+        /// <summary>
+        /// 테이블의 고유 키 후보: 켜져 있고 검증된 UNIQUE 제약(ALL_CONSTRAINTS 'U' ENABLED·VALIDATED)과 고유 인덱스(ALL_INDEXES UNIQUE, 식 인덱스 제외).
+        /// 제약과 그 인덱스가 같은 이름·열이면 UNION으로 한 번만 나온다. 열: KEY_NAME, COLUMN_NAME, POSITION.
+        /// NOT NULL 여부는 ALL_TAB_COLUMNS(<see cref="Columns"/>)로 따로 본다.
+        /// </summary>
+        public static SqlQuery UniqueKeys(string owner, string objectName)
+        {
+            var query = new SqlQuery
+            {
+                Sql = "SELECT k.CONSTRAINT_NAME AS KEY_NAME, kc.COLUMN_NAME, kc.POSITION"
+                    + " FROM ALL_CONSTRAINTS k"
+                    + " JOIN ALL_CONS_COLUMNS kc ON kc.OWNER = k.OWNER AND kc.CONSTRAINT_NAME = k.CONSTRAINT_NAME AND kc.TABLE_NAME = k.TABLE_NAME"
+                    + " WHERE k.CONSTRAINT_TYPE = 'U' AND k.STATUS = 'ENABLED' AND k.VALIDATED = 'VALIDATED'"
+                    + " AND k.OWNER = :owner AND k.TABLE_NAME = :name"
+                    + " UNION"
+                    + " SELECT i.INDEX_NAME AS KEY_NAME, ic.COLUMN_NAME, ic.COLUMN_POSITION AS POSITION"
+                    + " FROM ALL_INDEXES i"
+                    + " JOIN ALL_IND_COLUMNS ic ON ic.INDEX_OWNER = i.OWNER AND ic.INDEX_NAME = i.INDEX_NAME"
+                    + " WHERE i.UNIQUENESS = 'UNIQUE' AND i.INDEX_TYPE NOT LIKE 'FUNCTION-BASED%'"
+                    + " AND i.TABLE_OWNER = :owner AND i.TABLE_NAME = :name"
+                    + " ORDER BY 1, 3"
+            };
+            Bind(query, "owner", owner);
+            Bind(query, "name", objectName);
+            return query;
+        }
+
+        public static UniqueKeyColumn ReadUniqueKey(IDataRecord record)
+        {
+            return new UniqueKeyColumn
+            {
+                KeyName = Text(record, "KEY_NAME"),
+                ColumnName = Text(record, "COLUMN_NAME"),
+                Position = (int)(Number(record, "POSITION") ?? 0)
+            };
+        }
+
+        /// <summary>
+        /// ROWID로 행을 찾을 수 있는 보통 테이블이면 한 행(ALL_TABLES). 뷰(조인 뷰는 ORA-01445)·인덱스 구성 테이블(논리 ROWID)·외부 테이블은 행이 없다.
+        /// </summary>
+        public static SqlQuery RowIdTable(string owner, string objectName)
+        {
+            var query = new SqlQuery
+            {
+                Sql = "SELECT 1 AS OK FROM ALL_TABLES t"
+                    + " WHERE t.OWNER = :owner AND t.TABLE_NAME = :name AND t.IOT_TYPE IS NULL"
+                    + " AND NOT EXISTS (SELECT 1 FROM ALL_EXTERNAL_TABLES x WHERE x.OWNER = t.OWNER AND x.TABLE_NAME = t.TABLE_NAME)"
+            };
+            Bind(query, "owner", owner);
+            Bind(query, "name", objectName);
+            return query;
         }
 
         /// <summary>

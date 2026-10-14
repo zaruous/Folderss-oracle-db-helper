@@ -39,7 +39,8 @@ features:
   - name: 빠른 조회(트리 F1)
     description: >-
       그 DB 탭에서 앞 100행을 조회한다. 편집기 글은 그대로 두고 실행 기록에는 남는다.
-      조회 전에 데이터 사전에서 기본 키 열을 읽어 결과 편집 대상을 정한다.
+      조회 전에 데이터 사전에서 행을 찾을 키(기본 키 → NOT NULL 고유 키 → Oracle ROWID)를 골라 결과 편집 대상을 정한다
+      (ROWID면 SELECT 끝에 ROWID를 붙여 가져오고 그리드에는 보이지 않는다).
   - name: SELECT 넣기
     description: >-
       트리 메뉴·Enter: 그 DB 대상 탭(없으면 새 탭)으로 옮겨 편집기 맨 위에 SELECT 문을 넣는다.

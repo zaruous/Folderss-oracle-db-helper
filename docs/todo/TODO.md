@@ -25,5 +25,8 @@
 - [ ] RAW 기본 키 지원 — RAW(16) GUID 기본 키 테이블은 지금 편집 불가. RAW는 2,000바이트 이하라 잘리지 않으므로
       "0x…" 표시를 바이트로 되돌려 바인드. 표시 형식은 테스트로 고정.
 - [ ] (보류) 짧은 CLOB 편집·BLOB 파일 넣기/꺼내기 — 큰 데이터는 편집하지 않는 원칙에 따라 필요해질 때 다시 검토.
-- [ ] 기본 키가 없는 테이블 편집 — 고유 키(NOT NULL UNIQUE) → Oracle ROWID 순으로 대체하는 방안 검토
+- [x] 기본 키가 없는 테이블 편집 — 고유 키(NOT NULL UNIQUE) → Oracle ROWID 순으로 대체하는 방안 검토
       (PostgreSQL ctid는 UPDATE마다 바뀌어 제외, SQL Server는 행 주소 없음).
+      → 기본 키 → NOT NULL 고유 키(열 수·이름순) → Oracle 보통 테이블 ROWID(`RowEditLogic.ChooseKey`).
+      ROWID는 빠른 조회 SELECT 끝에 붙여 가져와 그리드에 보이기 전에 뗌, WHERE `ROWID = :rid`. 그 밖 DBMS는 편집 불가 그대로.
+      PR: · 버전:

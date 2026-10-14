@@ -239,7 +239,16 @@ namespace MyPlugin
         public SqlQuery Source(string owner, string objectType, string name)
         {
             string sql;
-            if (objectType == "VIEW")
+            if (objectType == "SEQUENCE")
+            {
+                // pg_sequences(PostgreSQL 10+). last_value는 nextval 전이거나 USAGE·SELECT 권한이 없으면 NULL
+                sql = "SELECT 'SEQUENCE' AS \"PART\", quote_ident(s.schemaname) || '.' || quote_ident(s.sequencename) AS \"QNAME\","
+                    + " s.data_type::text AS \"TYPE_NAME\", s.start_value::text AS \"START_VALUE\", s.increment_by::text AS \"INCREMENT_BY\","
+                    + " s.min_value::text AS \"MIN_VALUE\", s.max_value::text AS \"MAX_VALUE\", s.cache_size::text AS \"CACHE_SIZE\","
+                    + " CASE WHEN s.cycle THEN 'Y' ELSE 'N' END AS \"CYCLE_FLAG\", s.last_value::text AS \"LAST_VALUE\""
+                    + " FROM pg_catalog.pg_sequences s WHERE s.schemaname = :owner AND s.sequencename = :name";
+            }
+            else if (objectType == "VIEW")
             {
                 sql = "SELECT 'VIEW' AS \"PART\", CASE c.relkind WHEN 'm' THEN 'CREATE MATERIALIZED VIEW ' ELSE 'CREATE OR REPLACE VIEW ' END"
                     + " || quote_ident(n.nspname) || '.' || quote_ident(c.relname) || ' AS' || chr(10) || pg_catalog.pg_get_viewdef(c.oid, true) AS \"TEXT\""
@@ -262,6 +271,22 @@ namespace MyPlugin
         /// <summary>조각마다 ;로 끝나게(pg_get_functiondef는 ; 없이 끝남) 빈 줄로 잇는다.</summary>
         public string BuildSource(string owner, string objectType, string name, IList<SourcePart> parts)
         {
+            if (objectType == "SEQUENCE")
+            {
+                return ObjectSource.SequenceDdl(parts,
+                    r => "마지막 값(last_value): " + (r.Field("LAST_VALUE") ?? "없음(아직 nextval 전이거나 볼 권한 없음)"),
+                    r => r.Field("QNAME"),
+                    r => new[]
+                    {
+                        "AS " + r.Field("TYPE_NAME"),
+                        "START WITH " + r.Field("START_VALUE"),
+                        "INCREMENT BY " + r.Field("INCREMENT_BY"),
+                        "MINVALUE " + r.Field("MIN_VALUE"),
+                        "MAXVALUE " + r.Field("MAX_VALUE"),
+                        "CACHE " + r.Field("CACHE_SIZE"),
+                        r.Field("CYCLE_FLAG") == "Y" ? "CYCLE" : "NO CYCLE"
+                    });
+            }
             return ObjectSource.JoinStatements(parts, ";");
         }
 

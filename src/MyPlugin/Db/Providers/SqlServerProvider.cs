@@ -318,9 +318,18 @@ namespace MyPlugin
         {
             var query = new SqlQuery
             {
-                Sql = "SELECT o.type_desc AS PART, m.definition AS TEXT"
-                    + " FROM sys.sql_modules m JOIN sys.objects o ON o.object_id = m.object_id JOIN sys.schemas s ON s.schema_id = o.schema_id"
-                    + " WHERE s.name = @owner AND o.name = @name"
+                Sql = objectType == "SEQUENCE"
+                    // 값 열은 sql_variant — 글로 바꿔 읽는다. decimal·numeric 시퀀스는 정밀도를 붙인다
+                    ? "SELECT 'SEQUENCE' AS PART, QUOTENAME(s.name) + '.' + QUOTENAME(q.name) AS QNAME,"
+                        + " TYPE_NAME(q.user_type_id) + CASE WHEN TYPE_NAME(q.user_type_id) IN ('decimal', 'numeric') THEN '(' + CAST(q.precision AS VARCHAR(10)) + ', 0)' ELSE '' END AS TYPE_NAME,"
+                        + " CONVERT(VARCHAR(40), q.start_value) AS START_VALUE, CONVERT(VARCHAR(40), q.increment) AS INCREMENT_BY,"
+                        + " CONVERT(VARCHAR(40), q.minimum_value) AS MIN_VALUE, CONVERT(VARCHAR(40), q.maximum_value) AS MAX_VALUE,"
+                        + " CASE WHEN q.is_cycling = 1 THEN 'Y' ELSE 'N' END AS CYCLE_FLAG, CASE WHEN q.is_cached = 1 THEN 'Y' ELSE 'N' END AS CACHE_FLAG,"
+                        + " CAST(q.cache_size AS VARCHAR(20)) AS CACHE_SIZE, CONVERT(VARCHAR(40), q.current_value) AS LAST_VALUE"
+                        + " FROM sys.sequences q JOIN sys.schemas s ON s.schema_id = q.schema_id WHERE s.name = @owner AND q.name = @name"
+                    : "SELECT o.type_desc AS PART, m.definition AS TEXT"
+                        + " FROM sys.sql_modules m JOIN sys.objects o ON o.object_id = m.object_id JOIN sys.schemas s ON s.schema_id = o.schema_id"
+                        + " WHERE s.name = @owner AND o.name = @name"
             };
             Bind(query, "owner", owner);
             Bind(query, "name", name);
@@ -329,6 +338,22 @@ namespace MyPlugin
 
         public string BuildSource(string owner, string objectType, string name, IList<SourcePart> parts)
         {
+            if (objectType == "SEQUENCE")
+            {
+                return ObjectSource.SequenceDdl(parts,
+                    r => "현재 값(current_value): " + (r.Field("LAST_VALUE") ?? "없음"),
+                    r => r.Field("QNAME"),
+                    r => new[]
+                    {
+                        "AS " + r.Field("TYPE_NAME"),
+                        "START WITH " + r.Field("START_VALUE"),
+                        "INCREMENT BY " + r.Field("INCREMENT_BY"),
+                        "MINVALUE " + r.Field("MIN_VALUE"),
+                        "MAXVALUE " + r.Field("MAX_VALUE"),
+                        r.Field("CYCLE_FLAG") == "Y" ? "CYCLE" : "NO CYCLE",
+                        r.Field("CACHE_FLAG") != "Y" ? "NO CACHE" : r.Field("CACHE_SIZE") == null ? "CACHE" : "CACHE " + r.Field("CACHE_SIZE")
+                    });
+            }
             return ObjectSource.JoinStatements(parts, "");
         }
 

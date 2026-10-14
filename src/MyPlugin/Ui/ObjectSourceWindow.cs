@@ -6,7 +6,7 @@ using System.Windows.Input;
 namespace MyPlugin
 {
     /// <summary>
-    /// 뷰·프로시저·함수·패키지 소스 창(트리 [소스 보기]·코드 객체 F4). 모달 아님(열어 둔 채 SQL을 쓸 수 있다), Esc로 닫음.
+    /// 뷰·프로시저·함수·패키지·시퀀스 소스 창(트리 [소스 보기]·코드 객체·시퀀스 F4). 모달 아님(열어 둔 채 SQL을 쓸 수 있다), Esc로 닫음.
     /// 위: 이름·종류·DB 배지. 가운데: 읽기 전용 고정폭 소스(선택·Ctrl+C 됨). 아래: [SQL 탭에 넣기]·[복사]·[닫기].
     /// </summary>
     internal static class ObjectSourceWindow
@@ -105,6 +105,7 @@ namespace MyPlugin
                 case "PROCEDURE": return "프로시저";
                 case "FUNCTION": return "함수";
                 case "PACKAGE": return "패키지";
+                case "SEQUENCE": return "시퀀스";
                 default: return objectType ?? "";
             }
         }

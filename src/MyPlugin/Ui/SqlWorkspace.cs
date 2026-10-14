@@ -1432,7 +1432,7 @@ namespace MyPlugin
             }
         }
 
-        /// <summary>소스 창(트리 [소스 보기]·코드 객체 F4): 뷰·프로시저·함수·패키지의 소스를 읽어 보인다.</summary>
+        /// <summary>소스 창(트리 [소스 보기]·코드 객체·시퀀스 F4): 뷰·프로시저·함수·패키지·시퀀스의 소스를 읽어 보인다.</summary>
         public async void ShowSource(string dbId, string owner, string objectType, string objectName)
         {
             try

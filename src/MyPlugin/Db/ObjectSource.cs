@@ -7,11 +7,22 @@ using System.Text;
 
 namespace MyPlugin
 {
-    /// <summary>소스 조회 한 행: PART(뷰·PROCEDURE·PACKAGE BODY 등 조각 구분), TEXT(그 조각의 원문 — Oracle은 한 줄).</summary>
+    /// <summary>
+    /// 소스 조회 한 행: PART(뷰·PROCEDURE·PACKAGE BODY 등 조각 구분), TEXT(그 조각의 원문 — Oracle은 한 줄).
+    /// 시퀀스처럼 원문이 없는 객체는 TEXT 대신 속성 열(START_VALUE·INCREMENT_BY …)을 Fields로 읽어 문장을 만든다.
+    /// </summary>
     public sealed class SourcePart
     {
         public string Part { get; set; }
         public string Text { get; set; }
+        /// <summary>그 행의 모든 열(이름 → 글, NULL은 null). 대소문자 무시.</summary>
+        public Dictionary<string, string> Fields { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        public string Field(string name)
+        {
+            string value;
+            return Fields.TryGetValue(name, out value) ? value : null;
+        }
     }
 
     /// <summary>
@@ -20,15 +31,33 @@ namespace MyPlugin
     /// </summary>
     internal static class ObjectSource
     {
-        /// <summary>소스 보기 대상: 뷰와 코드 묶음(PROCEDURE·FUNCTION·PACKAGE).</summary>
+        /// <summary>소스 보기 대상: 뷰·시퀀스와 코드 묶음(PROCEDURE·FUNCTION·PACKAGE).</summary>
         public static bool Supports(string objectType)
         {
-            return objectType == "VIEW" || (objectType != null && TreeGroups.GroupOf(objectType) == TreeGroups.Code);
+            return objectType == "VIEW" || objectType == "SEQUENCE" || (objectType != null && TreeGroups.GroupOf(objectType) == TreeGroups.Code);
         }
 
         public static SourcePart Read(IDataRecord record)
         {
-            return new SourcePart { Part = Text(record, "PART"), Text = Text(record, "TEXT") };
+            var part = new SourcePart();
+            for (var i = 0; i < record.FieldCount; i++)
+                part.Fields[record.GetName(i)] = record.IsDBNull(i) ? null : Convert.ToString(record.GetValue(i), CultureInfo.InvariantCulture);
+            part.Part = part.Field("PART");
+            part.Text = part.Field("TEXT");
+            return part;
+        }
+
+        /// <summary>
+        /// 시퀀스 문장: [설명 주석 줄] + "CREATE SEQUENCE 이름" + 줄마다 들여 쓴 절 + ';'. 행이 없으면(권한 없음·없는 시퀀스) null.
+        /// </summary>
+        public static string SequenceDdl(IList<SourcePart> parts, Func<SourcePart, string> comment, Func<SourcePart, string> name, Func<SourcePart, IEnumerable<string>> clauses)
+        {
+            if (parts.Count == 0)
+                return null;
+            var row = parts[0];
+            var head = comment(row);
+            return (string.IsNullOrEmpty(head) ? "" : "-- " + head + "\n")
+                + "CREATE SEQUENCE " + name(row) + "\n  " + string.Join("\n  ", clauses(row)) + ";\n";
         }
 
         /// <summary>
@@ -89,12 +118,6 @@ namespace MyPlugin
         public static string FailedMessage(string reason)
         {
             return "소스를 가져오지 못했습니다: " + reason;
-        }
-
-        private static string Text(IDataRecord record, string name)
-        {
-            var value = record[name];
-            return value == null || value is DBNull ? null : Convert.ToString(value, CultureInfo.InvariantCulture);
         }
     }
 }

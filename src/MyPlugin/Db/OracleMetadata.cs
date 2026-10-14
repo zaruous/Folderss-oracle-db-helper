@@ -235,6 +235,13 @@ namespace MyPlugin
             {
                 sql = "SELECT 'VIEW' AS PART, TEXT FROM ALL_VIEWS WHERE OWNER = :owner AND VIEW_NAME = :name";
             }
+            else if (objectType == "SEQUENCE")
+            {
+                // 숫자는 TO_CHAR로(MAXVALUE 기본값이 28자리라 .NET decimal 경계에 걸리지 않게). LAST_VALUE는 분석 함수 이름이라 따옴표 별칭
+                sql = "SELECT 'SEQUENCE' AS PART, TO_CHAR(LAST_NUMBER) AS \"LAST_VALUE\", TO_CHAR(INCREMENT_BY) AS INCREMENT_BY,"
+                    + " TO_CHAR(MIN_VALUE) AS MIN_VALUE, TO_CHAR(MAX_VALUE) AS MAX_VALUE, TO_CHAR(CACHE_SIZE) AS CACHE_SIZE,"
+                    + " CYCLE_FLAG, ORDER_FLAG FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = :owner AND SEQUENCE_NAME = :name";
+            }
             else
             {
                 var package = objectType == "PACKAGE";
@@ -245,7 +252,7 @@ namespace MyPlugin
             var query = new SqlQuery { Sql = sql };
             Bind(query, "owner", owner);
             Bind(query, "name", name);
-            if (objectType != "VIEW" && objectType != "PACKAGE")
+            if (objectType != "VIEW" && objectType != "SEQUENCE" && objectType != "PACKAGE")
                 Bind(query, "type", objectType);
             return query;
         }
@@ -253,6 +260,23 @@ namespace MyPlugin
         /// <summary>뷰: CREATE OR REPLACE VIEW 스키마.이름 AS + 원문 + ';' 줄. 코드: 조각마다 CREATE OR REPLACE + 원문 + '/' 줄.</summary>
         public static string BuildSource(string owner, string objectType, string name, IList<SourcePart> parts)
         {
+            if (objectType == "SEQUENCE")
+            {
+                // 처음 START WITH 값은 남지 않는다 — LAST_NUMBER(캐시를 넘긴 다음 번호)로 다시 만들면 이미 쓴 번호와 겹치지 않는다
+                return ObjectSource.SequenceDdl(parts,
+                    r => "START WITH는 지금의 LAST_NUMBER(다음에 나올 번호 근처)입니다. 처음 만들 때의 시작 값은 데이터 사전에 남지 않습니다.",
+                    r => WorkspaceLogic.QualifiedName(owner, name),
+                    r => new[]
+                    {
+                        "START WITH " + r.Field("LAST_VALUE"),
+                        "INCREMENT BY " + r.Field("INCREMENT_BY"),
+                        "MINVALUE " + r.Field("MIN_VALUE"),
+                        "MAXVALUE " + r.Field("MAX_VALUE"),
+                        r.Field("CACHE_SIZE") == "0" ? "NOCACHE" : "CACHE " + r.Field("CACHE_SIZE"),
+                        r.Field("CYCLE_FLAG") == "Y" ? "CYCLE" : "NOCYCLE",
+                        r.Field("ORDER_FLAG") == "Y" ? "ORDER" : "NOORDER"
+                    });
+            }
             if (objectType != "VIEW")
                 return ObjectSource.JoinPlSql(parts);
             var text = parts.Count == 0 ? null : parts[0].Text;

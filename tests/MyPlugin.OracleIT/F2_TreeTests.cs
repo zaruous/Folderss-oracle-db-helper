@@ -145,9 +145,9 @@ namespace MyPlugin.OracleIT
         }
 
         [OracleFact]
-        public async Task F2_5_Source_View_Procedure_Package()
+        public async Task F2_5_Source_View_Procedure_Package_Sequence()
         {
-            // 트리 [소스 보기]·코드 객체 F4와 같은 조회: 뷰는 ALL_VIEWS.TEXT(LONG), 코드는 ALL_SOURCE
+            // 트리 [소스 보기]·코드 객체 F4와 같은 조회: 뷰는 ALL_VIEWS.TEXT(LONG), 코드는 ALL_SOURCE, 시퀀스는 ALL_SEQUENCES
             using (var session = await Db.OpenSessionAsync())
             {
                 var meta = DbProviders.Oracle.Metadata;
@@ -170,6 +170,13 @@ namespace MyPlugin.OracleIT
                 Assert.Contains("\n\nCREATE OR REPLACE PACKAGE BODY ", pkg);
                 // 넣은 그대로 SQL 탭에서 실행하면 명세·본문 두 문장
                 Assert.Equal(2, SqlScript.Split(pkg).Count);
+
+                var seq = meta.BuildSource(Owner, "SEQUENCE", "SEQ_ORDER",
+                    await session.QueryAsync(meta.Source(Owner, "SEQUENCE", "SEQ_ORDER"), ObjectSource.Read));
+                Log(seq);
+                Assert.Contains("\nCREATE SEQUENCE " + Owner + ".SEQ_ORDER\n  START WITH ", seq);
+                Assert.Contains("\n  INCREMENT BY 1\n", seq);
+                Assert.Single(SqlScript.Split(seq));
 
                 Assert.Null(meta.BuildSource(Owner, "PROCEDURE", "NO_SUCH_PROC",
                     await session.QueryAsync(meta.Source(Owner, "PROCEDURE", "NO_SUCH_PROC"), ObjectSource.Read)));

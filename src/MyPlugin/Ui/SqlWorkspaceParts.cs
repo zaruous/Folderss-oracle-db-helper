@@ -1,8 +1,11 @@
 using System;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
+using System.Windows.Threading;
 
 namespace MyPlugin
 {
@@ -32,6 +35,107 @@ namespace MyPlugin
             };
             button.SetResourceReference(Control.BorderBrushProperty, Theme.Border);
             return button;
+        }
+
+        /// <summary>
+        /// 가로로 넘칠 수 있는 탭 줄. 스크롤바는 숨긴다(넘칠 때 스크롤바가 생기면 줄이 두꺼워져 아래 칸이 밀린다) — 휠로 가로 스크롤하고,
+        /// 넘칠 때만 listButton(▾)이 보인다. ▾를 누르면 fillList가 채운 메뉴(전체 탭 목록)를 연다. listButton은 호출자가 배치한다.
+        /// </summary>
+        public static ScrollViewer TabScroll(Panel items, string listName, Action<ContextMenu> fillList, out Button listButton)
+        {
+            var scroll = new ScrollViewer
+            {
+                Content = items,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Focusable = false
+            };
+            scroll.PreviewMouseWheel += (s, e) =>
+            {
+                if (scroll.ScrollableWidth <= 0)
+                    return;
+                e.Handled = true;
+                scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset - e.Delta / 2.0);
+            };
+            var button = new Button
+            {
+                Content = "▾",
+                ToolTip = listName,
+                Padding = new Thickness(6, 1, 6, 1),
+                Margin = new Thickness(2, 3, 0, 3),
+                VerticalAlignment = VerticalAlignment.Center,
+                Focusable = false,
+                Visibility = Visibility.Collapsed
+            };
+            AutomationProperties.SetName(button, listName);
+            // 탭 수·창 폭이 바뀌면 ScrollChanged(ExtentWidth·ViewportWidth 변화)가 온다
+            scroll.ScrollChanged += (s, e) =>
+            {
+                var visibility = scroll.ScrollableWidth > 0 ? Visibility.Visible : Visibility.Collapsed;
+                if (button.Visibility != visibility)
+                    button.Visibility = visibility;
+            };
+            button.Click += (s, e) =>
+            {
+                var menu = ScrollingMenu();
+                fillList(menu);
+                if (menu.Items.Count == 0)
+                    return;
+                menu.PlacementTarget = button;
+                menu.Placement = PlacementMode.Bottom;
+                menu.IsOpen = true;
+            };
+            listButton = button;
+            return scroll;
+        }
+
+        /// <summary>
+        /// 항목이 많으면 세로로 스크롤되는 메뉴. Folderss의 ContextMenu 템플릿에는 ScrollViewer가 없어 화면보다 길면 아래 항목에 닿을 수 없다.
+        /// </summary>
+        public static ContextMenu ScrollingMenu()
+        {
+            var border = new FrameworkElementFactory(typeof(Border));
+            border.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+            border.SetValue(Border.BorderBrushProperty, new TemplateBindingExtension(Control.BorderBrushProperty));
+            border.SetValue(Border.BorderThicknessProperty, new TemplateBindingExtension(Control.BorderThicknessProperty));
+            border.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Control.PaddingProperty));
+            border.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
+            var scroll = new FrameworkElementFactory(typeof(ScrollViewer));
+            scroll.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+            scroll.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+            scroll.SetValue(UIElement.FocusableProperty, false);
+            scroll.AppendChild(new FrameworkElementFactory(typeof(ItemsPresenter)));
+            border.AppendChild(scroll);
+            return new ContextMenu
+            {
+                Template = new ControlTemplate(typeof(ContextMenu)) { VisualTree = border },
+                MaxHeight = SystemParameters.WorkArea.Height * 0.6
+            };
+        }
+
+        /// <summary>메뉴 항목. 머리글을 TextBlock으로 넣어 글 속 '_'가 바로 가기 키 표시로 사라지지 않게 한다(파일 이름에 흔함).</summary>
+        public static MenuItem PlainMenuItem(string text, bool bold, Action click)
+        {
+            var item = new MenuItem { Header = new TextBlock { Text = text, FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal } };
+            item.Click += (s, e) => click();
+            return item;
+        }
+
+        /// <summary>배치가 끝난 뒤 그 요소가 보이게 스크롤한다(숨긴 스크롤바로 넘친 탭 줄에서 고른 탭이 보이게).</summary>
+        public static void BringIntoViewWhenLoaded(FrameworkElement element)
+        {
+            element.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            {
+                try
+                {
+                    if (element.IsLoaded)
+                        element.BringIntoView();
+                }
+                catch (Exception)
+                {
+                    // 그 사이 탭 줄을 다시 그렸으면 할 일이 없다
+                }
+            }));
         }
 
         public static void SetSelected(Button button, Border underline, bool selected)

@@ -148,7 +148,7 @@ namespace MyPlugin
                 {
                     if (!field.Editable)
                         continue;
-                    var text = field.Null.IsChecked == true || (insert && field.Box.Text.Length == 0) ? null : field.Box.Text;
+                    var text = TextOf(field, insert);
                     var reason = RowEditLogic.Validate(table.KindAt(field.Index), text);
                     if (reason != null)
                     {
@@ -166,7 +166,35 @@ namespace MyPlugin
             body.Children.Add(DialogKit.Buttons(ok, cancel));
             Field first = fields.Find(f => f.Editable && f.Box.IsEnabled);
             DialogKit.FocusOnLoad(window, first != null ? (IInputElement)first.Box : ok);
+            // [취소]·Esc·제목 표시줄 X·Alt+F4: 바꾼 칸이 있으면 버릴지 묻는다(기본은 [계속 편집]). [확인]으로 닫을 때는 묻지 않는다
+            var opened = CurrentValues(values, fields, insert);
+            window.Closing += (s, e) =>
+            {
+                if (edited == null && RowEditLogic.HasChanges(opened, CurrentValues(values, fields, insert))
+                    && !Dialogs.ConfirmDiscardRowEdit(window, profile, title))
+                    e.Cancel = true;
+            };
             return window.ShowDialog() == true ? edited : null;
+        }
+
+        /// <summary>칸이 돌려줄 값(NULL 체크면 null, 새 행의 빈 칸도 null). 검사는 하지 않는다.</summary>
+        private static string TextOf(Field field, bool insert)
+        {
+            return field.Null.IsChecked == true || (insert && field.Box.Text.Length == 0) ? null : field.Box.Text;
+        }
+
+        /// <summary>지금 칸들의 값(편집할 수 없는 칸은 넘겨받은 값 그대로) — 닫기 확인에서 창을 열 때 값과 비교한다.</summary>
+        private static string[] CurrentValues(string[] values, List<Field> fields, bool insert)
+        {
+            var current = (string[])values.Clone();
+            if (current.Length < fields.Count)
+                Array.Resize(ref current, fields.Count);
+            foreach (var field in fields)
+            {
+                if (field.Editable)
+                    current[field.Index] = TextOf(field, insert);
+            }
+            return current;
         }
     }
 }

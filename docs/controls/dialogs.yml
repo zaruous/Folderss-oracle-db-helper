@@ -4,7 +4,7 @@ title: 확인·안내 대화상자
 kind: dialog
 source:
   - src/MyPlugin/Ui/Dialogs.cs
-used_by: [sql-workspace, db-helper-view, result-edit-bar]
+used_by: [sql-workspace, db-helper-view, result-edit-bar, row-edit-dialog]
 summary: >-
   확인·선택·안내용 모달 창 모음(Dialogs·PasswordPrompt)과 그 공통 틀(DialogKit).
   되돌릴 수 없는 선택은 경고 + 확인 체크를 거쳐야 실행 버튼이 켜지고, 기본 버튼은 가장 안전한 쪽이다.
@@ -26,6 +26,10 @@ features:
   - name: 다시 조회 전 변경 버리기(ConfirmDiscardEdits)
     description: >-
       편집 막대 [다시 조회] 때 저장하지 않은 수정·삭제 표시가 있으면 [버리고 조회]·[취소]. 기본 버튼은 [취소].
+  - name: 행 편집 버리기(ConfirmDiscardRowEdit)
+    description: >-
+      행 편집 창을 [취소]·Esc·X로 닫을 때 바꾼 칸이 있으면. 제목은 편집 창 앞머리 · 접속, "바꾼 칸이 있습니다. 버리고 닫을까요?",
+      [버리고 닫기]·[계속 편집]. 기본 버튼(Enter·Esc)은 [계속 편집].
   - name: 안내(Show)
     description: 아이콘 + 글(오류면 위험색) + [확인]. Ctrl+C로 제목·내용을 복사한다.
   - name: 비밀번호 입력(PasswordPrompt)

@@ -346,6 +346,35 @@ namespace MyPlugin.Tests
         }
 
         [Fact]
+        public void HasChanges_ComparesCellsWithNullDistinctFromEmpty()
+        {
+            Assert.False(RowEditLogic.HasChanges(new[] { "1", "a", null }, new[] { "1", "a", null }));
+            Assert.True(RowEditLogic.HasChanges(new[] { "1", "a", null }, new[] { "1", "b", null }));
+            // NULL을 빈 문자열로(또는 그 반대로) 바꾼 것도 바뀐 칸
+            Assert.True(RowEditLogic.HasChanges(new[] { "1", null }, new[] { "1", "" }));
+            Assert.True(RowEditLogic.HasChanges(new[] { "1", "" }, new[] { "1", null }));
+            // 대소문자·공백도 그대로 비교
+            Assert.True(RowEditLogic.HasChanges(new[] { "a" }, new[] { "A" }));
+            Assert.True(RowEditLogic.HasChanges(new[] { "a" }, new[] { "a " }));
+            // 모자란 칸은 NULL로 본다
+            Assert.False(RowEditLogic.HasChanges(new[] { "1" }, new[] { "1", null }));
+            Assert.True(RowEditLogic.HasChanges(new[] { "1" }, new[] { "1", "x" }));
+            Assert.False(RowEditLogic.HasChanges(null, new string[] { null }));
+            Assert.False(RowEditLogic.HasChanges(null, null));
+        }
+
+        [Fact]
+        public void HasChanges_ReopenedRowComparesWithOpenedValues()
+        {
+            // 이미 고친 행(원래 "a" → 지금 "b")을 다시 열면 창에는 지금 값이 들어간다: 아무것도 안 바꾸고 닫으면 버릴 것이 없다
+            var original = new[] { "1", "a" };
+            var opened = new[] { "1", "b" };
+            Assert.False(RowEditLogic.HasChanges(opened, new[] { "1", "b" }));
+            // 창에서 원래 값으로 되돌린 것도 버려질 편집이다(원래 값과 같아도)
+            Assert.True(RowEditLogic.HasChanges(opened, original));
+        }
+
+        [Fact]
         public void DateTimeCompose_KeepsTimeAndFraction()
         {
             var day = new DateTime(2025, 12, 31);

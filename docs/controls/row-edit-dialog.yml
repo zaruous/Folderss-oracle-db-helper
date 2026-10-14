@@ -30,11 +30,16 @@ features:
     description: >-
       [확인]을 누를 때 숫자·날짜 형식을 검사한다. 틀리면 "⚠ 열: 이유"를 보이고 그 칸에 머문다.
       NULL은 언제나 통과한다.
+  - name: 닫기 확인
+    description: >-
+      [취소]·Esc·제목 표시줄 X·Alt+F4로 닫을 때 창을 연 뒤 바꾼 칸이 있으면 "바꾼 칸이 있습니다. 버리고 닫을까요?"를 묻는다
+      ([버리고 닫기]·[계속 편집], 기본은 [계속 편집]). [확인]으로 닫거나 바꾼 칸이 없으면 묻지 않는다.
+      비교 기준은 창을 열 때 값(RowEditLogic.HasChanges)이라 이미 고친 행을 다시 열고 그대로 닫으면 묻지 않는다.
 keyboard:
   - keys: Enter
     action: "[확인] (여러 줄 칸 안에서는 줄바꿈)."
   - keys: Esc
-    action: "[취소]."
+    action: "[취소]. 바꾼 칸이 있으면 버릴지 묻는다."
   - keys: Tab
     action: 다음 칸.
 theme:

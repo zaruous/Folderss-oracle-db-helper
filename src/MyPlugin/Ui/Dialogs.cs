@@ -153,6 +153,25 @@ namespace MyPlugin
         }
 
         /// <summary>
+        /// 행 편집 창을 [취소]·Esc·X로 닫을 때 바꾼 칸이 있으면: 버리고 닫을지. title은 편집 창 제목 앞머리("행 편집"·"행 추가"…).
+        /// 기본 버튼(Enter·Esc)은 [계속 편집] — 잘못 눌러도 고친 값을 버리지 않게. 버리면 true.
+        /// </summary>
+        public static bool ConfirmDiscardRowEdit(Window owner, OracleConnectionProfile profile, string title)
+        {
+            var window = DialogKit.Create(owner, DialogKit.TitleFor(string.IsNullOrWhiteSpace(title) ? "행 편집" : title, profile), 400);
+            var body = DialogKit.Body(window);
+            body.Children.Add(DialogKit.Text("바꾼 칸이 있습니다. 버리고 닫을까요?", 0));
+            body.Children.Add(DialogKit.Hint("고친 값을 남기려면 [계속 편집]한 뒤 [확인]하세요.", 8));
+            var discard = DialogKit.PrimaryButton("버리고 닫기");
+            var keep = DialogKit.CancelButton("계속 편집", true);
+            keep.Margin = new Thickness(8, 0, 0, 0);
+            discard.Click += (s, e) => window.DialogResult = true;
+            body.Children.Add(DialogKit.Buttons(discard, keep));
+            DialogKit.FocusOnLoad(window, keep);
+            return window.ShowDialog() == true;
+        }
+
+        /// <summary>
         /// 연결을 끊거나 창을 닫기 전 커밋 대기 변경 처리. action은 "연결을 끊기" / "창을 닫기" 같은 동사구.
         /// 라디오: 롤백(기본, "변경을 버립니다") / 커밋("변경을 DB에 반영합니다"), 버튼 [확인] [돌아가기].
         /// </summary>

@@ -12,10 +12,11 @@
       → 편집 창과 같은 `EditBlockReason`으로 `UpdateBlockReason`·`InsertBlockReason`을 두고, 고칠 수 없는 칸이 바뀌었으면
       저장 전체를 거부(열 이름 넣은 메시지, Update/InsertStatement는 예외). 그대로면 SET에서 빠짐. INSERT는 잘린 값만 거부(LOB 열은 원래대로 뺌).
       PR: · 버전:
-- [ ] 편집 팝업 변경 관리 — 원래 값과 다른 칸 강조, 툴팁 "원래 값: …", 칸별 ↶ 되돌리기·[모두 되돌리기],
+- [x] 편집 팝업 변경 관리 — 원래 값과 다른 칸 강조, 툴팁 "원래 값: …", 칸별 ↶ 되돌리기·[모두 되돌리기],
       이미 고친 행을 다시 열어도 원래 값(`ResultGridRow.Original`) 기준으로 비교.
+      → `RowEditChanges`(Ui/RowEditChangeLogic.cs). 새 행은 창을 열 때 값이 기준("처음 값"). PR: · 버전:
 - [x] 편집 팝업 닫기 확인 — 바꾼 칸이 있는데 [취소]·Esc면 "버리고 닫을까요?"(기본 [계속 편집]).
-      X·Alt+F4도 같다. 비교는 창을 열 때 값 기준(`RowEditLogic.HasChanges`), [확인]이면 묻지 않음. PR:  · 버전:
+      X·Alt+F4도 같다. 비교는 창을 열 때 값 기준(`RowEditChanges.HasChanges`), [확인]이면 묻지 않음. PR:  · 버전:
 - [ ] 그리드에서 바뀐 칸만 강조 — 행은 지금처럼 주황, 바뀐 칸은 더 진하게(찾기 강조와 같은 방식).
 - [ ] 복제 시 LOB 처리 — 지금은 LOB 열이 INSERT에서 빠져 NULL(원본 내용 손실, NOT NULL이면 오류).
       서버에서 그대로 복사(`INSERT … SELECT 원본 LOB FROM t WHERE 키 = :원본키`)하거나 최소한 복제 창에 경고.

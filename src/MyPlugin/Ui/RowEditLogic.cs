@@ -309,23 +309,6 @@ namespace MyPlugin
             return TryParseDate(text, out value) ? value.Date : (DateTime?)null;
         }
 
-        /// <summary>
-        /// 편집 창 닫기 확인: 창을 열 때 값(before)과 지금 칸의 값(after) 중 다른 칸이 있는지(NULL과 빈 문자열은 다르다).
-        /// 길이가 다르면 모자란 칸은 NULL로 본다.
-        /// </summary>
-        public static bool HasChanges(string[] before, string[] after)
-        {
-            var length = Math.Max(before != null ? before.Length : 0, after != null ? after.Length : 0);
-            for (var i = 0; i < length; i++)
-            {
-                var a = before != null && i < before.Length ? before[i] : null;
-                var b = after != null && i < after.Length ? after[i] : null;
-                if (!string.Equals(a, b, StringComparison.Ordinal))
-                    return true;
-            }
-            return false;
-        }
-
         public static bool SameValues(string[] a, string[] b)
         {
             if (ReferenceEquals(a, b))

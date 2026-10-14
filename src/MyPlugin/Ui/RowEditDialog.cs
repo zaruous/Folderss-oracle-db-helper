@@ -12,6 +12,8 @@ namespace MyPlugin
     /// 결과 행 편집 창(빠른 조회 F1의 [편집]). 열마다 이름(기본 키는 🔑)·형식과 값 칸, NULL 체크. 편집할 수 없는 칸(LOB 등 형식, 잘려 보이는 값)은 읽기 전용.
     /// [확인]은 숫자·날짜 형식을 검사해 틀리면 그 칸에 머문다. 돌려주는 값은 그리드 표시 문자열(null = NULL) — 저장할 때 형식에 맞춰 바인드한다.
     /// 새 행([행 추가]·[복제], insert = true)은 NULL 칸도 바로 입력할 수 있게 비워 두고, 빈 칸은 NULL로 돌려준다(INSERT에서 빠져 DB 기본값).
+    /// 변경 관리(RowEditChanges): 원래 값(original, 새 행은 창을 열 때 값)과 다른 칸은 경고색 바탕(Theme.ChangedCell)과 툴팁 "원래 값: …",
+    /// 칸 오른쪽 ↶로 그 칸만, [모두 되돌리기]로 전부 되돌린다. 편집할 수 없는 칸에는 ↶를 두지 않는다.
     /// </summary>
     internal static class RowEditDialog
     {
@@ -23,10 +25,15 @@ namespace MyPlugin
             public TextBox Box;
             public CheckBox Null;
             public bool Editable;
+            public Button Undo;
+            public string Hint;
         }
 
-        /// <summary>고친 값(열 순서, NULL은 null). 취소면 null. title은 창 제목 앞머리("행 편집"·"행 추가"·"행 복제").</summary>
-        public static string[] Show(Window owner, OracleConnectionProfile profile, EditableTable table, string[] values, bool insert = false, string title = "행 편집")
+        /// <summary>
+        /// 고친 값(열 순서, NULL은 null). 취소면 null. title은 창 제목 앞머리("행 편집"·"행 추가"·"행 복제").
+        /// original은 비교 기준인 조회한 원래 값(ResultGridRow.OriginalValues) — 새 행이면 null(창을 열 때 값이 기준).
+        /// </summary>
+        public static string[] Show(Window owner, OracleConnectionProfile profile, EditableTable table, string[] values, bool insert = false, string title = "행 편집", string[] original = null)
         {
             if (table == null || values == null)
                 return null;
@@ -41,7 +48,45 @@ namespace MyPlugin
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MaxWidth = 220 });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var fields = new List<Field>();
+            // 칸을 다 만든 뒤 정한다(칸의 이벤트는 창이 뜬 뒤에만 오므로 그때는 null이 아니다)
+            RowEditChanges changes = null;
+            Button revertAll = null;
+            Action<Field> refresh = field =>
+            {
+                if (changes == null)
+                    return;
+                // 바탕만으로는 어두운 테마에서 안 바뀐 칸과 밝기 차가 작아(1.0~1.5) 경고색 테두리도 준다
+                if (changes.IsChanged(field.Index))
+                {
+                    field.Box.Background = Theme.ChangedCell;
+                    field.Box.BorderBrush = Theme.Warning;
+                }
+                else
+                {
+                    field.Box.ClearValue(Control.BackgroundProperty);
+                    field.Box.ClearValue(Control.BorderBrushProperty);
+                }
+                var tip = changes.ToolTip(field.Index);
+                field.Box.ToolTip = tip == null ? field.Hint : field.Hint == null ? tip : tip + Environment.NewLine + field.Hint;
+                if (field.Undo != null)
+                    field.Undo.Visibility = changes.CanRevert(field.Index) ? Visibility.Visible : Visibility.Hidden;
+                revertAll.IsEnabled = changes.CanRevertAny;
+            };
+            Action<Field> sync = field =>
+            {
+                if (changes == null)
+                    return;
+                changes.Set(field.Index, RowEditChanges.FieldValue(field.Null.IsChecked == true, field.Box.Text, insert));
+                refresh(field);
+            };
+            // 되돌린 값을 칸에 다시 채운다(NULL이면 체크, 새 행은 빈 칸)
+            Action<Field, string> fill = (field, value) =>
+            {
+                field.Null.IsChecked = RowEditChanges.ShowsAsNull(value, insert);
+                field.Box.Text = value ?? "";
+            };
             for (var i = 0; i < table.Columns.Count; i++)
             {
                 var column = table.Columns[i];
@@ -82,7 +127,8 @@ namespace MyPlugin
                 };
                 if (kind == ColumnValueKind.Number)
                     box.HorizontalContentAlignment = HorizontalAlignment.Right;
-                box.ToolTip = blocked ?? (kind == ColumnValueKind.DateTime ? "yyyy-MM-dd HH:mm:ss[.fffffff]" : null);
+                var hint = blocked ?? (kind == ColumnValueKind.DateTime ? "yyyy-MM-dd HH:mm:ss[.fffffff]" : null);
+                box.ToolTip = hint;
                 AutomationProperties.SetName(box, column.Name ?? "");
                 FrameworkElement valueCell = box;
                 DateTimeBox picker = null;
@@ -104,6 +150,7 @@ namespace MyPlugin
                     VerticalAlignment = VerticalAlignment.Top
                 };
                 Theme.Foreground(isNull);
+                var field = new Field { Index = i, Box = box, Null = isNull, Editable = blocked == null, Hint = hint };
                 var captured = box;
                 if (picker != null)
                 {
@@ -121,7 +168,28 @@ namespace MyPlugin
                 Grid.SetColumn(isNull, 2);
                 grid.Children.Add(isNull);
 
-                fields.Add(new Field { Index = i, Box = box, Null = isNull, Editable = blocked == null });
+                if (field.Editable)
+                {
+                    box.TextChanged += (s, e) => sync(field);
+                    isNull.Checked += (s, e) => sync(field);
+                    isNull.Unchecked += (s, e) => sync(field);
+                    // 읽기 전용 칸(LOB 등)은 바꿀 수 없으므로 ↶를 두지 않는다
+                    var undo = ShellUi.SmallButton("↶", (insert ? "처음 값" : "원래 값") + "으로 되돌리기 — " + (column.Name ?? ""));
+                    undo.FontSize = 12;
+                    undo.Margin = new Thickness(6, 4, 0, 0);
+                    undo.VerticalAlignment = VerticalAlignment.Top;
+                    undo.Visibility = Visibility.Hidden;
+                    undo.Click += (s, e) =>
+                    {
+                        fill(field, changes.Revert(field.Index));
+                        refresh(field);
+                    };
+                    field.Undo = undo;
+                    Grid.SetRow(undo, row);
+                    Grid.SetColumn(undo, 3);
+                    grid.Children.Add(undo);
+                }
+                fields.Add(field);
             }
             body.Children.Add(new ScrollViewer
             {
@@ -163,14 +231,33 @@ namespace MyPlugin
                 edited = result;
                 window.DialogResult = true;
             };
-            body.Children.Add(DialogKit.Buttons(ok, cancel));
+            revertAll = DialogKit.PlainButton("모두 되돌리기");
+            revertAll.ToolTip = insert ? "바꾼 칸을 모두 창을 열 때 값으로 되돌립니다" : "바꾼 칸을 모두 조회한 원래 값으로 되돌립니다";
+            revertAll.Click += (s, e) =>
+            {
+                foreach (var index in changes.RevertAll())
+                    fill(fields.Find(f => f.Index == index), changes.CurrentAt(index));
+                fields.ForEach(refresh);
+            };
+            var editable = new bool[table.Columns.Count];
+            foreach (var field in fields)
+                editable[field.Index] = field.Editable;
+            changes = new RowEditChanges(original ?? values, values, editable, insert);
+            fields.ForEach(refresh);
+
+            var footer = new DockPanel { Margin = new Thickness(0, 13, 0, 0), LastChildFill = true };
+            DockPanel.SetDock(revertAll, Dock.Left);
+            footer.Children.Add(revertAll);
+            var buttons = DialogKit.Buttons(ok, cancel);
+            buttons.Margin = new Thickness(0);
+            footer.Children.Add(buttons);
+            body.Children.Add(footer);
             Field first = fields.Find(f => f.Editable && f.Box.IsEnabled);
             DialogKit.FocusOnLoad(window, first != null ? (IInputElement)first.Box : ok);
             // [취소]·Esc·제목 표시줄 X·Alt+F4: 바꾼 칸이 있으면 버릴지 묻는다(기본은 [계속 편집]). [확인]으로 닫을 때는 묻지 않는다
-            var opened = CurrentValues(values, fields, insert);
             window.Closing += (s, e) =>
             {
-                if (edited == null && RowEditLogic.HasChanges(opened, CurrentValues(values, fields, insert))
+                if (edited == null && changes.HasChanges
                     && !Dialogs.ConfirmDiscardRowEdit(window, profile, title))
                     e.Cancel = true;
             };
@@ -181,20 +268,6 @@ namespace MyPlugin
         private static string TextOf(Field field, bool insert)
         {
             return field.Null.IsChecked == true || (insert && field.Box.Text.Length == 0) ? null : field.Box.Text;
-        }
-
-        /// <summary>지금 칸들의 값(편집할 수 없는 칸은 넘겨받은 값 그대로) — 닫기 확인에서 창을 열 때 값과 비교한다.</summary>
-        private static string[] CurrentValues(string[] values, List<Field> fields, bool insert)
-        {
-            var current = (string[])values.Clone();
-            if (current.Length < fields.Count)
-                Array.Resize(ref current, fields.Count);
-            foreach (var field in fields)
-            {
-                if (field.Editable)
-                    current[field.Index] = TextOf(field, insert);
-            }
-            return current;
         }
     }
 }

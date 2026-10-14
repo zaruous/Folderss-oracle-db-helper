@@ -270,7 +270,8 @@ namespace MyPlugin
                 return;
             }
             var inserted = row.State == RowEditState.Inserted;
-            var values = RowEditDialog.Show(Window.GetWindow(this), Profile(result.ResultDbId), result.Edit, row.Values, inserted, inserted ? "새 행 편집" : "행 편집");
+            var values = RowEditDialog.Show(Window.GetWindow(this), Profile(result.ResultDbId), result.Edit, row.Values, inserted, inserted ? "새 행 편집" : "행 편집",
+                inserted ? null : row.OriginalValues);
             if (values == null)
                 return;
             var blocked = inserted ? RowEditLogic.InsertBlockReason(result.Edit, values) : RowEditLogic.UpdateBlockReason(result.Edit, row.OriginalValues, values);

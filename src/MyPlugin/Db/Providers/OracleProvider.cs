@@ -98,6 +98,8 @@ namespace MyPlugin
             public SearchHit ReadColumnHit(IDataRecord record) { return OracleMetadata.ReadColumnHit(record); }
             public SqlQuery ServerVersion() { return TableSpecQueries.ServerVersion(); }
             public string ReadServerVersion(IDataRecord record) { return TableSpecQueries.ReadServerVersion(record); }
+            public SqlQuery Source(string owner, string objectType, string name) { return OracleMetadata.Source(owner, objectType, name); }
+            public string BuildSource(string owner, string objectType, string name, IList<SourcePart> parts) { return OracleMetadata.BuildSource(owner, objectType, name, parts); }
         }
     }
 

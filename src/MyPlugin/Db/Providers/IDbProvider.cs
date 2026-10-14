@@ -100,5 +100,11 @@ namespace MyPlugin
         /// <summary>DBMS 제품·버전(정의서 표지). 읽는 쪽은 첫 행만 쓴다.</summary>
         SqlQuery ServerVersion();
         string ReadServerVersion(IDataRecord record);
+
+        /// <summary>뷰·코드 객체(<see cref="ObjectSource.Supports"/>)의 소스 조회. 열 PART, TEXT(<see cref="ObjectSource.Read"/>), 행 순서대로.</summary>
+        SqlQuery Source(string owner, string objectType, string name);
+
+        /// <summary>Source 행들을 SQL 탭에 넣을 글로 잇는다. 행이 없거나 글이 모두 비면 null(권한 없음·암호화·없는 객체).</summary>
+        string BuildSource(string owner, string objectType, string name, IList<SourcePart> parts);
     }
 }

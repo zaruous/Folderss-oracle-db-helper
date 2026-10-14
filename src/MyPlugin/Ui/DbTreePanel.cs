@@ -64,6 +64,9 @@ namespace MyPlugin
         /// <summary>트리 F4: 테이블·뷰 정보 창.</summary>
         void DescribeObject(string dbId, string owner, string objectName);
 
+        /// <summary>트리 메뉴 [소스 보기]·코드 객체 F4: 뷰·프로시저·함수·패키지 소스 창.</summary>
+        void ShowSource(string dbId, string owner, string objectType, string objectName);
+
         /// <summary>트리 조회 중 세션이 끊긴 것을 알았을 때 등 툴바·배지를 새로 그려야 할 때.</summary>
         void StateChanged(string dbId);
 
@@ -873,6 +876,19 @@ namespace MyPlugin
                 menu.Items.Add(describe);
                 menu.Items.Add(MenuAction("SELECT 문 넣기", true, () => _host.InsertSelect(dbId, owner, name)));
             }
+            if (row.Kind == TreeRowKind.Object && ObjectSource.Supports(row.ObjectType))
+            {
+                var owner = row.Owner;
+                var name = row.ObjectName;
+                var type = row.ObjectType;
+                // 뷰는 위의 [테이블 정보] 묶음 뒤에 붙인다(F4는 테이블 정보). 코드 객체는 F4가 소스 보기
+                if (!TreeGroups.HasColumns(type))
+                    menu.Items.Add(new Separator());
+                var source = MenuAction("소스 보기", true, () => _host.ShowSource(dbId, owner, type, name));
+                if (!TreeGroups.HasColumns(type))
+                    source.InputGestureText = "F4";
+                menu.Items.Add(source);
+            }
             // 테이블 정의서: 누른 행이 고른 행들 안에 있으면 고른 행 전부(같은 DB), 아니면 누른 행
             var targets = TableSpecRows(dbId, row);
             var specText = TableSpecLogic.MenuText(row, targets);
@@ -950,7 +966,7 @@ namespace MyPlugin
                     return;
                 }
                 var entry = CurrentEntry();
-                // F1 빠른 조회(앞 100행) · F4 테이블 정보: 테이블·뷰 행에서
+                // F1 빠른 조회(앞 100행) · F4 테이블 정보: 테이블·뷰 행에서. F4는 코드 객체(프로시저·함수·패키지)에서 소스 보기
                 if ((e.Key == Key.F1 || e.Key == Key.F4) && Keyboard.Modifiers == ModifierKeys.None)
                 {
                     var target = entry == null ? null : entry.Row;
@@ -961,6 +977,11 @@ namespace MyPlugin
                             _host.QuickQuery(target.DbId, target.Owner, target.ObjectName);
                         else
                             _host.DescribeObject(target.DbId, target.Owner, target.ObjectName);
+                    }
+                    else if (e.Key == Key.F4 && target != null && target.Kind == TreeRowKind.Object && ObjectSource.Supports(target.ObjectType))
+                    {
+                        e.Handled = true;
+                        _host.ShowSource(target.DbId, target.Owner, target.ObjectType, target.ObjectName);
                     }
                     return;
                 }

@@ -1432,6 +1432,78 @@ namespace MyPlugin
             }
         }
 
+        /// <summary>소스 창(트리 [소스 보기]·코드 객체 F4): 뷰·프로시저·함수·패키지의 소스를 읽어 보인다.</summary>
+        public async void ShowSource(string dbId, string owner, string objectType, string objectName)
+        {
+            try
+            {
+                var profile = Profile(dbId);
+                if (profile == null || string.IsNullOrEmpty(objectName) || !ObjectSource.Supports(objectType))
+                    return;
+                var session = _host.GetSession(dbId);
+                if (session == null || session.IsBroken)
+                {
+                    if (!await _host.ConnectAsync(dbId))
+                        return;
+                    session = _host.GetSession(dbId);
+                    if (session == null)
+                        return;
+                }
+                // 실행 중인 문장이 끝날 때까지 기다리지 않는다(세션 하나를 같이 쓴다)
+                if (IsRunning(dbId))
+                {
+                    AddMessage(dbId, ObjectSource.BusyMessage(profile.Name), MessageKind.Error);
+                    if (_active != null)
+                        SetStatus(_active, WorkspaceLogic.TextStatus(ObjectSource.BusyMessage(profile.Name)));
+                    return;
+                }
+                var qualified = ObjectSource.DisplayName(owner, objectName);
+                var tab = _active;
+                var before = tab != null ? tab.Status : null;
+                var loading = WorkspaceLogic.TextStatus(ObjectSource.LoadingMessage(qualified));
+                if (tab != null && !tab.Running)
+                    SetStatus(tab, loading);
+                string source;
+                try
+                {
+                    var meta = session.Provider.Metadata;
+                    var parts = await session.QueryAsync(meta.Source(owner, objectType, objectName), ObjectSource.Read, CancellationToken.None);
+                    source = meta.BuildSource(owner, objectType, objectName, parts);
+                }
+                catch (Exception ex)
+                {
+                    AddMessage(dbId, ObjectSource.FailedMessage(DbSession.DescribeError(ex)), MessageKind.Error);
+                    if (tab != null && tab.Status == loading)
+                        SetStatus(tab, WorkspaceLogic.TextStatus(ObjectSource.FailedMessage(DbSession.DescribeError(ex))));
+                    return;
+                }
+                if (tab != null && tab.Status == loading)
+                    SetStatus(tab, before ?? WorkspaceLogic.ReadyStatus());
+                if (source == null)
+                {
+                    AddMessage(dbId, ObjectSource.NotFoundMessage(qualified), MessageKind.Info);
+                    if (_active != null)
+                        SetStatus(_active, WorkspaceLogic.TextStatus(ObjectSource.NotFoundMessage(qualified)));
+                    return;
+                }
+                ObjectSourceWindow.Show(Window.GetWindow(this), owner, objectType, objectName, source, profile,
+                    () => Safe(() => OpenTextTab(dbId, source)),
+                    text => CopyText(text, "소스를 복사했습니다."));
+            }
+            catch (Exception ex)
+            {
+                ReportUnexpected(ex);
+            }
+        }
+
+        /// <summary>그 DB 대상의 새 SQL 탭에 글을 넣어 연다(실행하지 않음).</summary>
+        private void OpenTextTab(string dbId, string text)
+        {
+            var tab = CreateTab(dbId, text);
+            ActivateTab(tab, true);
+            Window.GetWindow(this)?.Activate();
+        }
+
         // ================= SQL 파일·메뉴 명령 =================
 
         /// <summary>메뉴·아이콘이 따르는 상태가 바뀜(탭 바꿈·실행 시작과 끝·저장하지 않은 변경 표시).</summary>

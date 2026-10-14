@@ -107,6 +107,31 @@ namespace MyPlugin.Tests
         }
 
         [PgFact]
+        public async Task Source_ViewAndOverloadedFunction()
+        {
+            // 어느 서버에나 있는 pg_catalog 객체로 읽기만 한다: 뷰 pg_tables, 오버로드가 있는 함수 lower(text·anyrange·anymultirange)
+            using (var session = await OpenAsync())
+            {
+                var meta = session.Provider.Metadata;
+                var view = meta.BuildSource("pg_catalog", "VIEW", "pg_tables",
+                    await session.QueryAsync(meta.Source("pg_catalog", "VIEW", "pg_tables"), ObjectSource.Read));
+                _output.WriteLine(view);
+                Assert.StartsWith("CREATE OR REPLACE VIEW pg_catalog.pg_tables AS\n", view);
+                Assert.EndsWith(";\n", view);
+
+                var parts = await session.QueryAsync(meta.Source("pg_catalog", "FUNCTION", "lower"), ObjectSource.Read);
+                Assert.True(parts.Count >= 2, "lower는 오버로드가 여럿이어야 합니다");
+                var code = meta.BuildSource("pg_catalog", "FUNCTION", "lower", parts);
+                _output.WriteLine(code);
+                Assert.Equal(parts.Count, code.Split(new[] { "CREATE OR REPLACE FUNCTION pg_catalog.lower(" }, StringSplitOptions.None).Length - 1);
+
+                Assert.Empty(await session.QueryAsync(meta.Source("pg_catalog", "PROCEDURE", "lower"), ObjectSource.Read));
+                Assert.Null(meta.BuildSource("pg_catalog", "VIEW", "no_such_view",
+                    await session.QueryAsync(meta.Source("pg_catalog", "VIEW", "no_such_view"), ObjectSource.Read)));
+            }
+        }
+
+        [PgFact]
         public async Task Execute_Select_Cursor_And_QueryTable_Probe()
         {
             using (var session = await OpenAsync())

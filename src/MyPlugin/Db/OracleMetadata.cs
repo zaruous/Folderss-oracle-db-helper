@@ -225,6 +225,44 @@ namespace MyPlugin
         }
 
         /// <summary>
+        /// 소스: 뷰는 ALL_VIEWS.TEXT(LONG — 세션이 InitialLONGFetchSize = -1로 읽는다), 프로시저·함수·패키지는 ALL_SOURCE 줄(LINE 순, 패키지는 명세 다음 본문).
+        /// 열: PART, TEXT. 볼 권한이 없는 패키지 본문은 행이 없다(명세만 나온다).
+        /// </summary>
+        public static SqlQuery Source(string owner, string objectType, string name)
+        {
+            string sql;
+            if (objectType == "VIEW")
+            {
+                sql = "SELECT 'VIEW' AS PART, TEXT FROM ALL_VIEWS WHERE OWNER = :owner AND VIEW_NAME = :name";
+            }
+            else
+            {
+                var package = objectType == "PACKAGE";
+                sql = "SELECT TYPE AS PART, TEXT FROM ALL_SOURCE WHERE OWNER = :owner AND NAME = :name"
+                    + (package ? " AND TYPE IN ('PACKAGE', 'PACKAGE BODY') ORDER BY CASE TYPE WHEN 'PACKAGE' THEN 1 ELSE 2 END, LINE"
+                        : " AND TYPE = :type ORDER BY LINE");
+            }
+            var query = new SqlQuery { Sql = sql };
+            Bind(query, "owner", owner);
+            Bind(query, "name", name);
+            if (objectType != "VIEW" && objectType != "PACKAGE")
+                Bind(query, "type", objectType);
+            return query;
+        }
+
+        /// <summary>뷰: CREATE OR REPLACE VIEW 스키마.이름 AS + 원문 + ';' 줄. 코드: 조각마다 CREATE OR REPLACE + 원문 + '/' 줄.</summary>
+        public static string BuildSource(string owner, string objectType, string name, IList<SourcePart> parts)
+        {
+            if (objectType != "VIEW")
+                return ObjectSource.JoinPlSql(parts);
+            var text = parts.Count == 0 ? null : parts[0].Text;
+            if (string.IsNullOrWhiteSpace(text))
+                return null;
+            // ';'는 줄을 따로 둔다(원문 끝이 -- 주석이어도 문장이 끝나게)
+            return "CREATE OR REPLACE VIEW " + WorkspaceLogic.QualifiedName(owner, name) + " AS\n" + text.TrimEnd() + "\n;\n";
+        }
+
+        /// <summary>
         /// 테이블·뷰의 열(ALL_TAB_COLUMNS) COLUMN_ID 순 + 기본 키 여부(ALL_CONSTRAINTS 'P' / ALL_CONS_COLUMNS).
         /// 열: OWNER, TABLE_NAME, COLUMN_NAME, DATA_TYPE, DATA_LENGTH, DATA_PRECISION, DATA_SCALE, NULLABLE, COLUMN_ID, CHAR_USED, CHAR_LENGTH, IS_PK(1/0).
         /// </summary>

@@ -143,5 +143,37 @@ namespace MyPlugin.OracleIT
                 Log("검색 결과 묶음: 스키마 " + result.Schemas.Count + " · 객체 " + result.Objects.Count + " · 열 " + result.Columns.Count);
             }
         }
+
+        [OracleFact]
+        public async Task F2_5_Source_View_Procedure_Package()
+        {
+            // 트리 [소스 보기]·코드 객체 F4와 같은 조회: 뷰는 ALL_VIEWS.TEXT(LONG), 코드는 ALL_SOURCE
+            using (var session = await Db.OpenSessionAsync())
+            {
+                var meta = DbProviders.Oracle.Metadata;
+                var view = meta.BuildSource(Owner, "VIEW", "V_ORDER_SUMMARY",
+                    await session.QueryAsync(meta.Source(Owner, "VIEW", "V_ORDER_SUMMARY"), ObjectSource.Read));
+                Log(view);
+                Assert.StartsWith("CREATE OR REPLACE VIEW " + Owner + ".V_ORDER_SUMMARY AS\n", view);
+                Assert.Contains("ORDERS", view);
+
+                var proc = meta.BuildSource(Owner, "PROCEDURE", "P_TOUCH",
+                    await session.QueryAsync(meta.Source(Owner, "PROCEDURE", "P_TOUCH"), ObjectSource.Read));
+                Log(proc);
+                Assert.StartsWith("CREATE OR REPLACE PROCEDURE", proc);
+                Assert.EndsWith("\n/\n", proc);
+
+                var pkg = meta.BuildSource(Owner, "PACKAGE", "PKG_UTIL",
+                    await session.QueryAsync(meta.Source(Owner, "PACKAGE", "PKG_UTIL"), ObjectSource.Read));
+                Log(pkg);
+                Assert.StartsWith("CREATE OR REPLACE PACKAGE ", pkg);
+                Assert.Contains("\n\nCREATE OR REPLACE PACKAGE BODY ", pkg);
+                // 넣은 그대로 SQL 탭에서 실행하면 명세·본문 두 문장
+                Assert.Equal(2, SqlScript.Split(pkg).Count);
+
+                Assert.Null(meta.BuildSource(Owner, "PROCEDURE", "NO_SUCH_PROC",
+                    await session.QueryAsync(meta.Source(Owner, "PROCEDURE", "NO_SUCH_PROC"), ObjectSource.Read)));
+            }
+        }
     }
 }

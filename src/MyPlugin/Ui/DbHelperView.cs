@@ -392,6 +392,11 @@ namespace MyPlugin
             _workspace.DescribeObject(dbId, owner, objectName);
         }
 
+        public void ShowSource(string dbId, string owner, string objectType, string objectName)
+        {
+            _workspace.ShowSource(dbId, owner, objectType, objectName);
+        }
+
         /// <summary>테이블 정보(F4)·테이블 정의서는 아직 Oracle 데이터 사전(ALL_*)으로만 읽는다. 다른 공급자면 알리고 false.</summary>
         private bool SupportsTableInfo(string dbId, string feature)
         {

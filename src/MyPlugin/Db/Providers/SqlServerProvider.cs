@@ -313,6 +313,25 @@ namespace MyPlugin
             return open > 0 ? text.Substring(0, open).Trim() : text;
         }
 
+        /// <summary>sys.sql_modules.definition: 만든 그대로의 CREATE 문. 암호화(WITH ENCRYPTION)·CLR 객체는 NULL·행 없음.</summary>
+        public SqlQuery Source(string owner, string objectType, string name)
+        {
+            var query = new SqlQuery
+            {
+                Sql = "SELECT o.type_desc AS PART, m.definition AS TEXT"
+                    + " FROM sys.sql_modules m JOIN sys.objects o ON o.object_id = m.object_id JOIN sys.schemas s ON s.schema_id = o.schema_id"
+                    + " WHERE s.name = @owner AND o.name = @name"
+            };
+            Bind(query, "owner", owner);
+            Bind(query, "name", name);
+            return query;
+        }
+
+        public string BuildSource(string owner, string objectType, string name, IList<SourcePart> parts)
+        {
+            return ObjectSource.JoinStatements(parts, "");
+        }
+
         // ---------- 도우미 ----------
 
         private static string TypeCase(string alias)

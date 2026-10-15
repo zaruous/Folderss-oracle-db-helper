@@ -95,6 +95,7 @@ namespace MyPlugin
         private Grid _strip;
         private StackPanel _tabPanel;
         private ScrollViewer _tabScroll;
+        private Button _tabList;
         private Button _addTab;
         private StackPanel _rightGroup;
         private ComboBox _target;
@@ -369,19 +370,18 @@ namespace MyPlugin
             Theme.Background(_strip, Theme.SurfaceBackground);
             _strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             _strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            _strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             _strip.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             _strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             _tabPanel = new StackPanel { Orientation = Orientation.Horizontal };
-            _tabScroll = new ScrollViewer
-            {
-                Content = _tabPanel,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Focusable = false
-            };
-            _tabScroll.PreviewMouseWheel += TabScroll_PreviewMouseWheel;
+            _tabScroll = WorkspaceUi.TabScroll(_tabPanel, "SQL 탭 목록", menu => Safe(() => FillTabList(menu)), out _tabList);
             _strip.Children.Add(_tabScroll);
+            Grid.SetColumn(_tabList, 1);
+            _strip.Children.Add(_tabList);
+            // ▾가 보이거나 숨으면 탭 줄이 쓸 수 있는 폭이 바뀐다
+            _tabList.IsVisibleChanged += (s, e) => Safe(UpdateTabStripLayout);
+            _tabList.SizeChanged += (s, e) => Safe(UpdateTabStripLayout);
 
             _addTab = new Button
             {
@@ -394,7 +394,7 @@ namespace MyPlugin
             };
             AutomationProperties.SetName(_addTab, "새 SQL 탭");
             _addTab.Click += (s, e) => Safe(AddTab);
-            Grid.SetColumn(_addTab, 1);
+            Grid.SetColumn(_addTab, 2);
             _strip.Children.Add(_addTab);
 
             _rightGroup = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 6, 0) };
@@ -450,7 +450,7 @@ namespace MyPlugin
             _cancel.Click += (s, e) => Safe(CancelActive);
             _rightGroup.Children.Add(_cancel);
 
-            Grid.SetColumn(_rightGroup, 3);
+            Grid.SetColumn(_rightGroup, 4);
             _strip.Children.Add(_rightGroup);
             _strip.SizeChanged += (s, e) => Safe(UpdateTabStripLayout);
             _rightGroup.SizeChanged += (s, e) => Safe(UpdateTabStripLayout);
@@ -570,14 +570,15 @@ namespace MyPlugin
             _gridHost.Children.Add(_gridPlaceholder);
             _gridHost.Children.Add(BuildResultFind());
             _resultTabs = new StackPanel { Orientation = Orientation.Horizontal };
+            Button resultList;
+            var resultScroll = WorkspaceUi.TabScroll(_resultTabs, "조회 결과 목록", menu => Safe(() => FillResultList(menu)), out resultList);
+            var resultRow = new DockPanel();
+            DockPanel.SetDock(resultList, Dock.Right);
+            resultRow.Children.Add(resultList);
+            resultRow.Children.Add(resultScroll);
             _resultStrip = new Border
             {
-                Child = new ScrollViewer
-                {
-                    Content = _resultTabs,
-                    HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                    VerticalScrollBarVisibility = ScrollBarVisibility.Disabled
-                },
+                Child = resultRow,
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Visibility = Visibility.Collapsed
             };
@@ -740,17 +741,18 @@ namespace MyPlugin
                 RaiseActiveTabChanged();
         }
 
-        private void CloseTab(SqlTabState tab)
+        /// <summary>탭을 닫는다. 닫았으면 true(실행 중·마지막 탭·저장 묻기에서 취소면 false).</summary>
+        private bool CloseTab(SqlTabState tab)
         {
             if (_tabs.Count <= 1 || !_tabs.Contains(tab))
-                return;
+                return false;
             if (tab.Running)
             {
                 AddMessage(tab.RunningDbId ?? tab.DbId, "'" + tab.Title + "' 탭은 실행 중이라 닫지 않았습니다. 먼저 취소하세요.", MessageKind.Error);
-                return;
+                return false;
             }
             if (!ConfirmCloseUnsaved(tab) || !_tabs.Contains(tab) || tab.Running)
-                return;
+                return false;
             if (ReleaseCursor(tab))
                 AddMessage(tab.ResultDbId, "'" + tab.Title + "' 탭을 닫아 열린 커서를 닫았습니다.", MessageKind.Info);
             var index = _tabs.IndexOf(tab);
@@ -768,6 +770,7 @@ namespace MyPlugin
             {
                 RenderTabs();
             }
+            return true;
         }
 
         private void RenderTabs()
@@ -781,22 +784,9 @@ namespace MyPlugin
                 if (tab == _active)
                     activeHeader = header;
             }
+            // 탭이 많아 가로로 스크롤될 때 지금 탭이 보이게
             if (activeHeader != null)
-            {
-                // 탭이 많아 가로로 스크롤될 때 지금 탭이 보이게(배치가 끝난 뒤)
-                Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
-                {
-                    try
-                    {
-                        if (activeHeader.IsLoaded)
-                            activeHeader.BringIntoView();
-                    }
-                    catch (Exception)
-                    {
-                        // 그 사이 탭 줄을 다시 그렸으면 할 일이 없다
-                    }
-                }));
-            }
+                WorkspaceUi.BringIntoViewWhenLoaded(activeHeader);
         }
 
         private Button BuildTabHeader(SqlTabState tab)
@@ -857,6 +847,7 @@ namespace MyPlugin
             button.ToolTip = (tab.FilePath ?? tab.Title) + (tab.ShownDirty ? " (저장하지 않은 변경 있음)" : "") + " — 대상: " + (profile != null ? profile.Name : "없음");
             AutomationProperties.SetName(button, tab.Title);
             button.Click += (s, e) => Safe(() => ActivateTab(tab, true));
+            button.ContextMenu = BuildTabMenu(tab);
             if (close != null)
             {
                 var glyph = close;
@@ -892,16 +883,58 @@ namespace MyPlugin
             if (_cursorInfo.Visibility != info)
                 _cursorInfo.Visibility = info;
             var used = _rightGroup.ActualWidth + _rightGroup.Margin.Left + _rightGroup.Margin.Right
-                + _addTab.ActualWidth + _addTab.Margin.Left + _addTab.Margin.Right;
+                + _addTab.ActualWidth + _addTab.Margin.Left + _addTab.Margin.Right
+                + (_tabList.IsVisible ? _tabList.ActualWidth + _tabList.Margin.Left + _tabList.Margin.Right : 0);
             _tabScroll.MaxWidth = Math.Max(60, width - used);
         }
 
-        private void TabScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        /// <summary>▾ 탭 목록: 모든 SQL 탭(지금 탭은 굵게). 고르면 그 탭으로 옮기고 탭 줄을 그 탭까지 스크롤한다.</summary>
+        private void FillTabList(ContextMenu menu)
         {
-            if (_tabScroll.ScrollableWidth <= 0)
-                return;
-            e.Handled = true;
-            Safe(() => _tabScroll.ScrollToHorizontalOffset(_tabScroll.HorizontalOffset - e.Delta / 2.0));
+            foreach (var tab in _tabs)
+            {
+                var item = tab;
+                var profile = Profile(item.DbId);
+                var text = item.Title + (item.ShownDirty ? "*" : "") + "  —  " + (profile != null ? profile.Name : "대상 없음");
+                menu.Items.Add(WorkspaceUi.PlainMenuItem(text, item == _active, () => Safe(() => ActivateTab(item, true))));
+            }
+        }
+
+        /// <summary>탭 머리 오른쪽 클릭 메뉴: 닫기 · 다른 탭 모두 닫기 · 왼쪽 탭 모두 닫기 · 오른쪽 탭 모두 닫기.</summary>
+        private ContextMenu BuildTabMenu(SqlTabState tab)
+        {
+            var menu = new ContextMenu();
+            var items = new[]
+            {
+                Tuple.Create("닫기", TabCloseScope.This),
+                Tuple.Create("다른 탭 모두 닫기", TabCloseScope.Others),
+                Tuple.Create("왼쪽 탭 모두 닫기", TabCloseScope.Left),
+                Tuple.Create("오른쪽 탭 모두 닫기", TabCloseScope.Right)
+            };
+            foreach (var entry in items)
+            {
+                var scope = entry.Item2;
+                var item = WorkspaceUi.PlainMenuItem(entry.Item1, false, () => Safe(() => CloseTabs(tab, scope)));
+                item.IsEnabled = WorkspaceLogic.TabsToClose(_tabs.Count, _tabs.IndexOf(tab), scope).Count > 0;
+                menu.Items.Add(item);
+            }
+            return menu;
+        }
+
+        /// <summary>
+        /// 메뉴로 여러 탭 닫기(앞에서 뒤로). 실행 중인 탭은 건너뛰고(메시지), 저장 묻기에서 [취소]하면 남은 탭은 닫지 않는다.
+        /// 끝나면 메뉴를 연 탭으로 옮긴다.
+        /// </summary>
+        private void CloseTabs(SqlTabState tab, TabCloseScope scope)
+        {
+            var targets = WorkspaceLogic.TabsToClose(_tabs.Count, _tabs.IndexOf(tab), scope).Select(i => _tabs[i]).ToList();
+            foreach (var target in targets)
+            {
+                if (!CloseTab(target) && !target.Running)
+                    break;
+            }
+            if (scope != TabCloseScope.This && _tabs.Contains(tab) && _active != tab)
+                ActivateTab(tab, true);
         }
 
         // ================= 대상 =================
@@ -1401,6 +1434,78 @@ namespace MyPlugin
             {
                 ReportUnexpected(ex);
             }
+        }
+
+        /// <summary>소스 창(트리 [소스 보기]·코드 객체·시퀀스 F4): 뷰·프로시저·함수·패키지·시퀀스의 소스를 읽어 보인다.</summary>
+        public async void ShowSource(string dbId, string owner, string objectType, string objectName)
+        {
+            try
+            {
+                var profile = Profile(dbId);
+                if (profile == null || string.IsNullOrEmpty(objectName) || !ObjectSource.Supports(objectType))
+                    return;
+                var session = _host.GetSession(dbId);
+                if (session == null || session.IsBroken)
+                {
+                    if (!await _host.ConnectAsync(dbId))
+                        return;
+                    session = _host.GetSession(dbId);
+                    if (session == null)
+                        return;
+                }
+                // 실행 중인 문장이 끝날 때까지 기다리지 않는다(세션 하나를 같이 쓴다)
+                if (IsRunning(dbId))
+                {
+                    AddMessage(dbId, ObjectSource.BusyMessage(profile.Name), MessageKind.Error);
+                    if (_active != null)
+                        SetStatus(_active, WorkspaceLogic.TextStatus(ObjectSource.BusyMessage(profile.Name)));
+                    return;
+                }
+                var qualified = ObjectSource.DisplayName(owner, objectName);
+                var tab = _active;
+                var before = tab != null ? tab.Status : null;
+                var loading = WorkspaceLogic.TextStatus(ObjectSource.LoadingMessage(qualified));
+                if (tab != null && !tab.Running)
+                    SetStatus(tab, loading);
+                string source;
+                try
+                {
+                    var meta = session.Provider.Metadata;
+                    var parts = await session.QueryAsync(meta.Source(owner, objectType, objectName), ObjectSource.Read, CancellationToken.None);
+                    source = meta.BuildSource(owner, objectType, objectName, parts);
+                }
+                catch (Exception ex)
+                {
+                    AddMessage(dbId, ObjectSource.FailedMessage(DbSession.DescribeError(ex)), MessageKind.Error);
+                    if (tab != null && tab.Status == loading)
+                        SetStatus(tab, WorkspaceLogic.TextStatus(ObjectSource.FailedMessage(DbSession.DescribeError(ex))));
+                    return;
+                }
+                if (tab != null && tab.Status == loading)
+                    SetStatus(tab, before ?? WorkspaceLogic.ReadyStatus());
+                if (source == null)
+                {
+                    AddMessage(dbId, ObjectSource.NotFoundMessage(qualified), MessageKind.Info);
+                    if (_active != null)
+                        SetStatus(_active, WorkspaceLogic.TextStatus(ObjectSource.NotFoundMessage(qualified)));
+                    return;
+                }
+                ObjectSourceWindow.Show(Window.GetWindow(this), owner, objectType, objectName, source, profile,
+                    () => Safe(() => OpenTextTab(dbId, source)),
+                    text => CopyText(text, "소스를 복사했습니다."));
+            }
+            catch (Exception ex)
+            {
+                ReportUnexpected(ex);
+            }
+        }
+
+        /// <summary>그 DB 대상의 새 SQL 탭에 글을 넣어 연다(실행하지 않음).</summary>
+        private void OpenTextTab(string dbId, string text)
+        {
+            var tab = CreateTab(dbId, text);
+            ActivateTab(tab, true);
+            Window.GetWindow(this)?.Activate();
         }
 
         // ================= SQL 파일·메뉴 명령 =================
@@ -2193,6 +2298,22 @@ namespace MyPlugin
                 AutomationProperties.SetName(button, label.Text);
                 button.Click += (s, e) => Safe(() => SelectResult(tab, item));
                 _resultTabs.Children.Add(button);
+                if (selected)
+                    WorkspaceUi.BringIntoViewWhenLoaded(button);
+            }
+        }
+
+        /// <summary>▾ 결과 목록: 지금 탭의 결과 하위 탭 모두(고른 것은 굵게).</summary>
+        private void FillResultList(ContextMenu menu)
+        {
+            var tab = _active;
+            if (tab == null)
+                return;
+            foreach (var result in tab.Results)
+            {
+                var item = result;
+                var text = WorkspaceLogic.ResultTabTitle(item.Number, item.Sql, item.Rows.Count, item.HasMoreRows);
+                menu.Items.Add(WorkspaceUi.PlainMenuItem(text, item == tab.ActiveResult, () => Safe(() => SelectResult(tab, item))));
             }
         }
 

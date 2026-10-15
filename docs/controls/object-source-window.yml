@@ -1,0 +1,52 @@
+id: object-source-window
+name: ObjectSourceWindow
+title: 소스 창
+kind: window
+source:
+  - src/MyPlugin/Ui/ObjectSourceWindow.cs
+  - src/MyPlugin/Db/ObjectSource.cs
+  - src/MyPlugin/Db/OracleMetadata.cs
+  - src/MyPlugin/Db/Providers/PostgresMetadata.cs
+  - src/MyPlugin/Db/Providers/SqlServerProvider.cs
+used_by: [db-tree-panel, sql-workspace]
+summary: >-
+  트리 [소스 보기]·코드 객체·시퀀스 F4로 여는 뷰·프로시저·함수·패키지·시퀀스 소스 창(모달 아님 — 열어 둔 채 SQL을 쓸 수 있다).
+  Oracle·PostgreSQL·SQL Server.
+features:
+  - name: 머리
+    description: 스키마.이름, 종류(뷰·프로시저·함수·패키지·시퀀스), DB 배지.
+  - name: 소스
+    description: >-
+      읽기 전용 고정폭 글(선택·Ctrl+C 됨, 줄바꿈 없음).
+      Oracle: 뷰는 CREATE OR REPLACE VIEW 스키마.이름 AS + ALL_VIEWS.TEXT + ';' 줄,
+      코드는 ALL_SOURCE를 CREATE OR REPLACE + 원문 + '/' 줄로(패키지는 명세 다음 본문).
+      PostgreSQL: 뷰는 pg_get_viewdef(구체화 뷰는 CREATE MATERIALIZED VIEW), 함수·프로시저는 pg_get_functiondef(오버로드마다).
+      SQL Server: sys.sql_modules.definition(만든 그대로).
+      시퀀스는 원문이 없어 데이터 사전 속성으로 CREATE SEQUENCE 문을 만든다(맨 위 주석 줄에 현재·마지막 값):
+      Oracle ALL_SEQUENCES(START WITH는 LAST_NUMBER), PostgreSQL pg_sequences, SQL Server sys.sequences.
+  - name: 아래 버튼
+    description: "[SQL 탭에 넣기](그 DB 대상 새 탭, 실행하지 않음)·[복사]·[닫기]."
+keyboard:
+  - keys: Esc
+    action: 닫기.
+theme:
+  - part: 창·소스
+    keys: [WindowBackground, PanelBackground, PrimaryText, SecondaryText]
+states:
+  - 읽는 동안 상태줄에 "… 소스를 가져오는 중…". 소스가 없으면 창 대신 메시지(권한 없음·암호화·없는 객체).
+  - 그 DB에서 실행 중이면 기다리지 않고 메시지만 남긴다(세션 하나를 같이 쓴다).
+limits:
+  - Oracle 코드 원문에는 스키마가 없다(SQL 탭에서 실행하면 현재 스키마에 만들어진다). 볼 권한이 없는 패키지 본문은 빠지고 명세만 나온다.
+  - Oracle 뷰 원문 안에 빈 줄이 있으면 SQL 탭의 문장 나누기(빈 줄에서 끝남)로 나뉜다.
+  - PostgreSQL의 $$ 본문, SQL Server의 GO·빈 줄은 SQL 탭의 문장 나누기가 모른다 — 넣은 소스를 그대로 실행하면 나뉠 수 있다(보기·복사 용도).
+  - SQL Server의 암호화(WITH ENCRYPTION)·CLR 객체는 소스가 없다.
+  - Oracle 시퀀스의 처음 START WITH 값은 데이터 사전에 없다 — 지금의 LAST_NUMBER(캐시를 넘긴 다음 번호)로 쓴다. 그 밖의 옵션(SCALE·SESSION·KEEP 등 18c+)은 넣지 않는다.
+  - PostgreSQL 시퀀스는 pg_sequences(10+)를 쓰고, OWNED BY(열 소유)는 넣지 않는다.
+verification:
+  - PostgreSQL 16 실서버(PostgresIT.Source_ViewAndOverloadedFunction, 뷰·구체화 뷰·프로시저·오버로드 함수·따옴표 이름 수동 확인).
+  - PostgreSQL 16 시퀀스: 만든 문장으로 지우고 다시 만들어 속성(형식·시작·증가·최소·최대·캐시·순환)이 같은지 왕복 확인(일반·따옴표 이름·음수 증가 순환).
+  - Oracle·SQL Server는 단위 테스트(SQL 모양·잇기)만. Oracle 실서버 시험은 MyPlugin.OracleIT F2_5.
+tests:
+  - tests/MyPlugin.Tests/ObjectSourceTests.cs
+  - tests/MyPlugin.Tests/PostgresIT.cs
+related: [db-tree-panel, table-info-window, sql-workspace]

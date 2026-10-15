@@ -5,6 +5,15 @@ using System.Text;
 
 namespace MyPlugin
 {
+    /// <summary>탭 닫기 메뉴의 범위: 이 탭 · 다른 탭 모두 · 왼쪽 탭 모두 · 오른쪽 탭 모두.</summary>
+    internal enum TabCloseScope
+    {
+        This,
+        Others,
+        Left,
+        Right
+    }
+
     /// <summary>
     /// SQL 작업 영역(SqlWorkspace)의 화면과 무관한 규칙(순수 로직, 테스트 대상):
     /// 탭 이름, 줄·열 표시, 식별자 따옴표·SELECT 문장, 상태줄·메시지 문장, 기록에서 넣을 문장, TSV, 결과 칸 표시, 열 너비 어림.
@@ -71,6 +80,26 @@ namespace MyPlugin
             while (used.Contains(TabTitle(n)))
                 n++;
             return n;
+        }
+
+        /// <summary>
+        /// 탭 닫기 메뉴로 닫을 탭 위치(앞에서 뒤로). 탭이 하나뿐이거나 index가 범위 밖이면 빈 목록(작업 영역은 탭을 하나 이상 둔다).
+        /// </summary>
+        public static List<int> TabsToClose(int count, int index, TabCloseScope scope)
+        {
+            var result = new List<int>();
+            if (count <= 1 || index < 0 || index >= count)
+                return result;
+            for (var i = 0; i < count; i++)
+            {
+                var hit = scope == TabCloseScope.This ? i == index
+                    : scope == TabCloseScope.Others ? i != index
+                    : scope == TabCloseScope.Left ? i < index
+                    : i > index;
+                if (hit)
+                    result.Add(i);
+            }
+            return result;
         }
 
         /// <summary>＋로 만든 탭의 첫 줄.</summary>

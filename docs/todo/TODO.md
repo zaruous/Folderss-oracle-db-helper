@@ -30,3 +30,13 @@
       → 기본 키 → NOT NULL 고유 키(열 수·이름순) → Oracle 보통 테이블 ROWID(`RowEditLogic.ChooseKey`).
       ROWID는 빠른 조회 SELECT 끝에 붙여 가져와 그리드에 보이기 전에 뗌, WHERE `ROWID = :rid`. 그 밖 DBMS는 편집 불가 그대로.
       PR: · 버전:
+
+## SQL 편집기 구문 강조 (AvalonEdit)
+
+계획·실측 항목·테스트 데이터: [`docs/sql-editor-avalonedit-plan.md`](../sql-editor-avalonedit-plan.md). 범위는 SQL 작업 영역 편집기만.
+
+- [ ] 1. PoC 실측(Windows) — 플러그인 로드, 성능, 한글 IME, 단축키 충돌, 테마 7종. 막는 문제가 있으면 여기서 중단.
+- [ ] 2. 주석·문자열 구간 계산 — `SqlScript`에 공개 함수 추가, 경계 사례(D1) 단위 테스트 먼저.
+- [ ] 3. `SqlEditor` 전용 컨트롤로 교체 — TextBox 1:1 흉내가 아닌 의도 단위 API, 직접 그린 줄 번호 삭제, 컨트롤 기술서 갱신.
+- [ ] 4. 강조 색칠 연결 — 테마별 색, 실측 재측정.
+- [ ] (별도) 테이블 이름 강조 — 메타데이터 대조 방식, 1~4 이후 검토.

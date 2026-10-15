@@ -26,6 +26,25 @@ namespace MyPlugin.Tests
         }
 
         [Fact]
+        public void TabsToClose_ByScope()
+        {
+            // 탭 5개(0~4) 중 2번에서 메뉴를 열었다
+            Assert.Equal(new[] { 2 }, WorkspaceLogic.TabsToClose(5, 2, TabCloseScope.This));
+            Assert.Equal(new[] { 0, 1, 3, 4 }, WorkspaceLogic.TabsToClose(5, 2, TabCloseScope.Others));
+            Assert.Equal(new[] { 0, 1 }, WorkspaceLogic.TabsToClose(5, 2, TabCloseScope.Left));
+            Assert.Equal(new[] { 3, 4 }, WorkspaceLogic.TabsToClose(5, 2, TabCloseScope.Right));
+            // 양 끝: 왼쪽·오른쪽에 닫을 탭이 없다
+            Assert.Empty(WorkspaceLogic.TabsToClose(5, 0, TabCloseScope.Left));
+            Assert.Empty(WorkspaceLogic.TabsToClose(5, 4, TabCloseScope.Right));
+            // 탭이 하나뿐이면 무엇도 닫지 않는다(작업 영역은 탭을 하나 이상 둔다)
+            foreach (TabCloseScope scope in Enum.GetValues(typeof(TabCloseScope)))
+                Assert.Empty(WorkspaceLogic.TabsToClose(1, 0, scope));
+            // 범위 밖
+            Assert.Empty(WorkspaceLogic.TabsToClose(5, -1, TabCloseScope.Others));
+            Assert.Empty(WorkspaceLogic.TabsToClose(5, 5, TabCloseScope.This));
+        }
+
+        [Fact]
         public void NewTabText_NamesTargetOrNone()
         {
             Assert.Equal("-- 대상: 개발\n", WorkspaceLogic.NewTabText("개발"));

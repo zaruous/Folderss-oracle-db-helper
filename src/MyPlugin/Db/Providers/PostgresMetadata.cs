@@ -151,6 +151,47 @@ namespace MyPlugin
             };
         }
 
+        /// <summary>
+        /// 고유 인덱스(UNIQUE 제약도 고유 인덱스로 만들어진다): 기본 키·부분 인덱스(WHERE)·식 인덱스·아직 쓸 수 없는 인덱스는 뺀다.
+        /// INCLUDE 열(indnkeyatts 뒤)은 고유성에 들지 않으므로 뺀다.
+        /// </summary>
+        public SqlQuery UniqueKeys(string owner, string objectName)
+        {
+            var query = new SqlQuery
+            {
+                Sql = "SELECT i.relname AS \"KEY_NAME\", a.attname AS \"COLUMN_NAME\", k.ord AS \"POSITION\""
+                    + " FROM pg_catalog.pg_index x"
+                    + " JOIN pg_catalog.pg_class c ON c.oid = x.indrelid"
+                    + " JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace"
+                    + " JOIN pg_catalog.pg_class i ON i.oid = x.indexrelid"
+                    + " CROSS JOIN LATERAL unnest(x.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)"
+                    + " JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum"
+                    + " WHERE n.nspname = :owner AND c.relname = :name"
+                    + " AND x.indisunique AND NOT x.indisprimary AND x.indisvalid AND x.indpred IS NULL AND x.indexprs IS NULL"
+                    + " AND k.ord <= x.indnkeyatts"
+                    + " ORDER BY 1, 3"
+            };
+            Bind(query, "owner", owner);
+            Bind(query, "name", objectName);
+            return query;
+        }
+
+        public UniqueKeyColumn ReadUniqueKey(IDataRecord record)
+        {
+            return new UniqueKeyColumn
+            {
+                KeyName = Text(record, "KEY_NAME"),
+                ColumnName = Text(record, "COLUMN_NAME"),
+                Position = (int)(Number(record, "POSITION") ?? 0)
+            };
+        }
+
+        /// <summary>ctid는 UPDATE마다 바뀌어 행을 다시 찾는 데 쓸 수 없다.</summary>
+        public SqlQuery RowIdTable(string owner, string objectName)
+        {
+            return null;
+        }
+
         public SqlQuery SearchSchemas(string pattern, bool includeSystem, bool hasMaintainedFlag, int limit)
         {
             var query = new SqlQuery

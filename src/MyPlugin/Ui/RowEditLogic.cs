@@ -29,9 +29,35 @@ namespace MyPlugin
         Unsupported
     }
 
+    /// <summary>결과 편집이 UPDATE·DELETE의 WHERE로 행을 찾는 방법.</summary>
+    internal enum RowKeyKind
+    {
+        /// <summary>행을 찾을 키가 없음(편집할 수 없음).</summary>
+        None,
+        PrimaryKey,
+        /// <summary>모든 열이 NOT NULL인 UNIQUE 제약·고유 인덱스.</summary>
+        UniqueKey,
+        /// <summary>Oracle ROWID(조회 SELECT 끝에 붙여 가져오고 그리드에는 보이지 않는다).</summary>
+        RowId
+    }
+
     /// <summary>
-    /// 빠른 조회(F1) 결과를 편집·저장할 대상 테이블. 어느 열이 기본 키인지(WHERE에 쓸 열), 열마다 값 종류를 안다.
-    /// 기본 키가 없거나 결과에 기본 키 열이 빠졌으면 CanEdit = false(DisabledReason에 이유).
+    /// 행을 찾을 키: 기본 키 → NOT NULL 고유 키 → (Oracle 테이블만) ROWID 순으로 고른 것(<see cref="RowEditLogic.ChooseKey"/>).
+    /// </summary>
+    internal sealed class RowKey
+    {
+        public RowKeyKind Kind { get; set; }
+        /// <summary>고유 키의 제약·인덱스 이름. 기본 키·ROWID면 null.</summary>
+        public string Name { get; set; }
+        /// <summary>키 열 이름(키 순서). ROWID·없음이면 비어 있다.</summary>
+        public string[] Columns { get; set; } = Array.Empty<string>();
+        /// <summary>Kind가 None일 때 편집할 수 없는 이유.</summary>
+        public string Reason { get; set; }
+    }
+
+    /// <summary>
+    /// 빠른 조회(F1) 결과를 편집·저장할 대상 테이블. 어느 열로 행을 찾는지(기본 키·고유 키 열, 또는 ROWID), 열마다 값 종류를 안다.
+    /// 행을 찾을 키가 없거나 결과에 키 열이 빠졌으면 CanEdit = false(DisabledReason에 이유).
     /// </summary>
     internal sealed class EditableTable
     {
@@ -42,15 +68,35 @@ namespace MyPlugin
         /// <summary>바인드 변수 접두: Oracle·PostgreSQL ':', SQL Server '@'.</summary>
         public string ParameterPrefix { get; set; } = ":";
         public IReadOnlyList<ResultColumn> Columns { get; set; }
-        /// <summary>기본 키 열의 결과 열 위치. 비어 있으면 편집할 수 없다.</summary>
+        /// <summary>키(기본 키·고유 키) 열의 결과 열 위치. ROWID로 찾으면 비어 있다.</summary>
         public int[] KeyIndexes { get; set; } = Array.Empty<int>();
+        public RowKeyKind KeyKind { get; set; } = RowKeyKind.PrimaryKey;
+        /// <summary>고유 키의 제약·인덱스 이름(KeyKind가 UniqueKey일 때).</summary>
+        public string KeyName { get; set; }
         public ColumnValueKind[] Kinds { get; set; } = Array.Empty<ColumnValueKind>();
         /// <summary>편집할 수 없는 이유. 편집할 수 있으면 null.</summary>
         public string DisabledReason { get; set; }
 
         public bool CanEdit
         {
-            get { return DisabledReason == null && KeyIndexes.Length > 0; }
+            get { return DisabledReason == null && (KeyIndexes.Length > 0 || KeyKind == RowKeyKind.RowId); }
+        }
+
+        /// <summary>ROWID로 행을 찾는다: 조회 SELECT 끝에 ROWID를 붙였고, 행마다 ResultGridRow.RowId에 떼어 둔다.</summary>
+        public bool UsesRowId
+        {
+            get { return KeyKind == RowKeyKind.RowId; }
+        }
+
+        /// <summary>편집 막대에 보일 키 설명: 기본 키면 null, "고유 키 UK_EMP_EMAIL"·"ROWID".</summary>
+        public string KeyNote
+        {
+            get
+            {
+                if (KeyKind == RowKeyKind.UniqueKey)
+                    return "고유 키 " + (KeyName ?? "");
+                return KeyKind == RowKeyKind.RowId ? "ROWID" : null;
+            }
         }
 
         public bool IsKey(int index)
@@ -67,7 +113,8 @@ namespace MyPlugin
     /// <summary>
     /// 결과 행 편집(빠른 조회 F1)의 순수 로직: 열 형식 → 값 종류, 입력 검사·변환, UPDATE·DELETE 문(바인드 변수) 만들기.
     /// 값은 그리드의 표시 문자열(ValueFormatter.Format)이다 — 숫자는 InvariantCulture, 날짜는 "yyyy-MM-dd HH:mm:ss[.fffffff]".
-    /// WHERE는 기본 키 열의 원래 값으로만 쓴다(기본 키가 없으면 편집하지 않는다 — 같은 값의 행을 함께 바꾸지 않게).
+    /// WHERE는 행 하나만 가리키는 키로만 쓴다: 기본 키 → NOT NULL 고유 키 → Oracle ROWID(<see cref="ChooseKey"/>).
+    /// 키가 없으면 편집하지 않는다 — 같은 값의 행을 함께 바꾸지 않게.
     /// </summary>
     internal static class RowEditLogic
     {
@@ -145,11 +192,59 @@ namespace MyPlugin
             return null;
         }
 
+        /// <summary>행을 찾을 키가 없을 때 편집 막대에 보이는 이유.</summary>
+        public const string NoKeyReason = "기본 키나 NOT NULL 고유 키가 없어 편집할 수 없습니다.";
+
+        /// <summary>ROWID 키일 때 빠른 조회 SELECT 끝에 붙이는 열 이름(그리드에 보이기 전에 뗀다).</summary>
+        public const string RowIdAlias = "DBH$ROWID";
+
         /// <summary>
-        /// 편집 대상을 정한다: 데이터 사전의 기본 키 열(ColumnInfo.PrimaryKey)을 결과 열 위치에 맞춘다(이름 그대로, 없으면 대소문자 무시).
-        /// 기본 키가 없거나 결과에 그 열이 없으면 CanEdit = false.
+        /// 행을 찾을 키를 고른다.
+        /// 1) 기본 키(ColumnInfo.PrimaryKey, 열 순서).
+        /// 2) 없으면 고유 키(UNIQUE 제약·고유 인덱스) 가운데 모든 열이 NOT NULL이고 바인드할 수 있는 형식인 것 — 열이 가장 적은 것, 같으면 이름순.
+        ///    NULL을 허용하는 고유 키는 NULL끼리 겹칠 수 있어 뺀다. 데이터 사전 열 목록에 없는 열(식 인덱스의 숨은 열 등)이 든 키도 뺀다.
+        /// 3) 그것도 없고 Oracle 보통 테이블(rowIdTable)이면 ROWID. PostgreSQL ctid는 UPDATE마다 바뀌고 SQL Server는 행 주소가 없어 쓰지 않는다.
+        /// 4) 아니면 None(Reason에 이유).
         /// </summary>
+        public static RowKey ChooseKey(IEnumerable<ColumnInfo> metadata, IEnumerable<UniqueKeyColumn> uniqueKeys, string providerKind, bool rowIdTable)
+        {
+            var columns = (metadata ?? Enumerable.Empty<ColumnInfo>()).Where(c => c != null).ToList();
+            var primary = columns.Where(c => c.PrimaryKey).Select(c => c.Name ?? "").ToArray();
+            if (primary.Length > 0)
+                return new RowKey { Kind = RowKeyKind.PrimaryKey, Columns = primary };
+            var unique = (uniqueKeys ?? Enumerable.Empty<UniqueKeyColumn>())
+                .Where(k => k != null && !string.IsNullOrEmpty(k.KeyName) && !string.IsNullOrEmpty(k.ColumnName))
+                .GroupBy(k => k.KeyName, StringComparer.Ordinal)
+                .Select(g => new { Name = g.Key, Columns = g.OrderBy(k => k.Position).Select(k => k.ColumnName).Distinct(StringComparer.Ordinal).ToArray() })
+                .Where(k => k.Columns.All(name => IsUsableKeyColumn(columns, name)))
+                .OrderBy(k => k.Columns.Length)
+                .ThenBy(k => k.Name, StringComparer.Ordinal)
+                .FirstOrDefault();
+            if (unique != null)
+                return new RowKey { Kind = RowKeyKind.UniqueKey, Name = unique.Name, Columns = unique.Columns };
+            if (rowIdTable && string.Equals(providerKind, "oracle", StringComparison.OrdinalIgnoreCase))
+                return new RowKey { Kind = RowKeyKind.RowId };
+            return new RowKey { Kind = RowKeyKind.None, Reason = NoKeyReason };
+        }
+
+        // 고유 키 열로 쓸 수 있는지: 데이터 사전에 있고 NOT NULL이며 표시 글을 값으로 되살려 바인드할 수 있는 형식
+        private static bool IsUsableKeyColumn(List<ColumnInfo> columns, string name)
+        {
+            var column = columns.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.Ordinal));
+            return column != null && !column.Nullable && KindOf(column.TypeLabel) != ColumnValueKind.Unsupported;
+        }
+
+        /// <summary>기본 키만 보고 편집 대상을 정한다(고유 키·ROWID 후보 없이).</summary>
         public static EditableTable Describe(string owner, string name, IList<ResultColumn> columns, IEnumerable<ColumnInfo> metadata, string parameterPrefix)
+        {
+            return Describe(owner, name, columns, metadata, parameterPrefix, null);
+        }
+
+        /// <summary>
+        /// 편집 대상을 정한다: 고른 키(<see cref="ChooseKey"/>, null이면 기본 키만 보고 고름)의 열을 결과 열 위치에 맞춘다(이름 그대로, 없으면 대소문자 무시).
+        /// 키가 없거나 결과에 그 열이 없으면 CanEdit = false. ROWID 키는 결과 열에 맞추지 않는다(ROWID는 Values 밖, ResultGridRow.RowId).
+        /// </summary>
+        public static EditableTable Describe(string owner, string name, IList<ResultColumn> columns, IEnumerable<ColumnInfo> metadata, string parameterPrefix, RowKey key)
         {
             var table = new EditableTable
             {
@@ -159,24 +254,29 @@ namespace MyPlugin
                 Columns = columns != null ? new List<ResultColumn>(columns) : new List<ResultColumn>()
             };
             table.Kinds = table.Columns.Select(c => KindOf(c.TypeLabel)).ToArray();
-            var keys = (metadata ?? Enumerable.Empty<ColumnInfo>()).Where(c => c != null && c.PrimaryKey).Select(c => c.Name ?? "").ToList();
-            if (keys.Count == 0)
+            key = key ?? ChooseKey(metadata, null, null, false);
+            table.KeyKind = key.Kind;
+            table.KeyName = key.Name;
+            if (key.Kind == RowKeyKind.None)
             {
-                table.DisabledReason = "기본 키가 없는 테이블(또는 뷰)은 편집할 수 없습니다.";
+                table.DisabledReason = key.Reason ?? NoKeyReason;
                 return table;
             }
+            if (key.Kind == RowKeyKind.RowId)
+                return table;
+            var label = key.Kind == RowKeyKind.UniqueKey ? "고유 키" : "기본 키";
             var indexes = new List<int>();
-            foreach (var key in keys)
+            foreach (var column in key.Columns)
             {
-                var index = IndexOfColumn(table.Columns, key);
+                var index = IndexOfColumn(table.Columns, column);
                 if (index < 0)
                 {
-                    table.DisabledReason = "결과에 기본 키 열 '" + key + "'이(가) 없어 편집할 수 없습니다.";
+                    table.DisabledReason = "결과에 " + label + " 열 '" + column + "'이(가) 없어 편집할 수 없습니다.";
                     return table;
                 }
                 if (table.Kinds[index] == ColumnValueKind.Unsupported)
                 {
-                    table.DisabledReason = "기본 키 열 '" + key + "'의 형식(" + (table.Columns[index].TypeLabel ?? "") + ")으로는 행을 찾을 수 없어 편집할 수 없습니다.";
+                    table.DisabledReason = label + " 열 '" + column + "'의 형식(" + (table.Columns[index].TypeLabel ?? "") + ")으로는 행을 찾을 수 없어 편집할 수 없습니다.";
                     return table;
                 }
                 indexes.Add(index);
@@ -324,12 +424,63 @@ namespace MyPlugin
         }
 
         /// <summary>
-        /// 바뀐 열만 SET에 넣는 UPDATE 문(바인드 s0, s1 … / 키 k0, k1 …). WHERE는 기본 키의 원래 값. 바뀐 열이 없으면 null.
+        /// 저장 단계 검사(UPDATE): 편집 창과 같은 기준(EditBlockReason)으로 고칠 수 없는 칸 — 편집할 수 없는 형식(LOB 등)이거나
+        /// 원래 값·새 값이 잘려 보이는 칸 — 의 값이 원래 값과 다르면 저장을 거부할 이유("열 'X'(형식): …"). 문제가 없으면 null.
+        /// 값이 그대로인 칸은 UpdateStatement가 SET에서 빼므로 통과한다(조용히 빼지 않는다 — 잘린 표시 글이 LOB에 들어가는 일을 막는다).
         /// </summary>
-        public static SqlQuery UpdateStatement(EditableTable table, string[] original, string[] current)
+        public static string UpdateBlockReason(EditableTable table, string[] original, string[] current)
         {
-            if (table == null || !table.CanEdit || original == null || current == null)
+            if (table == null || original == null || current == null)
                 return null;
+            for (var i = 0; i < table.Columns.Count && i < current.Length; i++)
+            {
+                var before = i < original.Length ? original[i] : null;
+                if (string.Equals(before, current[i], StringComparison.Ordinal))
+                    continue;
+                var reason = EditBlockReason(table.KindAt(i), before) ?? EditBlockReason(table.KindAt(i), current[i]);
+                if (reason != null)
+                    return ColumnBlockMessage(table, i, reason);
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 저장 단계 검사(INSERT): 넣을 값이 잘려 보이면("…(전체 n자)") 거부할 이유. 문제가 없으면 null.
+        /// 편집할 수 없는 형식(LOB 등)의 열은 InsertStatement가 값과 상관없이 빼므로(DB 기본값·NULL) 여기서 막지 않는다.
+        /// </summary>
+        public static string InsertBlockReason(EditableTable table, string[] values)
+        {
+            if (table == null || values == null)
+                return null;
+            for (var i = 0; i < table.Columns.Count && i < values.Length; i++)
+            {
+                if (values[i] == null || table.KindAt(i) == ColumnValueKind.Unsupported)
+                    continue;
+                var reason = EditBlockReason(table.KindAt(i), values[i]);
+                if (reason != null)
+                    return ColumnBlockMessage(table, i, reason);
+            }
+            return null;
+        }
+
+        private static string ColumnBlockMessage(EditableTable table, int index, string reason)
+        {
+            var column = table.Columns[index];
+            return "열 '" + (column.Name ?? "") + "'(" + (column.TypeLabel ?? "") + "): " + reason + " — 바뀐 값을 저장하지 않습니다. 다시 조회(F1)한 뒤 고치세요.";
+        }
+
+        /// <summary>
+        /// 바뀐 열만 SET에 넣는 UPDATE 문(바인드 s0, s1 … / 키 k0, k1 …, ROWID 키면 rid). WHERE는 키의 원래 값(ROWID 키면 rowId).
+        /// 바뀐 열이 없거나 ROWID 키인데 rowId가 없으면 null.
+        /// 고칠 수 없는 칸(UpdateBlockReason)의 값이 바뀌었으면 InvalidOperationException(이유).
+        /// </summary>
+        public static SqlQuery UpdateStatement(EditableTable table, string[] original, string[] current, string rowId = null)
+        {
+            if (table == null || !table.CanEdit || original == null || current == null || (table.UsesRowId && rowId == null))
+                return null;
+            var blocked = UpdateBlockReason(table, original, current);
+            if (blocked != null)
+                throw new InvalidOperationException(blocked);
             var sets = new List<string>();
             var query = new SqlQuery();
             for (var i = 0; i < table.Columns.Count && i < current.Length; i++)
@@ -343,18 +494,22 @@ namespace MyPlugin
             }
             if (sets.Count == 0)
                 return null;
-            query.Sql = "UPDATE " + WorkspaceLogic.QualifiedName(table.Owner, table.Name) + " SET " + string.Join(", ", sets) + " WHERE " + KeyCondition(table, original, query);
+            query.Sql = "UPDATE " + WorkspaceLogic.QualifiedName(table.Owner, table.Name) + " SET " + string.Join(", ", sets) + " WHERE " + KeyCondition(table, original, rowId, query);
             return query;
         }
 
         /// <summary>
         /// 새 행의 INSERT 문(바인드 i0, i1 …). 값이 NULL인 열과 편집할 수 없는 형식(LOB 등)의 열은 빼서
         /// DB 기본값·자동 번호(없으면 NULL)가 들어가게 한다. 넣을 값이 하나도 없으면 null.
+        /// 잘려 보이는 값(InsertBlockReason)이 있으면 InvalidOperationException(이유).
         /// </summary>
         public static SqlQuery InsertStatement(EditableTable table, string[] values)
         {
             if (table == null || !table.CanEdit || values == null)
                 return null;
+            var blocked = InsertBlockReason(table, values);
+            if (blocked != null)
+                throw new InvalidOperationException(blocked);
             var names = new List<string>();
             var binds = new List<string>();
             var query = new SqlQuery();
@@ -451,18 +606,34 @@ namespace MyPlugin
             return mssql ? "N" + quoted : quoted;
         }
 
-        /// <summary>기본 키의 원래 값으로 행 하나를 지우는 DELETE 문.</summary>
-        public static SqlQuery DeleteStatement(EditableTable table, string[] original)
+        /// <summary>키의 원래 값(ROWID 키면 rowId)으로 행 하나를 지우는 DELETE 문. ROWID 키인데 rowId가 없으면 null.</summary>
+        public static SqlQuery DeleteStatement(EditableTable table, string[] original, string rowId = null)
         {
-            if (table == null || !table.CanEdit || original == null)
+            if (table == null || !table.CanEdit || original == null || (table.UsesRowId && rowId == null))
                 return null;
             var query = new SqlQuery();
-            query.Sql = "DELETE FROM " + WorkspaceLogic.QualifiedName(table.Owner, table.Name) + " WHERE " + KeyCondition(table, original, query);
+            query.Sql = "DELETE FROM " + WorkspaceLogic.QualifiedName(table.Owner, table.Name) + " WHERE " + KeyCondition(table, original, rowId, query);
             return query;
         }
 
-        private static string KeyCondition(EditableTable table, string[] original, SqlQuery query)
+        /// <summary>
+        /// 이 행을 고치거나 지울 수 없는 이유: ROWID 키인데 행의 ROWID를 모를 때(저장한 새 행 — 다시 조회해야 ROWID를 안다). 할 수 있으면 null.
+        /// </summary>
+        public static string RowBlockReason(EditableTable table, string rowId)
         {
+            if (table != null && table.UsesRowId && rowId == null)
+                return "새로 넣은 행은 ROWID를 몰라 고치거나 지울 수 없습니다. 다시 조회(F1)한 뒤 하세요.";
+            return null;
+        }
+
+        // WHERE: ROWID 키면 "ROWID = :rid"(값은 조회한 ROWID 글 — Oracle이 ROWID로 바꿔 비교), 아니면 키 열의 원래 값(NULL은 IS NULL).
+        private static string KeyCondition(EditableTable table, string[] original, string rowId, SqlQuery query)
+        {
+            if (table.UsesRowId)
+            {
+                query.Parameters.Add(new KeyValuePair<string, object>("rid", rowId));
+                return "ROWID = " + table.ParameterPrefix + "rid";
+            }
             var parts = new List<string>();
             for (var k = 0; k < table.KeyIndexes.Length; k++)
             {
@@ -537,7 +708,7 @@ namespace MyPlugin
         {
             if (affected == 0)
                 return "영향 행이 0행입니다 — 다른 세션에서 바뀌었거나 이미 지워진 행입니다. 다시 조회(F1)한 뒤 고치세요.";
-            return "영향 행이 " + affected.ToString(Inv) + "행입니다(1행이어야 함) — 기본 키가 고유하지 않을 수 있습니다. [롤백]으로 되돌리고 확인하세요.";
+            return "영향 행이 " + affected.ToString(Inv) + "행입니다(1행이어야 함) — 키가 고유하지 않을 수 있습니다. [롤백]으로 되돌리고 확인하세요.";
         }
     }
 }

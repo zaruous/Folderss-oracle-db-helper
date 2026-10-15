@@ -110,6 +110,23 @@ namespace MyPlugin
             State = RowEditState.Unchanged;
         }
 
+        /// <summary>ROWID 키(Oracle, 기본 키·고유 키 없는 테이블)로 편집할 때 이 행의 ROWID 글. 모르면(새 행, 다른 키) null.</summary>
+        public string RowId { get; private set; }
+
+        /// <summary>
+        /// ROWID 키: 빠른 조회 SELECT 끝에 붙여 가져온 ROWID 값을 Values에서 떼어 RowId에 둔다(그리드·복사·찾기에 보이지 않게).
+        /// 고치기 전에(조회·더 가져오기 직후) 한 번만 부른다.
+        /// </summary>
+        public void TakeRowId()
+        {
+            if (RowId != null || Original != null || _values.Length == 0)
+                return;
+            RowId = _values[_values.Length - 1];
+            var values = new string[_values.Length - 1];
+            Array.Copy(_values, values, values.Length);
+            Values = values;
+        }
+
         /// <summary>WHERE에 쓸 원래 값(고친 적 없으면 지금 값).</summary>
         public string[] OriginalValues
         {

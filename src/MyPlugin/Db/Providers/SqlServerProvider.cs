@@ -233,6 +233,43 @@ namespace MyPlugin
             };
         }
 
+        /// <summary>고유 인덱스(UNIQUE 제약 포함): 기본 키·필터 인덱스·꺼진 인덱스·포함 열(INCLUDE)은 뺀다.</summary>
+        public SqlQuery UniqueKeys(string owner, string objectName)
+        {
+            var query = new SqlQuery
+            {
+                Sql = "SELECT i.name AS KEY_NAME, c.name AS COLUMN_NAME, ic.key_ordinal AS POSITION"
+                    + " FROM sys.indexes i"
+                    + " JOIN sys.objects o ON o.object_id = i.object_id"
+                    + " JOIN sys.schemas s ON s.schema_id = o.schema_id"
+                    + " JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id"
+                    + " JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id"
+                    + " WHERE s.name = @owner AND o.name = @name"
+                    + " AND i.is_unique = 1 AND i.is_primary_key = 0 AND i.has_filter = 0 AND i.is_disabled = 0"
+                    + " AND ic.is_included_column = 0 AND ic.key_ordinal > 0"
+                    + " ORDER BY i.name, ic.key_ordinal"
+            };
+            Bind(query, "owner", owner);
+            Bind(query, "name", objectName);
+            return query;
+        }
+
+        public UniqueKeyColumn ReadUniqueKey(IDataRecord record)
+        {
+            return new UniqueKeyColumn
+            {
+                KeyName = Text(record, "KEY_NAME"),
+                ColumnName = Text(record, "COLUMN_NAME"),
+                Position = (int)(Number(record, "POSITION") ?? 0)
+            };
+        }
+
+        /// <summary>SQL Server에는 행을 다시 찾을 행 주소가 없다(%%physloc%%는 문서화되지 않았고 바뀔 수 있음).</summary>
+        public SqlQuery RowIdTable(string owner, string objectName)
+        {
+            return null;
+        }
+
         public SqlQuery SearchSchemas(string pattern, bool includeSystem, bool hasMaintainedFlag, int limit)
         {
             var query = new SqlQuery

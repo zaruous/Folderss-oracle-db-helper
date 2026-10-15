@@ -91,6 +91,19 @@ namespace MyPlugin
         SqlQuery Columns(string owner, string objectName);
         ColumnInfo ReadColumn(IDataRecord record);
 
+        /// <summary>
+        /// 기본 키가 없을 때 결과 편집이 행을 찾을 고유 키 후보: UNIQUE 제약·고유 인덱스의 열(꺼진 제약·부분 인덱스·식 인덱스 제외).
+        /// 열: KEY_NAME, COLUMN_NAME, POSITION. 열의 NOT NULL 여부는 <see cref="Columns"/>로 본다.
+        /// </summary>
+        SqlQuery UniqueKeys(string owner, string objectName);
+        UniqueKeyColumn ReadUniqueKey(IDataRecord record);
+
+        /// <summary>
+        /// 행 주소(Oracle ROWID)로 행을 찾을 수 있는 테이블이면 한 행을 돌려주는 조회. 행 주소를 쓸 수 없는 DBMS는 null
+        /// (PostgreSQL ctid는 UPDATE마다 바뀌고, SQL Server는 행 주소가 없다).
+        /// </summary>
+        SqlQuery RowIdTable(string owner, string objectName);
+
         SqlQuery SearchSchemas(string pattern, bool includeSystem, bool hasMaintainedFlag, int limit);
         SqlQuery SearchObjects(string pattern, bool includeSystem, bool hasMaintainedFlag, int limit);
         SearchHit ReadObjectHit(IDataRecord record);

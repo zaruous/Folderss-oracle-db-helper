@@ -1294,7 +1294,7 @@ namespace MyPlugin
         /// <summary>
         /// 트리 F1: 그 테이블·뷰의 앞 QuickQueryRows행을 그 DB 탭에서 바로 조회한다. 편집기 글은 바꾸지 않고(실행 기록에는 남음),
         /// 결과는 지금처럼 하나로 보인다. [다음 행 가져오기]는 툴바의 가져올 행 수로 이어 읽는다.
-        /// 결과는 편집할 수 있다(편집 막대 [편집]·[삭제]·[저장]): 조회 전에 데이터 사전에서 기본 키 열을 읽어 둔다
+        /// 결과는 편집할 수 있다(편집 막대 [편집]·[삭제]·[저장]): 조회 전에 데이터 사전에서 행을 찾을 키(기본 키 → NOT NULL 고유 키 → Oracle ROWID)를 정해 둔다
         /// (조회 뒤에 읽으면 리더가 하나뿐인 PostgreSQL에서 결과 커서가 닫혀 [다음 행 가져오기]를 못 한다).
         /// where는 편집 막대 WHERE 칸에서 다시 조회할 때의 조건(<see cref="WorkspaceLogic.QuickQueryWhere"/>로 검사한 것).
         /// </summary>
@@ -1317,13 +1317,17 @@ namespace MyPlugin
                 if (session == null)
                     return;
                 List<ColumnInfo> metadata = null;
+                RowKey key = null;
                 string metadataError = null;
                 try
                 {
                     metadata = await LoadColumnsAsync(session, profile, owner, objectName);
+                    key = await LoadRowKeyAsync(session, profile, owner, objectName, metadata);
                 }
                 catch (Exception ex)
                 {
+                    // 고유 키 후보를 읽다 실패해도 편집 불가로 보인다(이유는 막대에)
+                    metadata = null;
                     metadataError = DbSession.DescribeError(ex);
                 }
                 // 열 정보를 읽는 사이 다른 실행이 시작됐거나 연결 상태가 바뀌었을 수 있다
@@ -1332,10 +1336,10 @@ namespace MyPlugin
                 session = CheckSession(tab, profile);
                 if (session == null)
                     return;
-                var statement = SqlScript.Parse(WorkspaceLogic.QuickQueryStatement(owner, objectName, where));
+                var statement = SqlScript.Parse(WorkspaceLogic.QuickQueryStatement(owner, objectName, where, key != null && key.Kind == RowKeyKind.RowId));
                 AddMessage(dbId, WorkspaceLogic.QuickQueryMessage(WorkspaceLogic.QualifiedName(owner, objectName), tab.Title, where), MessageKind.Info);
                 await RunSingleAsync(tab, profile, session, statement, WorkspaceLogic.QuickQueryRows);
-                AttachEditTarget(tab, profile, owner, objectName, statement.Text, metadata, metadataError, where);
+                AttachEditTarget(tab, profile, owner, objectName, statement.Text, metadata, key, metadataError, where);
             }
             catch (Exception ex)
             {

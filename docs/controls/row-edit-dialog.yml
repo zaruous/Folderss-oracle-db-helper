@@ -5,6 +5,7 @@ kind: dialog
 source:
   - src/MyPlugin/Ui/RowEditDialog.cs
   - src/MyPlugin/Ui/RowEditLogic.cs
+  - src/MyPlugin/Ui/RowEditChangeLogic.cs
 used_by: [result-edit-bar]
 summary: >-
   결과 편집 막대의 [편집]·[행 추가]·[복제]로 여는 모달 창. 한 행의 열마다 값 칸과 NULL 체크를 보이고,
@@ -18,7 +19,7 @@ features:
       NULL 체크는 꺼진 채 칸을 바로 입력할 수 있고, 빈 칸은 NULL로 돌려준다(INSERT에서 빠져 DB 기본값).
   - name: 열 줄
     description: >-
-      왼쪽 열 이름(기본 키는 🔑)과 형식, 가운데 값 칸, 오른쪽 NULL 체크.
+      왼쪽 열 이름(행을 찾는 키 열 — 기본 키, 없으면 고른 고유 키 — 는 🔑, ROWID로 찾으면 표시 없음)과 형식, 가운데 값 칸, 오른쪽 NULL 체크와 ↶(바뀐 칸에만 보임).
       열이 많으면 목록이 스크롤된다(최대 높이 약 460px). 창은 크기를 바꿀 수 있다.
   - name: 값 칸 종류
     description: >-
@@ -26,15 +27,33 @@ features:
   - name: 편집할 수 없는 칸
     description: >-
       LOB·RAW·시간대 있는 TIMESTAMP·INTERVAL 같은 형식과 잘려 보이는 값("…(전체 n자)")은 읽기 전용이고 형식 옆에 이유를 보인다.
+  - name: 바뀐 칸 강조
+    description: >-
+      원래 값과 다른 칸은 경고색 바탕(Theme.ChangedCell)·경고색 테두리이고 툴팁에 "원래 값: …"(NULL은 "NULL", 빈 문자열은 "(빈 문자열)", 500자가 넘으면 앞부분)을 보인다.
+      기준은 언제나 조회한 원래 값(ResultGridRow.Original)이라 이미 고친 행을 다시 열면 고쳐 둔 칸이 처음부터 강조된다.
+      NULL과 빈 문자열은 다른 값이다. 글을 원래 값으로 다시 고치면 강조가 사라진다.
+  - name: 되돌리기
+    description: >-
+      칸 오른쪽 ↶는 그 칸만, 아래 왼쪽 [모두 되돌리기]는 바뀐 칸 전부를 원래 값으로 되돌린다(NULL이면 NULL 체크까지).
+      되돌릴 칸이 없으면 [모두 되돌리기]는 꺼진다. 편집할 수 없는 칸(LOB 등)에는 ↶가 없다.
+  - name: 새 행의 기준 값
+    description: >-
+      원래 값이 없는 새 행([행 추가]·[복제]·저장 전 새 행의 [편집])은 창을 열 때 값이 기준이다(툴팁 "처음 값: …").
+      [행 추가]는 모두 NULL이 기준이라 입력한 칸이 강조되고, [복제]는 원본에서 바꾼 칸이 강조된다. 새 행에서는 빈 칸 = NULL로 본다.
   - name: 입력 검사
     description: >-
       [확인]을 누를 때 숫자·날짜 형식을 검사한다. 틀리면 "⚠ 열: 이유"를 보이고 그 칸에 머문다.
       NULL은 언제나 통과한다.
+  - name: 닫기 확인
+    description: >-
+      [취소]·Esc·제목 표시줄 X·Alt+F4로 닫을 때 창을 연 뒤 바꾼 칸이 있으면 "바꾼 칸이 있습니다. 버리고 닫을까요?"를 묻는다
+      ([버리고 닫기]·[계속 편집], 기본은 [계속 편집]). [확인]으로 닫거나 바꾼 칸이 없으면 묻지 않는다.
+      비교 기준은 창을 열 때 값(RowEditChanges.HasChanges)이라 이미 고친 행을 다시 열고 그대로 닫으면 묻지 않는다.
 keyboard:
   - keys: Enter
     action: "[확인] (여러 줄 칸 안에서는 줄바꿈)."
   - keys: Esc
-    action: "[취소]."
+    action: "[취소]. 바꾼 칸이 있으면 버릴지 묻는다."
   - keys: Tab
     action: 다음 칸.
 theme:
@@ -42,13 +61,26 @@ theme:
     keys: [WindowBackground, PrimaryText, AppFontFamily]
   - part: 형식·이유 글
     keys: [SecondaryText]
+  - part: 바뀐 칸 바탕·테두리
+    keys: [Theme.ChangedCell, Theme.Warning]
   - part: 오류 글
     keys: [Theme.Danger]
   - part: "[확인] 테두리"
     keys: [AccentBrush]
+states:
+  - "바뀐 칸: 경고색 바탕·테두리, 툴팁 \"원래 값: …\", ↶ 보임. 마우스를 올리거나 포커스가 있으면 테두리는 WPF 기본 파랑."
+  - "바뀐 칸이 없음: [모두 되돌리기] 꺼짐."
 limits:
   - 한 번에 한 행만 고친다(여러 행 일괄 편집 없음).
   - 기본 키 열도 고칠 수 있다. 막지 않으므로 바꾸면 그 키로 UPDATE된다.
+  - >-
+    강조(원래 값 기준)와 창을 연 뒤 바꾼 칸이 있는지(RowEditChanges.HasChanges, 닫기 확인용)는 다르다.
+    다시 연 행을 [모두 되돌리기]하면 강조는 사라져도 창을 연 뒤에는 바뀐 것이다.
+verification:
+  - >-
+    Folderss 테마 7종의 실제 색으로 WCAG 대비를 재서 바뀐 칸 바탕 위 글자 6.9 이상, 경고색 테두리와 창 바탕 2.1(Light·GitHub)~8.1(Black)을 확인했다.
+    바탕만으로는 안 바뀐 칸과 밝기 차가 1.0~1.5라 테두리를 함께 준다(Windows 화면 확인은 아님).
 tests:
   - tests/MyPlugin.Tests/RowEditLogicTests.cs
+  - tests/MyPlugin.Tests/RowEditChangesTests.cs
 related: [result-edit-bar, date-time-box, dialogs]

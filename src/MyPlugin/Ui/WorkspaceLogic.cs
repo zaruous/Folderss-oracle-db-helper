@@ -405,12 +405,16 @@ namespace MyPlugin
 
         /// <summary>
         /// 빠른 조회 SELECT. 조건이 있으면 "WHERE (조건)"으로 괄호에 가둔다 — 조건은 <see cref="QuickQueryWhere"/>로 검사한 것이어야 한다.
+        /// rowId면(Oracle, 기본 키·고유 키가 없는 테이블) 끝에 ROWID를 글로 붙인다: "SELECT 스키마.테이블.*, ROWIDTOCHAR(ROWID) AS "DBH$ROWID"".
+        /// 테이블 별칭을 두지 않아 WHERE 조건의 "테이블.열"도 그대로 쓸 수 있다. 붙인 열은 결과 편집이 그리드에 보이기 전에 뗀다.
         /// </summary>
-        public static string QuickQueryStatement(string owner, string name, string where)
+        public static string QuickQueryStatement(string owner, string name, string where, bool rowId = false)
         {
-            if (string.IsNullOrEmpty(where))
+            if (string.IsNullOrEmpty(where) && !rowId)
                 return SelectStatement(owner, name);
-            return "SELECT *\n  FROM " + QualifiedName(owner, name) + "\n WHERE (" + where + ")";
+            var table = QualifiedName(owner, name);
+            var select = rowId ? "SELECT " + table + ".*, ROWIDTOCHAR(ROWID) AS \"" + RowEditLogic.RowIdAlias + "\"" : "SELECT *";
+            return select + "\n  FROM " + table + (string.IsNullOrEmpty(where) ? "" : "\n WHERE (" + where + ")");
         }
 
         /// <summary>

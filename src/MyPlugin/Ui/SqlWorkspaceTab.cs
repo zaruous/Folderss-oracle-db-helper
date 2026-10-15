@@ -335,6 +335,9 @@ namespace MyPlugin
             foreach (var values in rows)
             {
                 var row = new ResultGridRow(Rows.Count + 1, values);
+                // ROWID 키: 더 가져온 행도 끝의 ROWID를 뗀다(그리드에 붙이기 전에)
+                if (Edit != null && Edit.UsesRowId)
+                    row.TakeRowId();
                 Rows.Add(row);
                 if (first == null)
                     first = row;

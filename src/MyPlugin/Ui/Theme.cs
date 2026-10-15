@@ -40,6 +40,8 @@ namespace MyPlugin
         public static readonly Brush ModifiedRow = Frozen(0x66, 0xD1, 0x9A, 0x66);
         public static readonly Brush DeletedRow = Frozen(0x66, 0xE0, 0x6C, 0x75);
         public static readonly Brush InsertedRow = Frozen(0x66, 0x3F, 0xB2, 0x7F);
+        /// <summary>행 편집 창: 원래 값과 다른 칸의 바탕(고친 행과 같은 경고색, 찾기 강조와 같은 30%). 테두리는 Warning.</summary>
+        public static readonly Brush ChangedCell = Frozen(0x4D, 0xD1, 0x9A, 0x66);
 
         private static readonly Brush Green = Frozen(0x2E, 0xA0, 0x5B);
         private static readonly Brush Yellow = Frozen(0xC9, 0x93, 0x0A);

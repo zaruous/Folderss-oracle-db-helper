@@ -6,11 +6,12 @@ source:
   - src/MyPlugin/Ui/SqlWorkspaceEdit.cs
   - src/MyPlugin/Ui/RowEditLogic.cs
   - src/MyPlugin/Db/DbSession.cs
+  - src/MyPlugin/Db/Providers/IDbProvider.cs
 base: System.Windows.Controls.Border (DockPanel)
 used_by: [sql-workspace]
 summary: >-
   빠른 조회(트리 F1) 결과 위에만 보이는 [행 추가]·[복제]·[편집]·[삭제] │ [저장] │ WHERE 칸·[다시 조회] 막대.
-  고친 행은 UPDATE, 삭제 표시한 행은 DELETE로 기본 키를 써서 DB에 보낸다(커밋 전).
+  고친 행은 UPDATE, 삭제 표시한 행은 DELETE로 행을 찾는 키(기본 키 → NOT NULL 고유 키 → Oracle ROWID)를 써서 DB에 보낸다(커밋 전).
   WHERE 칸의 조건으로 같은 테이블을 다시 조회해 앞 100행 밖의 행도 편집한다.
 features:
   - name: 버튼 순서
@@ -35,7 +36,7 @@ features:
     description: >-
       확인 창에 실행할 문장을 보인 뒤 DELETE → UPDATE → INSERT 순으로 행마다 하나씩 실행한다
       (지운 행과 같은 키로 새 행을 넣어도 겹치지 않게). UPDATE는 바뀐 열만 SET,
-      DELETE·UPDATE의 WHERE는 기본 키의 원래 값이고 값은 바인드 변수로 보낸다(Oracle·PostgreSQL ':', SQL Server '@').
+      DELETE·UPDATE의 WHERE는 키(기본 키·고유 키)의 원래 값 또는 ROWID이고 값은 바인드 변수로 보낸다(Oracle·PostgreSQL ':', SQL Server '@').
       INSERT는 NULL(빈 칸)인 열과 LOB 같은 편집할 수 없는 형식의 열을 빼서 DB 기본값·자동 번호가 들어가게 한다.
       실행한 변경은 편집기 DML과 같이 커밋 대기로 센다.
   - name: INSERT 문 만들기(오른쪽 메뉴)
@@ -61,8 +62,18 @@ features:
       이미 보낸 문장은 커밋 대기이므로 [롤백]으로 되돌릴 수 있다.
   - name: 편집 대상 정하기
     description: >-
-      조회 전에 데이터 사전에서 기본 키 열을 읽어 결과 열에 맞춘다(이름 그대로, 없으면 대소문자 무시).
+      조회 전에 데이터 사전에서 행을 찾을 키를 골라 결과 열에 맞춘다(이름 그대로, 없으면 대소문자 무시).
       조회 뒤에 읽으면 PostgreSQL에서 결과 커서가 닫히므로 앞에서 읽는다.
+      고르는 순서: 기본 키 → 모든 열이 NOT NULL인 UNIQUE 제약·고유 인덱스(열이 가장 적은 것, 같으면 이름순.
+      NULL 허용·부분·식 인덱스, 꺼진 제약, LOB 같은 바인드할 수 없는 형식의 열이 든 키는 뺌) →
+      Oracle 보통 테이블이면 ROWID(뷰·인덱스 구성 테이블·외부 테이블은 제외).
+      PostgreSQL ctid는 UPDATE마다 바뀌고 SQL Server는 행 주소가 없어 ROWID 단계는 Oracle만.
+  - name: ROWID 키(Oracle)
+    description: >-
+      기본 키·고유 키가 없는 Oracle 테이블은 빠른 조회 SELECT 끝에 ROWIDTOCHAR(ROWID) AS "DBH$ROWID"를 붙여 가져오고
+      ("SELECT 스키마.테이블.*, …" — 별칭이 없어 WHERE 칸의 "테이블.열"도 그대로 쓴다),
+      그리드에 보이기 전에 행마다 떼어 둔다(그리드·복사·찾기·INSERT 문 만들기에 보이지 않음).
+      UPDATE·DELETE의 WHERE는 ROWID = :rid. 실행 기록에는 ROWID를 붙인 SELECT가 남는다.
 theme:
   - part: 막대 바탕·테두리
     keys: [SurfaceBackground, BorderBrush]
@@ -70,6 +81,8 @@ theme:
     keys: [SecondaryText]
 states:
   - 안내 글에 대상 테이블과 "수정 n · 삭제 m (저장하지 않음)" 또는 편집할 수 없는 이유를 보인다.
+  - 기본 키가 아닌 키로 행을 찾으면 대상 뒤에 "(고유 키 UK_…로 행을 찾음)"·"(ROWID로 행을 찾음)"을 붙인다.
+  - 키가 없으면 "기본 키나 NOT NULL 고유 키가 없어 편집할 수 없습니다."
   - 행 추가·복제·편집·삭제는 편집할 수 있고 실행 중이 아닐 때, 저장은 그에 더해 변경이 있을 때만 켜진다.
   - 안내 글에 "추가 n · 수정 m · 삭제 k (저장하지 않음)".
   - WHERE 칸은 실행 중이 아닐 때, [다시 조회]는 그에 더해 접속이 있을 때 켜진다(기본 키가 없어 편집할 수 없는 결과도 다시 조회는 된다).
@@ -79,7 +92,12 @@ limits:
     새 행에서 비운 열(DB 기본값·자동 번호)은 저장 뒤에도 그리드에 빈 값으로 남는다 — 실제 값은 다시 조회해야 보인다.
     키를 비운 채 저장한 새 행을 다시 고치면 키로 행을 찾지 못해 0행으로 멈춘다.
   - NULL을 일부러 넣어 DB 기본값을 덮을 수는 없다(NULL 열은 INSERT에서 빠짐).
-  - 기본 키가 없는 테이블·뷰, 결과에 기본 키 열이 없을 때, 읽기 전용 접속, 연결이 끊겼을 때는 버튼이 꺼진다.
+  - >-
+    기본 키·NOT NULL 고유 키가 없는 테이블·뷰(Oracle 보통 테이블은 ROWID로 편집), 결과에 키 열이 없을 때,
+    읽기 전용 접속, 연결이 끊겼을 때는 버튼이 꺼진다.
+  - >-
+    ROWID 키: 저장한 새 행은 ROWID를 몰라 다시 조회(F1)하기 전에는 고치거나 지울 수 없다(상태줄에 이유).
+    행 이동을 켠 분할 테이블에서 분할 키를 바꾸는 등 ROWID가 바뀌면 그 뒤 저장은 0행으로 멈춘다.
   - 저장 전에 원본이 다른 세션에서 바뀌었는지 보지 않는다(다른 열 변경은 덮어쓴다, 지워졌으면 0행으로 멈춤).
   - 저장하지 않은 표시는 다른 문장 실행·트리 F1 다시 조회 때 묻지 않고 사라진다(묻는 것은 WHERE 칸 [다시 조회]뿐).
   - WHERE 조건 안의 함수 호출(부작용이 있는 사용자 함수 등)은 막지 않는다 — 편집기에서 쓸 수 있는 SQL보다 넓히지 않는 것이 목표.

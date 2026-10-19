@@ -17,6 +17,7 @@ namespace MyPlugin
             _manager = manager;
 
             manager.AddSettingsPage(new ConnectionSettingsPage(manager));
+            manager.AddSettingsPage(new MonitorSettingsPage(manager));
         }
 
         /// <summary>

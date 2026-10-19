@@ -631,6 +631,120 @@ namespace MyPlugin.Tests
             Assert.Equal(12, MonitorLogic.MaxCharts);
         }
 
+        // ---------- 잠금 연쇄 트리 ----------
+
+        [Fact]
+        public void LockTree_OnlyOracleForNow()
+        {
+            Assert.NotNull(DbProviders.Oracle.Monitor.LockTree);
+            Assert.Null(DbProviders.Postgres.Monitor.LockTree);
+            Assert.Null(DbProviders.SqlServer.Monitor.LockTree);
+            Assert.Null(DbProviders.Generic.Monitor.LockTree);
+        }
+
+        [Fact]
+        public void Oracle_LockTree_Sql_GvSession_ContractColumnsFirst_ReadOnly_AliasesFit11g()
+        {
+            var tree = DbProviders.Oracle.Monitor.LockTree;
+            var sql = tree.Sql;
+            Assert.StartsWith("WITH w AS (SELECT INST_ID, SID, BLOCKING_INSTANCE, BLOCKING_SESSION FROM GV$SESSION WHERE BLOCKING_SESSION_STATUS = 'VALID')", sql);
+            // 계약 열이 이 순서로 앞에
+            var positions = MonitorLockTree.ContractColumns.Select(c => sql.IndexOf(" AS " + c + ",", StringComparison.Ordinal)).ToList();
+            Assert.All(positions, p => Assert.True(p > 0));
+            Assert.Equal(positions.OrderBy(p => p), positions);
+            Assert.Contains("FROM GV$SESSION s", sql);
+            Assert.Contains("GV$TRANSACTION t ON t.INST_ID = s.INST_ID AND t.ADDR = s.TADDR", sql);
+            // 쉬는 근원의 Idle 대기(SQL*Net message from client)는 대기 초에서 뺀다
+            Assert.Contains("CASE WHEN s.STATE = 'WAITING' AND s.WAIT_CLASS <> 'Idle' THEN ROUND(s.WAIT_TIME_MICRO / 1000000) END AS WAIT_SECONDS", sql);
+            Assert.Contains("NVL(s.SQL_ID, s.PREV_SQL_ID)", sql);
+            Assert.DoesNotContain(" V$SESSION", sql);
+            // 바인드·DML·문장 끝 없음
+            var bare = Regex.Replace(sql, "'[^']*'", "''");
+            Assert.DoesNotMatch(@":[A-Za-z_]", bare);
+            foreach (var word in new[] { "INSERT ", "UPDATE ", "DELETE ", "DROP ", "ALTER ", "TRUNCATE " })
+                Assert.False(Regex.IsMatch(bare, @"\b" + word, RegexOptions.IgnoreCase), word);
+            Assert.DoesNotContain(";", sql);
+            foreach (Match alias in Regex.Matches(sql, "AS \"([^\"]+)\""))
+                Assert.True(System.Text.Encoding.UTF8.GetByteCount(alias.Groups[1].Value) <= 30, "별칭 " + alias.Groups[1].Value);
+            // 종료 조치에 쓰는 표시 열이 있다
+            foreach (var column in tree.Actions.SelectMany(a => a.Columns))
+                Assert.Contains("AS \"" + column + "\"", sql);
+            Assert.False(string.IsNullOrWhiteSpace(tree.Description));
+            Assert.Equal(OracleMonitor.Privilege, tree.Privilege);
+        }
+
+        [Fact]
+        public void Oracle_LockTree_Details_SameTitlesAsLocksSection_KeyIsInstanceAndSid()
+        {
+            var tree = DbProviders.Oracle.Monitor.LockTree;
+            var locks = DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Locks);
+            // 화면의 상세 버튼은 섹션 상세의 제목으로 만든다 — 트리 상세도 같은 제목·순서·글 여부여야 한다
+            Assert.Equal(locks.Details.Select(d => d.Title), tree.Details.Select(d => d.Title));
+            Assert.Equal(locks.Details.Select(d => d.AsText), tree.Details.Select(d => d.AsText));
+            foreach (var detail in tree.Details)
+            {
+                Assert.Contains("TO_NUMBER(SUBSTR(:name, 1, INSTR(:name, ',') - 1))", detail.Sql);
+                Assert.Contains("TO_NUMBER(SUBSTR(:name, INSTR(:name, ',') + 1))", detail.Sql);
+                Assert.Contains("GV$", detail.Sql);
+                Assert.Equal("1,412", detail.Query("1,412").Parameters.Single().Value);
+            }
+            var plan = tree.Details.First(d => d.Id == "plan").Sql;
+            Assert.Contains("s.INST_ID = USERENV('INSTANCE')", plan);
+            Assert.Contains("s.INST_ID <> USERENV('INSTANCE')", plan);
+        }
+
+        [Fact]
+        public void Oracle_LockTree_Kill_WithInstance_OnlyDigits()
+        {
+            var kill = DbProviders.Oracle.Monitor.LockTree.Actions.Single();
+            Assert.Equal(new[] { "인스턴스", "SID", "SERIAL#" }, kill.Columns);
+            Assert.Equal("ALTER SYSTEM KILL SESSION '412,53021,@2' IMMEDIATE", kill.Build(new[] { "2", "412", "53021" }));
+            Assert.Null(kill.Build(new[] { "2", "412'", "53021" }));
+            Assert.Null(kill.Build(new[] { "x", "412", "53021" }));
+            Assert.Null(kill.Build(new[] { "2", "412" }));
+            Assert.Equal("근원 세션 종료…", MonitorLogic.RootActionTitle(kill));
+        }
+
+        // ---------- 전체 DB 상태 ----------
+
+        [Fact]
+        public void Overview_OnlyOracleForNow()
+        {
+            Assert.NotNull(DbProviders.Oracle.Monitor.Overview);
+            Assert.Null(DbProviders.Postgres.Monitor.Overview);
+            Assert.Null(DbProviders.SqlServer.Monitor.Overview);
+            Assert.Null(DbProviders.Generic.Monitor.Overview);
+        }
+
+        [Fact]
+        public void Oracle_Overview_LongFormat_ClosedMetricList_ReadOnly()
+        {
+            var overview = DbProviders.Oracle.Monitor.Overview;
+            var sql = overview.Sql;
+            // 첫 가지에서 열 이름·형식을 정한다(리터럴이 CHAR면 짧은 이름이 공백으로 채워짐)
+            Assert.StartsWith("SELECT CAST('active_sessions' AS VARCHAR2(30)) AS METRIC, CAST(NULL AS VARCHAR2(128)) AS ITEM, COUNT(*) AS VALUE, CAST(NULL AS VARCHAR2(64)) AS TEXT", sql);
+            // 지표 이름은 닫힌 목록 안에서만, 판정하는 지표는 모두 준다
+            var names = Regex.Matches(sql, @"SELECT (?:CAST\()?'([a-z_0-9]+)'").Cast<Match>().Select(m => m.Groups[1].Value).ToList();
+            Assert.All(names, n => Assert.Contains(n, MonitorMetrics.All));
+            Assert.Equal(names.Count, names.Distinct().Count());
+            foreach (var judged in OverviewLogic.DefaultThresholds.Keys)
+                Assert.Contains(judged, names);
+            Assert.Contains(MonitorMetrics.CpuCount, names);
+            // 함정: UNDO·TEMP 제외, FRA는 회수 가능 공간을 뺀다, 잠금은 3초 이상, 아카이브는 오류 상태만
+            Assert.Contains("WHERE t.CONTENTS = 'PERMANENT'", sql);
+            Assert.Contains("(SPACE_USED - SPACE_RECLAIMABLE) * 100 / SPACE_LIMIT", sql);
+            Assert.Contains("SPACE_LIMIT > 0", sql);
+            Assert.Contains("WAIT_TIME_MICRO >= 3000000", sql);
+            Assert.Contains("STATUS IN ('ERROR', 'DISABLED', 'BAD PARAM', 'FULL')", sql);
+            Assert.Contains("STATUS LIKE 'COMPLETED%'", sql);
+            var bare = Regex.Replace(sql, "'[^']*'", "''");
+            Assert.DoesNotMatch(@":[A-Za-z_]", bare);
+            foreach (var word in new[] { "INSERT ", "UPDATE ", "DELETE ", "DROP ", "ALTER ", "TRUNCATE " })
+                Assert.False(Regex.IsMatch(bare, @"\b" + word, RegexOptions.IgnoreCase), word);
+            Assert.DoesNotContain(";", sql);
+            Assert.Equal(OracleMonitor.Privilege, overview.Privilege);
+        }
+
         // ---------- 실측(2026-10-19)에서 찾은 것 ----------
 
         /// <summary>SQL Server 기본 정보: SERVERPROPERTY(서버 정렬)와 sys.databases 열(Latin1_General_CI_AS_KS_WS)을 UNION ALL 하면 정렬 충돌 — 첫 가지에서 값 열의 정렬을 정한다.</summary>
@@ -677,12 +791,12 @@ namespace MyPlugin.Tests
         {
             var sections = DbProviders.Postgres.Monitor.Sections.ToDictionary(s => s.Id);
             var storage = sections[MonitorSections.Storage].Sql;
-            Assert.Equal(1, Regex.Matches(storage, @"pg_tablespace_size\(").Count);
+            Assert.Single(Regex.Matches(storage, @"pg_tablespace_size\("));
             Assert.Contains("CASE WHEN (has_tablespace_privilege(p.oid, 'CREATE') OR pg_has_role('pg_read_all_stats', 'USAGE'))"
                 + " OR p.oid = (SELECT d.dattablespace FROM pg_database d WHERE d.datname = current_database()) THEN pg_tablespace_size(p.oid) END", storage);
             Assert.Contains("ORDER BY t.bytes DESC NULLS LAST", storage);
             var databases = sections[PostgresMonitor.Databases].Sql;
-            Assert.Equal(1, Regex.Matches(databases, @"pg_database_size\(").Count);
+            Assert.Single(Regex.Matches(databases, @"pg_database_size\("));
             Assert.Contains("CASE WHEN (has_database_privilege(p.oid, 'CONNECT') OR pg_has_role('pg_read_all_stats', 'USAGE')) THEN pg_database_size(p.oid) END", databases);
             foreach (var sql in new[] { storage, databases })
                 Assert.Contains("COALESCE(pg_size_pretty(", sql);

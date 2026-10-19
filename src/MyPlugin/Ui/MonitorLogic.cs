@@ -213,6 +213,21 @@ namespace MyPlugin
         public const string ActionNoRowText = "먼저 표에서 행을 고르세요.";
         public const string ActionReadOnlyText = "읽기 전용 접속에서는 세션 종료 같은 조치를 할 수 없습니다. 접속 관리에서 읽기 전용을 끄세요.";
         public const string ActionBadValueText = "이 행의 값으로는 문장을 만들 수 없습니다(세션 번호가 수가 아님).";
+        public const string ActionUnknownSessionText = "이 세션은 정보가 없어(이미 끝났거나 볼 수 없는 세션) 문장을 만들 수 없습니다. [새로 고침] 뒤 다시 고르세요.";
+
+        /// <summary>잠금 트리의 근원 조치 메뉴 글: "세션 종료…" → "근원 세션 종료…".</summary>
+        public static string RootActionTitle(MonitorAction action)
+        {
+            return "근원 " + (action == null ? "" : action.Title);
+        }
+
+        // ---------- 잠금 연쇄 트리 ----------
+
+        public const string TableViewText = "표로 보기";
+        public const string TreeViewText = "트리로 보기";
+        public const string TableViewToolTip = "잠금 모드(TM·TX, 보유·요청 모드)까지 보이는 평면 표로 바꿉니다";
+        public const string TreeViewToolTip = "근원 블로커 아래에 막힌 세션을 펼친 트리로 바꿉니다";
+        public const string MinWaitToolTip = "사슬 안의 가장 긴 대기가 이보다 짧으면 숨깁니다(아주 짧은 대기 잡음 제외). 다시 조회하지 않습니다.";
 
         /// <summary>조치를 실행한 뒤 상태: "실행함: ALTER SYSTEM KILL SESSION '412,53021' IMMEDIATE".</summary>
         public static string ActionDoneText(string statement)

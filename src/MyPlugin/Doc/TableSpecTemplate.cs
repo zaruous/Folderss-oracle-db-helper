@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using ClosedXML.Excel;
 
@@ -308,8 +309,8 @@ namespace MyPlugin
 
         // ================= 안내(결과에서 빠짐) =================
 
-        /// <summary>문법·변수 안내 시트(명세서형 템플릿도 함께 쓴다).</summary>
-        internal static void Help(IXLWorksheet sheet)
+        /// <summary>문법·변수 안내 시트(명세서형 템플릿·점검 보고서도 함께 쓴다). variables가 없으면 정의서 변수.</summary>
+        internal static void Help(IXLWorksheet sheet, IEnumerable<TemplateVariable> variables = null)
         {
             sheet.Column(1).Width = 2;
             sheet.Column(2).Width = 38;
@@ -359,7 +360,7 @@ namespace MyPlugin
             sheet.Cell(start + 1, 4).Value = "예";
             Header(sheet.Range(start + 1, 2, start + 1, 4));
             var row = start + 2;
-            foreach (var variable in TableSpecModel.Variables)
+            foreach (var variable in variables ?? TableSpecModel.Variables)
             {
                 sheet.Cell(row, 2).SetValue(variable.Name);
                 sheet.Cell(row, 3).SetValue(variable.Description);

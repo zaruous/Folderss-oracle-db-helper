@@ -186,5 +186,14 @@ namespace MyPlugin
         };
 
         public IReadOnlyList<MonitorSection> Sections { get { return All; } }
+
+        /// <summary>잠금 연쇄 트리는 아직 Oracle만(설계 docs/monitor-dba-design.md 3장의 대응표대로 나중에 채운다).</summary>
+        public MonitorLockTree LockTree { get { return null; } }
+
+        /// <summary>전체 DB 화면의 지표는 아직 Oracle만(타일은 "지원 예정").</summary>
+        public MonitorOverview Overview { get { return null; } }
+
+        /// <summary>일일 점검은 아직 Oracle만(그 DBMS 접속은 점검 대상에서 빠진다).</summary>
+        public MonitorCheckSet CheckSet { get { return null; } }
     }
 }

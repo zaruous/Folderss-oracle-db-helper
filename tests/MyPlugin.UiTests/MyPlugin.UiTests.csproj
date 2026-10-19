@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    헤드리스 UI 시험: Folderss 없이 플러그인 zip을 Folderss와 같은 방식(PluginLoadContext)으로 불러 WPF 창을 띄우고,
+    같은 프로세스 안에서 WPF 트리·자동화 피어로 조작한다. 숨은 데스크톱에서만 돈다(scripts/ui-test.ps1 — 기본 데스크톱이면 모두 건너뜀).
+    CI(ubuntu)는 이 프로젝트를 실행하지 않는다.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Folderss 테마 색 사전과 컨트롤 스타일(Folderss 저장소 Folderss/Themes에서 복사 — Controls.xaml은 AvalonDock 전용 스타일을 뺀 사본) -->
+    <EmbeddedResource Include="Themes\*.xaml" />
+    <Page Remove="Themes\*.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 계약은 기본 로드 컨텍스트에 둔다(Folderss와 같음 — 플러그인 쪽 PluginLoadContext가 계약은 넘겨받는다) -->
+    <ProjectReference Include="..\..\contract\Folderss.PluginContract\Folderss.PluginContract.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <!-- 결과 확인용(플러그인이 쓴 history.db·엑셀을 읽는다) -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
+  </ItemGroup>
+
+</Project>

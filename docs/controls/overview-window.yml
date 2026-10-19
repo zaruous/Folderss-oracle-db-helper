@@ -1,0 +1,76 @@
+id: overview-window
+name: OverviewWindow
+title: 전체 DB 상태 창
+kind: window
+source:
+  - src/MyPlugin/Ui/OverviewWindow.cs
+  - src/MyPlugin/Ui/OverviewLogic.cs
+  - src/MyPlugin/Db/Providers/IMonitorProvider.cs
+  - src/MyPlugin/Db/Providers/OracleMonitor.cs
+used_by: [db-helper-view, shell-menu]
+summary: >-
+  도구 > 전체 DB 상태…로 여는 창(모달 아님, DB Helper 창마다 하나). 저장한 접속마다 타일 하나 — 가장 심각한 상태의 색과 그 이유 한 줄,
+  활성 세션과 미니 추이, 공간(최대 기준)·FRA, 백업·로그 모드, 갱신 시각. 누르면 그 DB의 성능 모니터.
+features:
+  - name: 지표 계약
+    description: >-
+      IDbProvider.Monitor.Overview(MonitorOverview). 공급자 SQL 하나가 긴 형식(METRIC · ITEM · VALUE · TEXT)으로 지표를 돌려주고
+      OverviewLogic이 닫힌 목록(MonitorMetrics — 이력 설계와 같은 이름) 밖의 행은 버린다. 지금은 Oracle만(PostgreSQL·SQL Server 타일은 "지원 예정").
+      Oracle은 GV$SESSION·GV$SYSMETRIC(평균 활성 세션 60초)·GV$OSSTAT(CPU 수)·DBA_TABLESPACE_USAGE_METRICS(영구만, 최대 기준 높은 3개)·
+      V$RECOVERY_FILE_DEST(회수 가능 제외)·V$ARCHIVE_DEST_STATUS(오류만)·V$RMAN_BACKUP_JOB_DETAILS·DBA_SCHEDULER_JOB_RUN_DETAILS·V$DATABASE를 한 번 왕복.
+  - name: 판정
+    description: >-
+      OverviewLogic.Judge — 기본 임계값(주의/위험): 잠금 대기 세션 1/5 · 최장 대기 60/300초(3초 이상만 셈), 공간 85/95%, FRA 80/90%,
+      아카이브 대상 오류 1(위험), 마지막 백업 26/50시간(기록 없음은 주의), 평균 활성 세션 ÷ CPU 1/2배, 실패한 예약 작업 1(주의).
+      주의·위험만 단계 내림차순(같으면 잠금 → 아카이브 → 공간 → FRA → 백업 → 활성 → 예약 작업)으로 두고 첫 판정이 이유 줄.
+  - name: 타일
+    description: >-
+      머리 띠는 접속 색(초록·노랑·빨강), 이름(고정이면 📌) · 상태 칩(위험·실패 위험색, 주의·권한 경고색, 정상 성공색, 그 밖 테두리만),
+      이유 줄(판정 또는 접속·권한 오류 문장), 활성 줄 + 미니 추이(창이 열린 동안 30점), 공간 줄, 백업 줄, 주소·갱신 시각(5초마다). 도구 설명에 판정 전체.
+      상태: 가져오는 중 · 정상 · 주의 · 위험 · 접속 실패 · 조회 실패(시간 초과 포함) · 권한 필요 · 비밀번호 필요 · 지원 예정.
+  - name: 순서·요약
+    description: >-
+      고정한 타일이 먼저, 그다음 정렬 콤보(심각도: 위험 → 실패 → 주의 → 권한 → 비밀번호 → 정상 → 가져오는 중 → 지원 예정 / 이름), 같으면 이름.
+      타일 하나가 끝날 때마다 순서·머리 요약("7개 · 위험 1 · 실패 1 · 주의 2 · 숨김 1")을 고친다(느린 DB가 전체 정렬을 붙잡지 않게).
+  - name: 접속·세션
+    description: >-
+      타일마다 이 창 전용 세션(창이 열린 동안 유지, 닫으면 정리). 동시 4개, DB마다 10초 시간 제한. 저장된 비밀번호가 있는 접속만 스스로 붙고,
+      없으면 "비밀번호 필요" — 타일을 누를 때만 성능 모니터와 같은 경로로 묻는다(취소하면 그대로). 끊긴 세션은 다음 새로 고침에 다시 연다.
+  - name: 오른쪽 메뉴·누름
+    description: >-
+      타일 누름(Enter): 그 DB의 성능 모니터(비밀번호 필요면 묻고 붙음). 메뉴: 성능 모니터 열기 · 잠금 트리 열기([잠금] 섹션으로 연다) ·
+      지금 새로 고침 · 맨 앞에 고정/고정 풀기 · 이 화면에서 빼기. 고정·숨김은 플러그인 설정(monitor.overview.pinned · monitor.overview.hidden)에
+      남고, 숨긴 것이 있으면 머리에 [숨긴 DB 다시 보이기].
+  - name: 일일 점검
+    description: 머리의 [일일 점검…]으로 일일 점검 창을 연다(DB Helper 창마다 하나 — 열려 있으면 앞으로).
+keyboard:
+  - keys: F5
+    action: 모든 타일 새로 고침.
+  - keys: Esc
+    action: 닫기.
+  - keys: Enter
+    action: 포커스가 있는 타일의 성능 모니터.
+theme:
+  - part: 창·타일
+    keys: [WindowBackground, PanelBackground, PrimaryText, SecondaryText, BorderBrush, AccentBrush]
+  - part: 상태 칩·이유 줄
+    keys: [Theme.Danger, Theme.Warning, Theme.Success]
+  - part: 머리 띠
+    keys: [Theme.ConnectionColor]
+states:
+  - 접속이 없음 → "등록한 접속이 없습니다. [접속 관리…]에서 추가하세요."
+  - 자동 새로 고침 끔 · 30초 · 1분(기본) · 5분. 새로 고치는 중이면 겹쳐 실행하지 않는다.
+limits:
+  - 임계값은 기본값 고정(접속별 덮어쓰기는 일일 점검 8-3의 SQLite 저장소와 함께). 창이 닫혀 있으면 감시·알림이 없다.
+  - 공간은 자동 확장 최대 크기 기준이라 OS·ASM 디스크 여유가 그보다 작으면 안심을 주는 쪽으로 틀린다(TODO 6). UNDO·TEMP는 타일에서 뺀다(성능 모니터 섹션에서).
+  - 평균 활성 세션은 60초 평균이라 잠금이 풀린 뒤에도 잠시 높게 남는다. 미니 추이는 창이 열린 동안만.
+  - 닫힌 포트처럼 접속이 안 되는 DB는 ODP.NET 재시도로 실패까지 몇 초(실측 약 7초) 걸린다 — 그동안 "가져오는 중".
+verification: >-
+  2026-10-19 Folderss 1.8.8 안에서(격리 호스트): Oracle 11.2 XE(SELECT_CATALOG_ROLE 계정 · 권한 없는 계정 · 비밀번호 미저장 · 닫힌 포트),
+  19.9, PostgreSQL·SQL Server 접속으로 7개 타일이 각각 주의(백업 기록 없음)·권한 필요·비밀번호 필요·접속 실패(ORA-12541)·지원 예정으로 나옴.
+  XE에 근원 1 + 대기 5 잠금을 만들자 위험 "잠금 대기 5", [잠금 트리 열기]가 [잠금] 섹션으로 열리고 근원 종료 뒤 주의 "잠금 대기 4", 풀린 뒤 원래대로.
+  비밀번호 창 열기·취소, 고정·빼기·다시 보이기·이름순·설정 저장, 창을 닫으면 타일 세션 정리(V$SESSION), 다시 열어도 고정 유지, 타일마다 순서 갱신.
+tests:
+  - tests/MyPlugin.Tests/OverviewLogicTests.cs
+  - tests/MyPlugin.Tests/MonitorTests.cs
+related: [monitor-window, shell-menu, db-helper-view, dialogs, check-window]

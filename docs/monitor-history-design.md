@@ -136,6 +136,8 @@ CREATE TABLE metric (
 ) WITHOUT ROWID;
 ```
 
+- 같은 파일에 일일 점검의 `check_item`·`check_override`·`check_run`·`check_result` 테이블이 더해진다([`monitor-dba-design.md`](monitor-dba-design.md) 6장 "저장소").
+  이 SQLite 계층은 일일 점검 단계(8-3a)에서 먼저 만들고 이력(5-3)이 그것을 쓴다.
 - 저장 범위 강제: `name`은 코드에 정한 닫힌 목록만 받는다(목록 밖이면 쓰지 않음). `item`에는 테이블스페이스·파일 이름만 온다. SQL 문장·사용자·호스트는 넣을 칸이 없다.
 - 보관 정리: 창을 열 때 하루 한 번 `DELETE FROM snapshot WHERE taken_at < ?`(? = 지금 − 설정의 보관 기간, 4.2절)(외래 키 CASCADE로 지표도), 파일은 처음 만들 때 `auto_vacuum = INCREMENTAL`로 두고 정리 뒤 `PRAGMA incremental_vacuum`.
 - 버전: `schema_version`보다 새 파일(나중 버전 플러그인이 만든 것)을 열면 쓰지 않고 읽기만 하며 메시지 탭에 알린다. 낮으면 순서대로 올린다.

@@ -232,6 +232,40 @@ namespace MyPlugin
             return window.ShowDialog() == true ? result : SaveChoice.Cancel;
         }
 
+        /// <summary>
+        /// 예/아니요 확인(기본은 [취소]). danger면 경고색 문구와 확인 체크를 켜야 [yes]가 눌린다(되돌릴 수 없는 일 — 이력 지우기 등).
+        /// </summary>
+        public static bool Confirm(Window owner, string title, string message, string yes, bool danger)
+        {
+            var window = DialogKit.Create(owner, string.IsNullOrWhiteSpace(title) ? "DB Helper" : title, 440);
+            var body = DialogKit.Body(window);
+            var text = new TextBlock { Text = message ?? "", TextWrapping = TextWrapping.Wrap };
+            if (danger)
+                text.Foreground = Theme.Danger;
+            else
+                Theme.Foreground(text);
+            body.Children.Add(text);
+            var ok = danger ? DialogKit.PlainButton(yes) : DialogKit.PrimaryButton(yes);
+            var cancel = DialogKit.CancelButton("취소", true);
+            if (danger)
+            {
+                var check = DialogKit.Check("되돌릴 수 없는 것을 알고 진행합니다");
+                check.Margin = new Thickness(0, 10, 0, 0);
+                body.Children.Add(check);
+                DialogKit.EnableWhenChecked(ok, check);
+            }
+            var result = false;
+            ok.Click += (s, e) =>
+            {
+                result = true;
+                window.DialogResult = true;
+            };
+            body.Children.Add(DialogKit.Buttons(ok, cancel));
+            DialogKit.FocusOnLoad(window, cancel);
+            window.ShowDialog();
+            return result;
+        }
+
         /// <summary>단순 안내(확인 버튼 하나). error면 위험색 아이콘·문구.</summary>
         public static void Show(Window owner, string title, string message, bool error)
         {

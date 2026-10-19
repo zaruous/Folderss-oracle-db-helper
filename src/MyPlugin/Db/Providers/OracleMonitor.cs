@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MyPlugin
 {
@@ -198,6 +199,220 @@ namespace MyPlugin
         };
 
         public IReadOnlyList<MonitorSection> Sections { get { return All; } }
+
+        public MonitorLockTree LockTree { get { return Tree; } }
+
+        public MonitorOverview Overview { get { return OverviewQuery; } }
+
+        public MonitorCheckSet CheckSet { get { return Checks; } }
+
+        /// <summary>
+        /// 내장 스키마가 아닌 소유자 조건(11g에는 ORACLE_MAINTAINED가 없어 알려진 목록 + APEX_·FLOWS_ 패턴 — XE 11g의 APEX_040000 등).
+        /// </summary>
+        private static string NotSystemOwner(string column)
+        {
+            return column + " NOT IN (" + string.Join(", ", OracleMetadata.KnownSystemSchemas.Select(s => "'" + s + "'")) + ")"
+                + " AND " + column + " NOT LIKE 'APEX\\_%' ESCAPE '\\' AND " + column + " NOT LIKE 'FLOWS\\_%' ESCAPE '\\'";
+        }
+
+        private const string CatalogPrivilege = "SELECT_CATALOG_ROLE";
+
+        /// <summary>
+        /// 일일 점검 기본 묶음(11.2 XE SELECT_CATALOG_ROLE 계정으로 모든 SQL 실측, 2026-10-20).
+        /// - 경고 로그(V$DIAG_ALERT_EXT)는 11g~12.1에서 SELECT_CATALOG_ROLE로 안 보인다(ORA-00942 → "건너뜀(권한)").
+        /// - 오래된 통계는 휴지통 객체(BIN$)에서 DBMS_STATS가 ORA-20001을 내므로 NO_MERGE 인라인 뷰로 먼저 거른다.
+        /// - 공간은 최대 크기 기준 영구 테이블스페이스만(UNDO·TEMP는 성능 모니터 섹션에서), FRA는 회수 가능 공간을 뺀다.
+        /// - Data Guard 지연은 스탠바이 실측 환경이 없어 아직 넣지 않았다.
+        /// </summary>
+        private static readonly MonitorCheckSet Checks = new MonitorCheckSet(
+            "SELECT 'oracle:' || d.DBID || ':' || d.NAME AS IDENTITY, d.NAME || ' (DBID ' || d.DBID || ')' AS LABEL FROM V$DATABASE d",
+            new[]
+            {
+                new MonitorCheck("ora.instance", "가용성", "인스턴스 상태·가동 시간",
+                    "SELECT i.INST_ID AS \"인스턴스\", i.INSTANCE_NAME AS \"이름\", i.STATUS AS \"상태\", d.OPEN_MODE AS \"열림\","
+                    + " TO_CHAR(i.STARTUP_TIME, 'YYYY-MM-DD HH24:MI') AS \"시작 시각\", ROUND((SYSDATE - i.STARTUP_TIME) * 24, 1) AS \"가동(시간)\","
+                    + " CASE WHEN i.STATUS = 'OPEN' AND d.OPEN_MODE LIKE 'READ WRITE%' THEN 'OK' WHEN i.STATUS = 'OPEN' THEN 'WARN' ELSE 'CRIT' END AS \"판정\""
+                    + " FROM GV$INSTANCE i CROSS JOIN V$DATABASE d ORDER BY i.INST_ID",
+                    CheckRule.ByLevel("판정"), CatalogPrivilege, "열리지 않은 인스턴스는 alert log와 리스너를 확인합니다. 읽기 전용(스탠바이 등)이면 의도한 것인지 확인합니다."),
+                new MonitorCheck("ora.log_mode", "가용성", "아카이브 로그 모드",
+                    "SELECT d.NAME AS \"DB\", d.LOG_MODE AS \"로그 모드\", d.FORCE_LOGGING AS \"강제 로깅\","
+                    + " CASE WHEN d.LOG_MODE = 'ARCHIVELOG' THEN 'OK' ELSE 'WARN' END AS \"판정\" FROM V$DATABASE d",
+                    CheckRule.ByLevel("판정"), CatalogPrivilege, "NOARCHIVELOG면 시점 복구가 안 됩니다. 운영 DB는 ARCHIVELOG로 바꿉니다(개발 DB면 이 항목을 꺼 둡니다)."),
+                new MonitorCheck("ora.archive_dest", "가용성", "아카이브 대상 오류",
+                    "SELECT DEST_ID AS \"대상\", DEST_NAME AS \"이름\", STATUS AS \"상태\", ERROR AS \"오류\" FROM V$ARCHIVE_DEST_STATUS"
+                    + " WHERE STATUS IN ('ERROR', 'DISABLED', 'BAD PARAM', 'FULL') ORDER BY DEST_ID",
+                    CheckRule.AnyRow(CheckLevel.Critical), CatalogPrivilege, "아카이브가 멈추면 곧 DB 전체가 멈춥니다. 대상 경로의 공간·권한과 오류 문구를 확인합니다."),
+                new MonitorCheck("ora.tablespace", "공간", "테이블스페이스 사용률(최대 기준)",
+                    "SELECT m.TABLESPACE_NAME AS \"테이블스페이스\", ROUND(m.USED_SPACE * t.BLOCK_SIZE / 1048576) AS \"사용(MB)\","
+                    + " ROUND(m.TABLESPACE_SIZE * t.BLOCK_SIZE / 1048576) AS \"최대(MB)\", ROUND(m.USED_PERCENT, 1) AS \"사용률(%)\""
+                    + " FROM DBA_TABLESPACE_USAGE_METRICS m JOIN DBA_TABLESPACES t ON t.TABLESPACE_NAME = m.TABLESPACE_NAME"
+                    + " WHERE t.CONTENTS = 'PERMANENT' ORDER BY m.USED_PERCENT DESC",
+                    CheckRule.Threshold("사용률(%)", 85, 95), CatalogPrivilege, "자동 확장 최대 크기 기준입니다. 데이터 파일을 더하거나 최대 크기를 늘리고, OS·ASM 디스크 여유도 확인합니다."),
+                new MonitorCheck("ora.fra", "공간", "FRA 사용률",
+                    "SELECT NAME AS \"위치\", ROUND(SPACE_LIMIT / 1048576) AS \"한도(MB)\", ROUND(SPACE_USED / 1048576) AS \"사용(MB)\","
+                    + " ROUND(SPACE_RECLAIMABLE / 1048576) AS \"회수 가능(MB)\", ROUND((SPACE_USED - SPACE_RECLAIMABLE) * 100 / SPACE_LIMIT, 1) AS \"사용률(%)\""
+                    + " FROM V$RECOVERY_FILE_DEST WHERE SPACE_LIMIT > 0",
+                    CheckRule.Threshold("사용률(%)", 80, 90), CatalogPrivilege, "가득 차면 아카이브가 멈춥니다. 백업된 아카이브를 지우거나(RMAN DELETE) DB_RECOVERY_FILE_DEST_SIZE를 늘립니다.",
+                    new[] { new MonitorRequirement("SELECT COUNT(*) FROM V$RECOVERY_FILE_DEST WHERE SPACE_LIMIT > 0", "FRA(복구 영역)를 쓰지 않습니다.") }),
+                new MonitorCheck("ora.last_backup", "백업", "마지막 성공 백업 경과",
+                    "SELECT TO_CHAR(MAX(END_TIME), 'YYYY-MM-DD HH24:MI') AS \"마지막 성공\", ROUND((SYSDATE - MAX(END_TIME)) * 24, 1) AS \"경과(시간)\""
+                    + " FROM V$RMAN_BACKUP_JOB_DETAILS WHERE STATUS LIKE 'COMPLETED%'",
+                    CheckRule.Threshold("경과(시간)", 26, 50, CheckLevel.Warning), CatalogPrivilege,
+                    "RMAN 백업이 하루 넘게 없거나 기록이 없습니다. 백업 작업과 스케줄을 확인합니다(RMAN 밖 백업이면 이 항목을 꺼 둡니다)."),
+                new MonitorCheck("ora.backup_failures", "백업", "실패·경고 백업(24시간)",
+                    "SELECT TO_CHAR(START_TIME, 'YYYY-MM-DD HH24:MI') AS \"시작\", INPUT_TYPE AS \"종류\", STATUS AS \"상태\", ROUND(ELAPSED_SECONDS / 60, 1) AS \"소요(분)\","
+                    + " CASE WHEN STATUS IN ('FAILED', 'COMPLETED WITH ERRORS', 'RUNNING WITH ERRORS') THEN 'CRIT' ELSE 'WARN' END AS \"판정\""
+                    + " FROM V$RMAN_BACKUP_JOB_DETAILS WHERE START_TIME > SYSDATE - 1 AND STATUS NOT IN ('COMPLETED', 'RUNNING') ORDER BY START_TIME DESC",
+                    CheckRule.ByLevel("판정"), CatalogPrivilege, "RMAN 로그(V$RMAN_OUTPUT)에서 실패 원인을 보고 다시 백업합니다."),
+                new MonitorCheck("ora.alert_log", "로그", "경고 로그 ORA- 오류(24시간)",
+                    "SELECT * FROM (SELECT TO_CHAR(ORIGINATING_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS') AS \"시각\", SUBSTR(MESSAGE_TEXT, 1, 300) AS \"메시지\","
+                    + " CASE WHEN MESSAGE_TEXT LIKE '%ORA-00600%' OR MESSAGE_TEXT LIKE '%ORA-07445%' OR MESSAGE_TEXT LIKE '%ORA-04031%' THEN 'CRIT' ELSE 'WARN' END AS \"판정\""
+                    + " FROM V$DIAG_ALERT_EXT WHERE ORIGINATING_TIMESTAMP > SYSTIMESTAMP - INTERVAL '1' DAY AND MESSAGE_TEXT LIKE '%ORA-%'"
+                    + " ORDER BY ORIGINATING_TIMESTAMP DESC) WHERE ROWNUM <= 200",
+                    CheckRule.ByLevel("판정"), "V$DIAG_ALERT_EXT SELECT(11g~12.1은 SELECT_CATALOG_ROLE로 안 보임 — SYS가 따로 허용)",
+                    "ORA-00600·07445·04031은 내부 오류·메모리 부족입니다. trace 파일과 함께 확인합니다."),
+                new MonitorCheck("ora.log_switch", "로그", "시간당 로그 스위치(24시간)",
+                    "SELECT TO_CHAR(TRUNC(FIRST_TIME, 'HH24'), 'MM-DD HH24') || '시' AS \"시간\", COUNT(*) AS \"스위치(회)\""
+                    + " FROM V$LOG_HISTORY WHERE FIRST_TIME > SYSDATE - 1 GROUP BY TRUNC(FIRST_TIME, 'HH24') ORDER BY COUNT(*) DESC",
+                    CheckRule.Threshold("스위치(회)", 12, 30), CatalogPrivilege, "스위치가 잦으면 리두 로그가 작은 것입니다. 로그 크기를 키워 시간당 4~6회 정도로 맞춥니다."),
+                new MonitorCheck("ora.invalid_objects", "객체", "INVALID 객체",
+                    "SELECT o.OWNER AS \"소유자\", o.OBJECT_TYPE AS \"종류\", o.OBJECT_NAME AS \"객체\", TO_CHAR(o.LAST_DDL_TIME, 'YYYY-MM-DD HH24:MI') AS \"마지막 DDL\""
+                    + " FROM DBA_OBJECTS o WHERE o.STATUS = 'INVALID' AND " + NotSystemOwner("o.OWNER") + " ORDER BY 1, 2, 3",
+                    CheckRule.AnyRow(CheckLevel.Warning), CatalogPrivilege, "다시 컴파일합니다(UTL_RECOMP 또는 ALTER … COMPILE). 계속 INVALID면 참조 객체를 확인합니다."),
+                new MonitorCheck("ora.unusable_indexes", "객체", "UNUSABLE 인덱스·파티션",
+                    "SELECT OWNER AS \"소유자\", INDEX_NAME AS \"인덱스\", CAST(NULL AS VARCHAR2(128)) AS \"파티션\", STATUS AS \"상태\" FROM DBA_INDEXES WHERE STATUS = 'UNUSABLE'"
+                    + " UNION ALL SELECT INDEX_OWNER, INDEX_NAME, PARTITION_NAME, STATUS FROM DBA_IND_PARTITIONS WHERE STATUS = 'UNUSABLE'"
+                    + " UNION ALL SELECT INDEX_OWNER, INDEX_NAME, SUBPARTITION_NAME, STATUS FROM DBA_IND_SUBPARTITIONS WHERE STATUS = 'UNUSABLE' ORDER BY 1, 2, 3",
+                    CheckRule.AnyRow(CheckLevel.Critical), CatalogPrivilege, "UNUSABLE 인덱스는 DML·조회를 실패하게 하거나 느리게 합니다. ALTER INDEX … REBUILD [PARTITION …]."),
+                new MonitorCheck("ora.stale_stats", "객체", "오래된 통계",
+                    "SELECT OWNER AS \"소유자\", TABLE_NAME AS \"테이블\", PARTITION_NAME AS \"파티션\", TO_CHAR(LAST_ANALYZED, 'YYYY-MM-DD') AS \"마지막 분석\""
+                    + " FROM (SELECT /*+ NO_MERGE */ OWNER, TABLE_NAME, PARTITION_NAME, LAST_ANALYZED, STALE_STATS FROM DBA_TAB_STATISTICS"
+                    + " WHERE TABLE_NAME NOT LIKE 'BIN$%' AND " + NotSystemOwner("OWNER") + ") WHERE STALE_STATS = 'YES' ORDER BY 1, 2, 3",
+                    CheckRule.AnyRow(CheckLevel.Warning), CatalogPrivilege, "자동 통계 수집 작업이 도는지 확인하고, 필요한 테이블은 DBMS_STATS.GATHER_TABLE_STATS로 모읍니다."),
+                new MonitorCheck("ora.failed_jobs", "작업·세션", "실패한 스케줄러 작업(24시간)",
+                    "SELECT OWNER AS \"소유자\", JOB_NAME AS \"작업\", TO_CHAR(LOG_DATE, 'YYYY-MM-DD HH24:MI') AS \"시각\", STATUS AS \"상태\", ERROR# AS \"오류 번호\","
+                    + " SUBSTR(ADDITIONAL_INFO, 1, 200) AS \"내용\" FROM DBA_SCHEDULER_JOB_RUN_DETAILS"
+                    + " WHERE STATUS <> 'SUCCEEDED' AND LOG_DATE > SYSTIMESTAMP - INTERVAL '1' DAY ORDER BY LOG_DATE DESC",
+                    CheckRule.AnyRow(CheckLevel.Warning), CatalogPrivilege, "오류 번호와 내용으로 원인을 보고 작업을 다시 실행합니다."),
+                new MonitorCheck("ora.broken_jobs", "작업·세션", "중단·실패한 DBMS_JOB",
+                    "SELECT SCHEMA_USER AS \"소유자\", JOB AS \"번호\", SUBSTR(WHAT, 1, 120) AS \"작업\", BROKEN AS \"중단\", FAILURES AS \"실패 수\","
+                    + " TO_CHAR(LAST_DATE, 'YYYY-MM-DD HH24:MI') AS \"마지막 실행\" FROM DBA_JOBS WHERE BROKEN = 'Y' OR FAILURES > 0 ORDER BY 1, 2",
+                    CheckRule.AnyRow(CheckLevel.Warning), CatalogPrivilege, "DBMS_JOB.BROKEN으로 다시 살리고 실패 원인(alert log·trace)을 확인합니다."),
+                new MonitorCheck("ora.long_running", "작업·세션", "30분 넘게 실행 중인 세션",
+                    "SELECT s.INST_ID AS \"인스턴스\", s.SID AS \"SID\", s.SERIAL# AS \"SERIAL#\", s.USERNAME AS \"사용자\", s.PROGRAM AS \"프로그램\", s.SQL_ID AS \"SQL_ID\","
+                    + " ROUND(s.LAST_CALL_ET / 60) AS \"실행(분)\" FROM GV$SESSION s WHERE s.TYPE = 'USER' AND s.STATUS = 'ACTIVE' AND s.LAST_CALL_ET >= 1800"
+                    + " AND (s.STATE <> 'WAITING' OR s.WAIT_CLASS <> 'Idle') ORDER BY s.LAST_CALL_ET DESC",
+                    CheckRule.AnyRow(CheckLevel.Warning), CatalogPrivilege, "성능 모니터 [세션]에서 SQL 전문·실행 계획을 보고 의도한 배치인지 확인합니다."),
+                new MonitorCheck("ora.blocking", "작업·세션", "잠금 대기(지금)",
+                    "SELECT s.INST_ID AS \"인스턴스\", s.SID AS \"SID\", s.USERNAME AS \"사용자\", s.BLOCKING_INSTANCE || ',' || s.BLOCKING_SESSION AS \"막는 세션\","
+                    + " s.EVENT AS \"대기 이벤트\", ROUND(s.WAIT_TIME_MICRO / 1000000) AS \"대기(초)\" FROM GV$SESSION s"
+                    + " WHERE s.BLOCKING_SESSION_STATUS = 'VALID' AND s.STATE = 'WAITING' AND s.WAIT_TIME_MICRO >= 3000000 ORDER BY s.WAIT_TIME_MICRO DESC",
+                    CheckRule.Threshold("대기(초)", 60, 300), CatalogPrivilege, "성능 모니터 [잠금] 트리에서 근원 세션을 찾아 커밋·롤백하게 하거나 끊습니다."),
+                new MonitorCheck("ora.password_expiry", "보안", "14일 안에 만료되는 비밀번호",
+                    "SELECT USERNAME AS \"사용자\", ACCOUNT_STATUS AS \"상태\", TO_CHAR(EXPIRY_DATE, 'YYYY-MM-DD') AS \"만료일\", PROFILE AS \"프로필\","
+                    + " CASE WHEN ACCOUNT_STATUS = 'EXPIRED' THEN 'CRIT' ELSE 'WARN' END AS \"판정\" FROM DBA_USERS"
+                    + " WHERE EXPIRY_DATE < SYSDATE + 14 AND ACCOUNT_STATUS IN ('OPEN', 'EXPIRED(GRACE)', 'EXPIRED') AND " + NotSystemOwner("USERNAME")
+                    + " ORDER BY EXPIRY_DATE",
+                    CheckRule.ByLevel("판정"), CatalogPrivilege, "응용 계정이 만료되면 접속이 끊깁니다. 비밀번호를 바꾸거나 프로필의 PASSWORD_LIFE_TIME을 확인합니다.")
+            });
+
+        /// <summary>
+        /// 전체 DB 타일 지표(긴 형식 한 장, 한 번 왕복 — 11.2 XE SELECT_CATALOG_ROLE 계정으로 0.1초).
+        /// - 첫 가지의 METRIC·ITEM·TEXT는 VARCHAR2로 CAST(리터럴이 CHAR면 짧은 이름이 공백으로 채워진다).
+        /// - 테이블스페이스는 영구만, DBA_TABLESPACE_USAGE_METRICS(자동 확장 최대 크기 기준) 높은 3개 — UNDO는 만료된 익스텐트까지, TEMP는 고수위를 사용으로 세어 오경보가 난다.
+        /// - FRA는 회수 가능 공간을 뺀다(예전 FRA 파일까지 SPACE_USED에 들어감). 쓰지 않으면(한도 0) 행 없음.
+        /// - 잠금 대기는 3초 이상만(잠금 트리의 기본 최소 대기). 아카이브 대상은 ERROR·DISABLED(오류 뒤 꺼짐)·BAD PARAM·FULL만 오류.
+        /// - 백업은 COMPLETED%(WITH WARNINGS 포함)의 마지막 끝 시각 — 기록이 없으면 VALUE NULL.
+        /// </summary>
+        private static readonly MonitorOverview OverviewQuery = new MonitorOverview(Privilege,
+            "SELECT CAST('" + MonitorMetrics.ActiveSessions + "' AS VARCHAR2(30)) AS METRIC, CAST(NULL AS VARCHAR2(128)) AS ITEM, COUNT(*) AS VALUE, CAST(NULL AS VARCHAR2(64)) AS TEXT"
+            + " FROM GV$SESSION WHERE TYPE = 'USER' AND STATUS = 'ACTIVE' AND (STATE <> 'WAITING' OR WAIT_CLASS <> 'Idle')"
+            + " UNION ALL SELECT '" + MonitorMetrics.AverageActiveSessions + "', NULL, ROUND(SUM(VALUE), 2), NULL FROM GV$SYSMETRIC WHERE METRIC_NAME = 'Average Active Sessions' AND GROUP_ID = 2"
+            + " UNION ALL SELECT '" + MonitorMetrics.CpuCount + "', NULL, SUM(VALUE), NULL FROM GV$OSSTAT WHERE STAT_NAME = 'NUM_CPUS'"
+            + " UNION ALL SELECT '" + MonitorMetrics.BlockedSessions + "', NULL, COUNT(*), NULL FROM GV$SESSION"
+            + " WHERE BLOCKING_SESSION_STATUS = 'VALID' AND STATE = 'WAITING' AND WAIT_TIME_MICRO >= 3000000"
+            + " UNION ALL SELECT '" + MonitorMetrics.LongestBlockSeconds + "', NULL, MAX(ROUND(WAIT_TIME_MICRO / 1000000)), NULL FROM GV$SESSION"
+            + " WHERE BLOCKING_SESSION_STATUS = 'VALID' AND STATE = 'WAITING'"
+            + " UNION ALL SELECT * FROM (SELECT '" + MonitorMetrics.TablespaceUsedPercent + "', m.TABLESPACE_NAME, ROUND(m.USED_PERCENT, 1), NULL"
+            + " FROM DBA_TABLESPACE_USAGE_METRICS m JOIN DBA_TABLESPACES t ON t.TABLESPACE_NAME = m.TABLESPACE_NAME"
+            + " WHERE t.CONTENTS = 'PERMANENT' ORDER BY m.USED_PERCENT DESC) WHERE ROWNUM <= 3"
+            + " UNION ALL SELECT '" + MonitorMetrics.RecoveryAreaUsedPercent + "', NULL, ROUND((SPACE_USED - SPACE_RECLAIMABLE) * 100 / SPACE_LIMIT, 1), NULL"
+            + " FROM V$RECOVERY_FILE_DEST WHERE SPACE_LIMIT > 0"
+            + " UNION ALL SELECT '" + MonitorMetrics.ArchiveDestErrors + "', NULL, COUNT(*), NULL FROM V$ARCHIVE_DEST_STATUS WHERE STATUS IN ('ERROR', 'DISABLED', 'BAD PARAM', 'FULL')"
+            + " UNION ALL SELECT '" + MonitorMetrics.LastBackupHours + "', NULL, ROUND((SYSDATE - MAX(END_TIME)) * 24, 1), NULL FROM V$RMAN_BACKUP_JOB_DETAILS WHERE STATUS LIKE 'COMPLETED%'"
+            + " UNION ALL SELECT '" + MonitorMetrics.FailedJobs24h + "', NULL, COUNT(*), NULL FROM DBA_SCHEDULER_JOB_RUN_DETAILS"
+            + " WHERE STATUS <> 'SUCCEEDED' AND LOG_DATE > SYSTIMESTAMP - INTERVAL '1' DAY"
+            + " UNION ALL SELECT '" + MonitorMetrics.UptimeHours + "', NULL, ROUND((SYSDATE - MIN(STARTUP_TIME)) * 24, 1), NULL FROM GV$INSTANCE"
+            + " UNION ALL SELECT '" + MonitorMetrics.LogMode + "', NULL, NULL, LOG_MODE FROM V$DATABASE"
+            + " UNION ALL SELECT '" + MonitorMetrics.DbRole + "', NULL, NULL, DATABASE_ROLE FROM V$DATABASE");
+
+        /// <summary>트리 상세의 키("INST_ID,SID")를 GV$ 조건으로 푼다. 바인드 :name을 여러 번 쓴다(ODP.NET BindByName).</summary>
+        private static string KeyMatch(string alias)
+        {
+            return alias + ".INST_ID = TO_NUMBER(SUBSTR(:name, 1, INSTR(:name, ',') - 1))"
+                + " AND " + alias + ".SID = TO_NUMBER(SUBSTR(:name, INSTR(:name, ',') + 1))";
+        }
+
+        /// <summary>
+        /// 잠금 트리 행의 상세: [잠금] 섹션 상세(<see cref="SessionDetails"/>)와 같은 제목·순서, 키만 "INST_ID,SID"(GV$ — RAC의 다른 인스턴스 세션도).
+        /// DBMS_XPLAN.DISPLAY_CURSOR는 접속한 인스턴스의 커서만 보므로 다른 인스턴스 세션은 안내 한 줄.
+        /// </summary>
+        private static readonly IReadOnlyList<MonitorDetail> TreeDetails = new[]
+        {
+            new MonitorDetail("sql", "SQL 전문", "GV$SQL.SQL_FULLTEXT — 이 세션이 지금 실행 중인(없으면 직전) 문장. 쉬는 근원 세션은 직전 문장.",
+                "SELECT q.SQL_FULLTEXT FROM GV$SESSION s"
+                + " JOIN GV$SQL q ON q.INST_ID = s.INST_ID AND q.SQL_ID = NVL(s.SQL_ID, s.PREV_SQL_ID)"
+                + " AND q.CHILD_NUMBER = NVL2(s.SQL_ID, s.SQL_CHILD_NUMBER, s.PREV_CHILD_NUMBER)"
+                + " WHERE " + KeyMatch("s") + " AND ROWNUM = 1", true),
+            new MonitorDetail("plan", "실행 계획", "DBMS_XPLAN.DISPLAY_CURSOR(SQL_ID, 자식 번호, 'TYPICAL') — 접속한 인스턴스의 세션만(RAC의 다른 인스턴스는 그 인스턴스에 접속해야 한다).",
+                "SELECT p.PLAN_TABLE_OUTPUT FROM GV$SESSION s,"
+                + " TABLE(DBMS_XPLAN.DISPLAY_CURSOR(NVL(s.SQL_ID, s.PREV_SQL_ID), NVL2(s.SQL_ID, s.SQL_CHILD_NUMBER, s.PREV_CHILD_NUMBER), 'TYPICAL')) p"
+                + " WHERE " + KeyMatch("s") + " AND s.INST_ID = USERENV('INSTANCE')"
+                + " UNION ALL SELECT '다른 인스턴스(' || s.INST_ID || ')의 세션입니다. 실행 계획은 그 인스턴스에 접속해야 볼 수 있습니다.'"
+                + " FROM GV$SESSION s WHERE " + KeyMatch("s") + " AND s.INST_ID <> USERENV('INSTANCE')", true),
+            new MonitorDetail("stats", "세션 통계", "GV$SESSTAT · V$STATNAME — CPU·논리/물리 읽기·리두·커밋 수 등 이 세션의 누적 통계(값이 큰 것부터 50개).",
+                "SELECT * FROM (SELECT n.NAME AS \"통계\", st.VALUE AS \"값\", n.CLASS AS \"분류\""
+                + " FROM GV$SESSTAT st JOIN V$STATNAME n ON n.STATISTIC# = st.STATISTIC#"
+                + " WHERE " + KeyMatch("st") + " AND st.VALUE > 0 ORDER BY st.VALUE DESC) WHERE ROWNUM <= 50")
+        };
+
+        /// <summary>트리의 세션 종료: ALTER SYSTEM KILL SESSION 'sid,serial#,@inst' IMMEDIATE(11g+ — RAC의 다른 인스턴스 세션도). 세 값이 모두 수일 때만.</summary>
+        private static readonly IReadOnlyList<MonitorAction> TreeActions = new[]
+        {
+            new MonitorAction("kill", "세션 종료…", new[] { "인스턴스", "SID", "SERIAL#" },
+                "이 세션의 커밋하지 않은 변경은 롤백되고 사용자는 ORA-00028로 끊깁니다. 되돌릴 수 없습니다.",
+                values => values.All(MonitorAction.IsDigits)
+                    ? "ALTER SYSTEM KILL SESSION '" + values[1] + "," + values[2] + ",@" + values[0] + "' IMMEDIATE" : null)
+        };
+
+        /// <summary>
+        /// 잠금 연쇄 트리: GV$SESSION의 BLOCKING_SESSION(대기 사슬, 11gR2의 STATUS = 'VALID')으로 간선을 만든다.
+        /// V$LOCK의 TM·TX보다 넓다 — 라이브러리 캐시 핀·cursor: pin S wait on X·buffer busy처럼 다른 세션을 기다리는 대기도 잡힌다.
+        /// 행 = 막힌 세션과 막는 세션 모두(막는 세션은 BLOCKER_KEY가 NULL인 행 — 쉬는 근원이면 유휴 초·트랜잭션 시작·직전 SQL).
+        /// 객체는 기다리는 세션의 ROW_WAIT_OBJ#(ALL_OBJECTS — 권한 밖이면 빈 칸), SQL은 지금(없으면 직전) 문장의 앞 200자.
+        /// </summary>
+        private static readonly MonitorLockTree Tree = new MonitorLockTree(
+            "GV$SESSION의 BLOCKING_SESSION(대기 사슬)로 근원 블로커 아래에 막힌 세션을 펼친다. 근원이 쉬면 유휴 시간·트랜잭션 시작·직전 SQL. 최소 대기보다 짧은 사슬은 숨긴다.",
+            Privilege,
+            "WITH w AS (SELECT INST_ID, SID, BLOCKING_INSTANCE, BLOCKING_SESSION FROM GV$SESSION WHERE BLOCKING_SESSION_STATUS = 'VALID')"
+            + " SELECT s.INST_ID || ',' || s.SID AS SESSION_KEY,"
+            + " CASE WHEN w.BLOCKING_SESSION IS NOT NULL THEN w.BLOCKING_INSTANCE || ',' || w.BLOCKING_SESSION END AS BLOCKER_KEY,"
+            // 쉬는 근원도 STATE = 'WAITING'(SQL*Net message from client — Idle)이라 그 대기는 빼야 "최장 대기"가 막힌 시간만 센다(실측 11.2 XE)
+            + " CASE WHEN s.STATE = 'WAITING' AND s.WAIT_CLASS <> 'Idle' THEN ROUND(s.WAIT_TIME_MICRO / 1000000) END AS WAIT_SECONDS,"
+            + " CASE WHEN s.STATUS <> 'ACTIVE' THEN s.LAST_CALL_ET END AS IDLE_SECONDS,"
+            + " s.INST_ID AS \"인스턴스\", s.SID AS \"SID\", s.SERIAL# AS \"SERIAL#\", s.USERNAME AS \"사용자\", s.STATUS AS \"상태\","
+            + " CASE WHEN s.STATE = 'WAITING' THEN s.EVENT END AS \"대기 이벤트\","
+            + " CASE WHEN w.SID IS NOT NULL AND s.ROW_WAIT_OBJ# > 0 THEN"
+            + " (SELECT o.OWNER || '.' || o.OBJECT_NAME FROM ALL_OBJECTS o WHERE o.OBJECT_ID = s.ROW_WAIT_OBJ#) END AS \"객체\","
+            + " TO_CHAR(t.START_DATE, 'YYYY-MM-DD HH24:MI:SS') AS \"트랜잭션 시작\","
+            + " s.SQL_ID AS \"SQL_ID\", s.PREV_SQL_ID AS \"직전 SQL_ID\","
+            + " (SELECT SUBSTR(q.SQL_TEXT, 1, 200) FROM GV$SQL q WHERE q.INST_ID = s.INST_ID AND q.SQL_ID = NVL(s.SQL_ID, s.PREV_SQL_ID) AND ROWNUM = 1) AS \"SQL\","
+            + " s.PROGRAM AS \"프로그램\", s.MACHINE AS \"머신\", s.OSUSER AS \"OS 사용자\", s.MODULE AS \"모듈\""
+            + " FROM GV$SESSION s"
+            + " LEFT JOIN w ON w.INST_ID = s.INST_ID AND w.SID = s.SID"
+            + " LEFT JOIN GV$TRANSACTION t ON t.INST_ID = s.INST_ID AND t.ADDR = s.TADDR"
+            + " WHERE (s.INST_ID, s.SID) IN (SELECT INST_ID, SID FROM w UNION SELECT BLOCKING_INSTANCE, BLOCKING_SESSION FROM w)",
+            TreeDetails, TreeActions);
 
         /// <summary>파일 뷰(DBA_DATA_FILES·DBA_TEMP_FILES)를 테이블스페이스별 크기·최대·자동 확장으로 합친다.</summary>
         private static string FileSums(string view)

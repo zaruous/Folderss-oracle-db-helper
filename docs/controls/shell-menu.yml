@@ -19,7 +19,7 @@ features:
   - name: 연결 메뉴
     description: 트리에서 고른 DB 이름을 머리에 보이고 연결·다시 연결·연결 끊기·접속 관리.
   - name: 도구 메뉴
-    description: 테이블 정의서 만들기, GCM 정의서 만들기, 성능 모니터(트리에서 고른 DB 대상 — 열 때마다 항목 글에 DB 이름).
+    description: 테이블 정의서 만들기, GCM 정의서 만들기, 성능 모니터(트리에서 고른 DB 대상 — 열 때마다 항목 글에 DB 이름), 전체 DB 상태(저장한 접속 전부), 일일 점검(고른 DB들 — 상태·직전 대비·엑셀 보고서).
   - name: 도움말 메뉴
     description: 도움말(HTML 도움말 창), 단축키 목록.
   - name: 아이콘 막대
@@ -44,4 +44,4 @@ limits:
     그래서 메뉴 막대 안에서만 쓰는 템플릿을 테마 키로 직접 준다.
 tests:
   - tests/MyPlugin.Tests/ShellLogicTests.cs
-related: [db-helper-view, help-window, monitor-window]
+related: [db-helper-view, help-window, monitor-window, overview-window, check-window]

@@ -17,6 +17,272 @@ namespace MyPlugin
     {
         /// <summary>섹션 목록(화면 순서). 이 DBMS를 지원하지 않으면 빈 목록.</summary>
         IReadOnlyList<MonitorSection> Sections { get; }
+
+        /// <summary>
+        /// 잠금 연쇄 트리(누가 누구를 막는지 — 근원 블로커 아래에 막힌 세션). 있으면 [잠금] 섹션이 트리로 보이고 [표로 보기]로 섹션 표에 돌아간다.
+        /// 지원하지 않으면 null(그 DBMS에서는 [잠금] 섹션 표만). 설계: docs/monitor-dba-design.md 3장.
+        /// </summary>
+        MonitorLockTree LockTree { get; }
+
+        /// <summary>
+        /// 전체 DB 한 화면의 타일 지표(가벼운 뷰만, 한 번 왕복). 지원하지 않으면 null(그 DBMS 접속의 타일은 "지원 예정").
+        /// 설계: docs/monitor-dba-design.md 5장.
+        /// </summary>
+        MonitorOverview Overview { get; }
+
+        /// <summary>
+        /// 일일 점검의 기본 묶음(DB 식별 SQL + 점검 항목). 지원하지 않으면 null(그 DBMS 접속은 점검 대상에서 빠진다).
+        /// 사용자 점검 항목은 SQLite 저장소(MonitorStore)에 있고 같은 형식(<see cref="MonitorCheck"/>)으로 섞여 돈다. 설계: docs/monitor-dba-design.md 6장.
+        /// </summary>
+        MonitorCheckSet CheckSet { get; }
+    }
+
+    /// <summary>점검 판정 방식.</summary>
+    internal enum CheckRuleKind
+    {
+        /// <summary>결과 행이 있으면 <see cref="CheckRule.Level"/>(없으면 정상). 값 = 행 수.</summary>
+        AnyRow,
+        /// <summary>열(<see cref="CheckRule.Column"/>) 값의 최댓값을 주의·위험 문턱과 비교. 값이 없으면 <see cref="CheckRule.MissingLevel"/>.</summary>
+        Threshold,
+        /// <summary>판정 열(<see cref="CheckRule.Column"/>)의 'OK'·'WARN'·'CRIT' 가운데 가장 나쁜 것. 값 = OK가 아닌 행 수.</summary>
+        ByLevel,
+        /// <summary>판정 없이 보이기만(상태 "정보").</summary>
+        Info
+    }
+
+    /// <summary>점검 결과 단계(규칙이 고르는 것).</summary>
+    internal enum CheckLevel
+    {
+        Ok,
+        Warning,
+        Critical
+    }
+
+    /// <summary>점검 판정 규칙. 사용자 항목은 JSON으로 저장한다(CheckLogic.RuleToJson/RuleFromJson).</summary>
+    internal sealed class CheckRule
+    {
+        private CheckRule(CheckRuleKind kind, CheckLevel level, string column, double? warning, double? critical, CheckLevel missing)
+        {
+            Kind = kind;
+            Level = level;
+            Column = column;
+            Warning = warning;
+            Critical = critical;
+            MissingLevel = missing;
+        }
+
+        public CheckRuleKind Kind { get; }
+        public CheckLevel Level { get; }
+        public string Column { get; }
+        public double? Warning { get; }
+        public double? Critical { get; }
+        public CheckLevel MissingLevel { get; }
+
+        /// <summary>행이 있으면 level(주의·위험).</summary>
+        public static CheckRule AnyRow(CheckLevel level)
+        {
+            return new CheckRule(CheckRuleKind.AnyRow, level == CheckLevel.Ok ? CheckLevel.Warning : level, null, null, null, CheckLevel.Ok);
+        }
+
+        /// <summary>열 값(행이 여럿이면 최댓값) ≥ warning이면 주의, ≥ critical이면 위험. 값이 하나도 없으면 missing.</summary>
+        public static CheckRule Threshold(string column, double? warning, double? critical, CheckLevel missing = CheckLevel.Ok)
+        {
+            if (string.IsNullOrWhiteSpace(column))
+                throw new ArgumentException("임계값 규칙에는 열 이름이 있어야 합니다.");
+            if (!warning.HasValue && !critical.HasValue)
+                throw new ArgumentException("임계값 규칙에는 주의나 위험 값이 있어야 합니다.");
+            return new CheckRule(CheckRuleKind.Threshold, CheckLevel.Ok, column.Trim(), warning, critical, missing);
+        }
+
+        /// <summary>판정 열의 'OK'·'WARN'·'CRIT'(대소문자 무시).</summary>
+        public static CheckRule ByLevel(string column)
+        {
+            if (string.IsNullOrWhiteSpace(column))
+                throw new ArgumentException("판정 열 규칙에는 열 이름이 있어야 합니다.");
+            return new CheckRule(CheckRuleKind.ByLevel, CheckLevel.Ok, column.Trim(), null, null, CheckLevel.Ok);
+        }
+
+        public static CheckRule Info()
+        {
+            return new CheckRule(CheckRuleKind.Info, CheckLevel.Ok, null, null, null, CheckLevel.Ok);
+        }
+
+        /// <summary>문턱만 바꾼 사본(점검 항목 관리의 임계값 덮어쓰기). 임계값 규칙이 아니면 그대로.</summary>
+        public CheckRule WithThresholds(double? warning, double? critical)
+        {
+            if (Kind != CheckRuleKind.Threshold || (!warning.HasValue && !critical.HasValue))
+                return this;
+            return new CheckRule(Kind, Level, Column, warning ?? Warning, critical ?? Critical, MissingLevel);
+        }
+    }
+
+    /// <summary>
+    /// 일일 점검 항목 하나. 결과 행 = 발견 사항(별칭이 머리글). 바인드 없음, SELECT 한 문장.
+    /// 권한이 없으면 "건너뜀(권한)", 필요 조건(<see cref="Requirements"/>)이 안 맞으면 "건너뜀(조건)", 그 밖 실패·시간 초과는 "오류".
+    /// </summary>
+    internal sealed class MonitorCheck
+    {
+        public MonitorCheck(string id, string category, string title, string sql, CheckRule rule, string privilege = null, string advice = null,
+            IReadOnlyList<MonitorRequirement> requirements = null)
+        {
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(category) || string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(sql))
+                throw new ArgumentException("점검 항목의 id·분류·제목·SQL이 비었습니다.");
+            Id = id;
+            Category = category;
+            Title = title;
+            Sql = sql;
+            Rule = rule ?? throw new ArgumentNullException(nameof(rule));
+            Privilege = privilege ?? "";
+            Advice = advice ?? "";
+            Requirements = requirements ?? Array.Empty<MonitorRequirement>();
+        }
+
+        /// <summary>바꾸지 않는 키(설정·결과 보관). 기본 묶음은 'ora.*', 사용자 항목은 'user.*'.</summary>
+        public string Id { get; }
+        /// <summary>가용성 · 공간 · 백업 · 로그 · 객체 · 작업·세션 · 보안(<see cref="MonitorCheckSet.Categories"/>) 또는 사용자 분류.</summary>
+        public string Category { get; }
+        public string Title { get; }
+        public string Sql { get; }
+        public CheckRule Rule { get; }
+        public string Privilege { get; }
+        /// <summary>주의·위험일 때 조치 안내 한두 줄.</summary>
+        public string Advice { get; }
+        public IReadOnlyList<MonitorRequirement> Requirements { get; }
+        /// <summary>사용자 항목이면 true(점검 항목 관리에서 고치고 지울 수 있다).</summary>
+        public bool IsUser { get { return Id.StartsWith("user.", StringComparison.Ordinal); } }
+    }
+
+    /// <summary>DBMS의 일일 점검 기본 묶음과 DB 식별 SQL.</summary>
+    internal sealed class MonitorCheckSet
+    {
+        public const string Identity = "IDENTITY";
+        public const string Label = "LABEL";
+
+        /// <summary>기본 분류 순서(결과 창·엑셀이 이 순서로 묶는다. 목록 밖 분류는 뒤에).</summary>
+        public static readonly IReadOnlyList<string> Categories = new[] { "가용성", "공간", "백업", "로그", "객체", "작업·세션", "보안" };
+
+        public MonitorCheckSet(string identitySql, IReadOnlyList<MonitorCheck> items)
+        {
+            if (string.IsNullOrWhiteSpace(identitySql))
+                throw new ArgumentException("DB 식별 SQL이 비었습니다.", nameof(identitySql));
+            IdentitySql = identitySql;
+            Items = items ?? Array.Empty<MonitorCheck>();
+        }
+
+        /// <summary>한 행: IDENTITY(바뀌지 않는 서버 쪽 식별 — 이력을 묶는 키), LABEL(사람이 읽을 이름).</summary>
+        public string IdentitySql { get; }
+        public IReadOnlyList<MonitorCheck> Items { get; }
+    }
+
+    /// <summary>
+    /// 전체 DB 화면의 지표 조회. 결과는 긴 형식 한 장 — 행 하나 = 지표 하나: <see cref="Metric"/>(<see cref="MonitorMetrics"/>의 이름) ·
+    /// <see cref="Item"/>(테이블스페이스 이름 등, 없으면 NULL) · <see cref="Value"/>(수, 없으면 NULL) · <see cref="Text"/>(글 값, 선택).
+    /// DBMS가 줄 수 없는 지표는 행을 주지 않으면 된다. 목록 밖 이름은 화면이 무시한다. 판정은 <c>OverviewLogic</c>이 한다.
+    /// </summary>
+    internal sealed class MonitorOverview
+    {
+        public const string Metric = "METRIC";
+        public const string Item = "ITEM";
+        public const string Value = "VALUE";
+        public const string Text = "TEXT";
+
+        public MonitorOverview(string privilege, string sql)
+        {
+            if (string.IsNullOrWhiteSpace(sql))
+                throw new ArgumentException("sql이 비었습니다.", nameof(sql));
+            Privilege = privilege ?? "";
+            Sql = sql;
+        }
+
+        /// <summary>필요한 권한(권한 오류 타일에 보임).</summary>
+        public string Privilege { get; }
+
+        /// <summary>조회 SQL(바인드 없음, SELECT만).</summary>
+        public string Sql { get; }
+    }
+
+    /// <summary>
+    /// 전체 DB 화면·이력이 함께 쓰는 지표 이름(닫힌 목록). 이력 설계(monitor-history-design.md 5절)의 metric.name과 같은 이름을 쓴다.
+    /// </summary>
+    internal static class MonitorMetrics
+    {
+        /// <summary>지금 활성인 사용자 세션 수(Idle 대기 제외).</summary>
+        public const string ActiveSessions = "active_sessions";
+        /// <summary>평균 활성 세션(최근 60초, Oracle V$SYSMETRIC 'Average Active Sessions').</summary>
+        public const string AverageActiveSessions = "aas";
+        /// <summary>CPU 수(평균 활성 세션 판정 기준).</summary>
+        public const string CpuCount = "cpu_count";
+        /// <summary>다른 세션에 막혀 3초 이상 기다리는 세션 수(잠금 트리의 기본 최소 대기와 같음).</summary>
+        public const string BlockedSessions = "blocked_sessions";
+        /// <summary>막혀 기다리는 세션의 가장 긴 대기(초).</summary>
+        public const string LongestBlockSeconds = "longest_block_s";
+        /// <summary>영구 테이블스페이스 사용률(자동 확장 최대 크기 기준, %). ITEM = 이름. 높은 것부터 몇 개.</summary>
+        public const string TablespaceUsedPercent = "ts_used_pct";
+        /// <summary>복구 영역(FRA) 사용률(회수 가능 공간을 뺀 값, %). 쓰지 않으면 행 없음.</summary>
+        public const string RecoveryAreaUsedPercent = "fra_used_pct";
+        /// <summary>오류 상태인 아카이브 대상 수.</summary>
+        public const string ArchiveDestErrors = "archive_dest_errors";
+        /// <summary>마지막으로 성공한 백업에서 지난 시간(시간). 백업 기록이 없으면 VALUE NULL.</summary>
+        public const string LastBackupHours = "last_backup_h";
+        /// <summary>최근 24시간에 실패한 예약 작업 수.</summary>
+        public const string FailedJobs24h = "failed_jobs_24h";
+        /// <summary>인스턴스 가동 시간(시간).</summary>
+        public const string UptimeHours = "uptime_h";
+        /// <summary>로그 모드(TEXT: ARCHIVELOG · NOARCHIVELOG) — 판정 없이 보이기만.</summary>
+        public const string LogMode = "log_mode";
+        /// <summary>DB 역할(TEXT: PRIMARY · PHYSICAL STANDBY …) — 판정 없이 보이기만.</summary>
+        public const string DbRole = "db_role";
+
+        public static readonly IReadOnlyList<string> All = new[]
+        {
+            ActiveSessions, AverageActiveSessions, CpuCount, BlockedSessions, LongestBlockSeconds, TablespaceUsedPercent,
+            RecoveryAreaUsedPercent, ArchiveDestErrors, LastBackupHours, FailedJobs24h, UptimeHours, LogMode, DbRole
+        };
+    }
+
+    /// <summary>
+    /// 잠금 연쇄 트리 조회. 결과 행 하나 = 간선 하나(세션 → 그 세션을 막는 세션). 트리 만들기는 공급자가 아니라 <c>LockTreeLogic</c>가 한다.
+    /// - 계약 열(로직이 읽는 고정 이름, 화면에 그대로 보이지 않음): <see cref="SessionKey"/> · <see cref="BlockerKey"/>(근원이면 NULL) ·
+    ///   <see cref="WaitSeconds"/>(지금 대기 중인 초, 아니면 NULL) · <see cref="IdleSeconds"/>(쉬는 세션의 유휴 초, 활성이면 NULL).
+    /// - 그 밖의 열은 표시 열(별칭이 머리글). 블로커가 여럿이면 같은 세션이 행 여러 개로 온다 — 표시 열은 첫 행 값을 쓴다.
+    /// - 키는 공급자가 정하는 불투명한 글(Oracle "INST_ID,SID" · PostgreSQL pid · SQL Server session_id). 상세는 키를 바인드(name)하고,
+    ///   조치(세션 종료)는 표시 열 값으로 문장을 만든다.
+    /// </summary>
+    internal sealed class MonitorLockTree
+    {
+        public const string SessionKey = "SESSION_KEY";
+        public const string BlockerKey = "BLOCKER_KEY";
+        public const string WaitSeconds = "WAIT_SECONDS";
+        public const string IdleSeconds = "IDLE_SECONDS";
+
+        /// <summary>계약 열(이 순서로 SQL 앞에 둔다). 화면은 이 열들을 표시 열에서 뺀다.</summary>
+        public static readonly IReadOnlyList<string> ContractColumns = new[] { SessionKey, BlockerKey, WaitSeconds, IdleSeconds };
+
+        public MonitorLockTree(string description, string privilege, string sql, IReadOnlyList<MonitorDetail> details = null, IReadOnlyList<MonitorAction> actions = null)
+        {
+            if (string.IsNullOrWhiteSpace(sql))
+                throw new ArgumentException("sql이 비었습니다.", nameof(sql));
+            Description = description ?? "";
+            Privilege = privilege ?? "";
+            Sql = sql;
+            Details = details ?? Array.Empty<MonitorDetail>();
+            Actions = actions ?? Array.Empty<MonitorAction>();
+        }
+
+        /// <summary>무엇을 어디서 읽는지 한 줄(트리 위에 보임).</summary>
+        public string Description { get; }
+
+        /// <summary>필요한 권한(권한 오류 메시지에 보임).</summary>
+        public string Privilege { get; }
+
+        /// <summary>조회 SQL(바인드 없음).</summary>
+        public string Sql { get; }
+
+        /// <summary>트리 행을 눌렀을 때의 상세(키 = SESSION_KEY). 화면의 상세 버튼은 [잠금] 섹션 상세와 같은 제목·순서여야 한다.</summary>
+        public IReadOnlyList<MonitorDetail> Details { get; }
+
+        /// <summary>트리 행의 오른쪽 메뉴 조치(세션 종료). 화면이 [근원 …]과 [이 …] 두 가지로 보인다. 열 이름은 표시 열.</summary>
+        public IReadOnlyList<MonitorAction> Actions { get; }
     }
 
     /// <summary>세 DBMS가 함께 갖는 섹션 id(이 순서대로).</summary>
@@ -238,5 +504,11 @@ namespace MyPlugin
         public static readonly NoMonitor Instance = new NoMonitor();
 
         public IReadOnlyList<MonitorSection> Sections { get { return Array.Empty<MonitorSection>(); } }
+
+        public MonitorLockTree LockTree { get { return null; } }
+
+        public MonitorOverview Overview { get { return null; } }
+
+        public MonitorCheckSet CheckSet { get { return null; } }
     }
 }

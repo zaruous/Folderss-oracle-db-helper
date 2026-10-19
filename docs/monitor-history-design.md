@@ -45,7 +45,7 @@ DBA가 "이력"으로 알고 싶은 것은 네 가지다. 질문마다 필요한
 
 - 저장하는 것: **숫자 지표만**(테이블스페이스 사용·크기, DB 크기, 세션 수, 로그 스위치 수). **SQL 문장·사용자 이름·호스트 이름은 저장하지 않는다**(제약 6).
 - 주기: 창을 열 때 한 번, 열려 있는 동안 60분마다(테이블스페이스 조회는 무겁다).
-- 위치: `<플러그인 데이터 폴더>\monitor-history\<DB 식별자>\YYYY-MM.jsonl` — 한 줄에 스냅샷 하나, 달마다 파일 하나. 보관 기간이 지난 달 파일은 지운다(기본 90일).
+- 저장소: **SQLite 파일 하나** `<플러그인 데이터 폴더>\monitor-history\history.db`(5절). 보관 기간이 지난 스냅샷은 지운다(기본 90일).
 - 추세(Q3)는 **조건이 맞을 때만** 보인다: 점이 5개 이상이고 3일 이상에 걸쳐 있을 때. 아니면 "이력이 부족합니다(수집 2일, 4점)". 화면에 **수집한 구간**을 함께 보여서 구멍을 숨기지 않는다.
 - "며칠 뒤 가득 참"은 일 단위 선형 회귀로 계산하되 **최대(자동 확장 한도) 기준**과 **지금 크기 기준**을 둘 다 보인다. 디스크 여유는 모르므로(TODO 6) 문구에 그 한계를 쓴다.
 
@@ -87,16 +87,53 @@ DBA가 "이력"으로 알고 싶은 것은 네 가지다. 질문마다 필요한
 | PostgreSQL | `pg_control_system().system_identifier` + 데이터베이스 이름 |
 | SQL Server | `@@SERVERNAME` + `DB_NAME()` |
 
-폴더 이름에는 해시를 쓰고, 원래 값은 파일 안 머리 줄에 둔다.
+키(`db_key`)는 DBMS 종류와 위 값을 이어 SHA-256으로 줄인 글이고, 원래 값은 `db.label`에 둔다.
 
-### 스냅샷 한 줄
+### 저장소 — SQLite (결정 2026-10-19)
 
-```json
-{"at":"2026-10-19T05:05:31Z","start":"2026-10-02T03:12:44Z","m":{"sessions":48,"active":7,"lock_waits":2,"db_mb":512340},"ts":{"MES_DATA":[191562,204800,204800],"MES_IDX":[88311,102400,102400]}}
+PGlite(WebAssembly PostgreSQL)도 검토했지만 JavaScript 실행 환경(Node.js 또는 WebView2)을 따로 띄워야 하고, 데이터 폴더를 한 프로세스만 열 수 있어
+DB Helper 팝업이 둘 열리면 기록이 실패한다. 데이터 양(DB 하나에 90일 · 시간당 1회 · 지표 40개 ≈ 9만 행, 수 MB)에 비해 과하다. → **SQLite**로 한다.
+
+- 패키지: `Microsoft.Data.Sqlite`(테스트 프로젝트가 이미 쓰는 8.0.x). 네이티브 `e_sqlite3.dll`이 `runtimes\win-x64\native\`로 함께 배포되고,
+  Folderss 플러그인 로더가 `.deps.json`으로 플러그인 폴더의 네이티브 DLL을 찾는다(`PluginManager.PluginLoadContext.LoadUnmanagedDll`). 플러그인 zip이 약 1.5MB 커진다.
+- 파일: `<플러그인 데이터 폴더>\monitor-history\history.db` 하나에 모든 DB(`%LOCALAPPDATA%` 아래라 로컬 디스크 — WAL 모드 사용).
+- 동시 사용: 같은 PC에서 DB Helper 팝업이 둘 열려도 된다. `busy_timeout` 5초, 스냅샷 하나를 트랜잭션 하나로 쓴다(쓰기는 시간당 몇 번이라 경합이 거의 없다).
+- 스키마(첫 버전):
+
+```sql
+CREATE TABLE schema_version (version INTEGER NOT NULL);           -- 1
+CREATE TABLE db (
+  db_key     TEXT PRIMARY KEY,            -- SHA-256(종류 + 서버 식별자)
+  kind       TEXT NOT NULL,               -- oracle · postgres · mssql
+  label      TEXT NOT NULL,               -- 원래 식별자(표시용): "DBID 1587721044 / orcl"
+  first_seen TEXT NOT NULL,               -- UTC ISO-8601
+  last_seen  TEXT NOT NULL
+);
+CREATE TABLE snapshot (
+  id         INTEGER PRIMARY KEY,
+  db_key     TEXT NOT NULL REFERENCES db(db_key),
+  taken_at   TEXT NOT NULL,               -- UTC ISO-8601
+  started_at TEXT,                        -- 인스턴스 시작 시각(누적 카운터 리셋 판정)
+  elapsed_ms INTEGER                      -- 수집에 걸린 시간(부하 확인용)
+);
+CREATE INDEX ix_snapshot_db_time ON snapshot (db_key, taken_at);
+CREATE TABLE metric (
+  snapshot_id INTEGER NOT NULL REFERENCES snapshot(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,              -- 'sessions' · 'ts_used_mb' · 'ts_size_mb' · 'ts_max_mb' · 'db_size_mb' · 'log_switches' …
+  item        TEXT NOT NULL DEFAULT '',   -- 테이블스페이스·파일 이름(없으면 '')
+  value       REAL NOT NULL,
+  PRIMARY KEY (snapshot_id, name, item)
+) WITHOUT ROWID;
 ```
 
-- `at`은 UTC, `start`는 인스턴스 시작 시각(카운터 리셋 판정용).
-- `ts`는 테이블스페이스별 [사용, 크기, 최대] MB.
+- 저장 범위 강제: `name`은 코드에 정한 닫힌 목록만 받는다(목록 밖이면 쓰지 않음). `item`에는 테이블스페이스·파일 이름만 온다. SQL 문장·사용자·호스트는 넣을 칸이 없다.
+- 보관 정리: 창을 열 때 하루 한 번 `DELETE FROM snapshot WHERE taken_at < ?`(외래 키 CASCADE로 지표도), 파일은 처음 만들 때 `auto_vacuum = INCREMENTAL`로 두고 정리 뒤 `PRAGMA incremental_vacuum`.
+- 버전: `schema_version`보다 새 파일(나중 버전 플러그인이 만든 것)을 열면 쓰지 않고 읽기만 하며 메시지 탭에 알린다. 낮으면 순서대로 올린다.
+- 고장: 파일을 열 수 없거나 손상이면 그 세션 동안 이력 기록을 끄고 메시지 탭에 알린다(모니터는 계속 동작). [이력 지우기…]는 파일을 지운다.
+- 보안: 파일은 암호화하지 않는다. 담기는 것은 서버 식별자·테이블스페이스 이름·숫자뿐이라는 점을 설정 탭에 적는다.
+- 이점: 이력 저장 로직을 리눅스 CI에서 실제 SQLite로 단위 테스트할 수 있다(지금 테스트 프로젝트에 이미 있음).
+- 대체안: Windows의 플러그인 안에서 `e_sqlite3`가 불러지지 않으면 JSONL(DB마다 달 파일 하나, 한 줄에 스냅샷 하나)로 간다. 5-3 첫 작업에서 판정한다.
+- 나중에(범위 밖): DB Helper에 SQLite 공급자를 붙이면 이 이력 파일을 SQL 탭에서 직접 조회할 수 있다.
 
 ### 누적 카운터의 차이 규칙
 
@@ -129,6 +166,7 @@ IMonitorProvider
 ## 7. 결정이 필요한 것
 
 결정됨(2026-10-19):
+- 이력 파일 저장소 → **SQLite**(5절). PGlite는 비권장으로 정리.
 - ~~2단을 할지~~ → **설정 선택지로 둔다(기본 끔)**. 보관 기간·수집 주기·제외 접속도 설정에서 고른다(4.1절). 저장 지표는 숫자만으로 고정(SQL 문장은 남기지 않음 — 설정으로 바꾸지 않는다).
 
 남은 결정:
@@ -141,7 +179,7 @@ IMonitorProvider
 |---|---|---|
 | 5-1 | 1단 메모리 이력: 구간 보기(느린 SQL·대기), 스파크라인 | 차이·리셋 규칙 단위 테스트(재시작·감소·캐시 밀림 경우), 창을 닫으면 메모리 해제 |
 | 5-2 | 임계값 설정 + 창 배지 + 메시지 탭(상태 변화 때만) | 임계값 경계값 테스트, 같은 상태에서 메시지가 쌓이지 않음 테스트 |
-| 5-3 | 2단 로컬 파일 + 설정 탭 "성능 모니터"(4.1절) | DB 식별자 테스트(프로필 복제·이름 변경에도 같은 폴더), 보관 기간 정리 테스트, 파일에 SQL 문장이 없음을 확인하는 테스트, 깨진 줄은 건너뜀 |
+| 5-3 | 2단 SQLite 이력 + 설정 탭 "성능 모니터"(4.1절) | ① Windows PoC: 설치한 플러그인에서 `history.db`를 열고 쓰고 읽음(실패하면 JSONL로 전환) ② 스키마 생성·버전 올림·새 버전 파일은 읽기만 테스트 ③ DB 식별자 테스트(프로필 복제·이름 변경에도 같은 db_key) ④ 보관 기간 정리 테스트 ⑤ 닫힌 지표 목록 밖은 쓰지 않음 테스트 ⑥ 두 연결이 동시에 써도 실패하지 않음(busy_timeout) 테스트 ⑦ 손상 파일이면 기록만 끄고 예외를 내지 않음 테스트 |
 | 5-4 | 추세(가득 참 예측) | 점 부족·구간 부족이면 예측을 숨김 테스트, 회귀 계산 테스트 |
 | 5-5 | 3단 서버 이력(Query Store · AWR) | 꺼져 있으면 필요 조건 안내, AWR은 팩 설정이 없으면 조회 SQL을 보내지 않음 |
 | 5-6 | (계약 변경 시) OS 알림 | Folderss 계약·본체·예제 플러그인 빌드 |

@@ -149,10 +149,21 @@ namespace MyPlugin
                 {
                     // 열 이름이 13에서 바뀌었다(total_time → total_exec_time). 먼저 버전을 보고, 그다음 확장이 이 DB에 만들어졌는지 본다
                     new MonitorRequirement("SELECT CASE WHEN current_setting('server_version_num')::int >= 130000 THEN 1 ELSE 0 END",
-                        "PostgreSQL 13 이상에서만 지원합니다. 12 이하는 pg_stat_statements의 열 이름(total_time)이 달라 이 섹션을 쓸 수 없습니다."),
+                        "PostgreSQL 13 이상에서만 지원합니다. 12 이하는 pg_stat_statements의 열 이름(total_time)이 달라 이 섹션을 쓸 수 없습니다.",
+                        "PostgreSQL 13 이상으로 올리면 [느린 SQL]을 쓸 수 있습니다.\n"
+                        + "  1. 지금 버전 확인: SELECT version();\n"
+                        + "  2. 내려받기: https://www.postgresql.org/download/\n"
+                        + "  3. 큰 버전 업그레이드는 pg_upgrade 또는 pg_dump/pg_restore — https://www.postgresql.org/docs/current/upgrading.html"),
                     new MonitorRequirement("SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'",
                         "pg_stat_statements 확장이 이 데이터베이스에 설치돼 있지 않습니다. 관리자가 postgresql.conf의 shared_preload_libraries에 pg_stat_statements를 넣고 서버를 재시작한 뒤,"
-                        + " 이 DB에서 CREATE EXTENSION pg_stat_statements; 를 실행해야 합니다.")
+                        + " 이 DB에서 CREATE EXTENSION pg_stat_statements; 를 실행해야 합니다.",
+                        "pg_stat_statements 설치 절차(이 PC의 PostgreSQL):\n"
+                        + "  1. 설정 파일 위치 확인: SHOW config_file;\n"
+                        + "  2. postgresql.conf에 추가(이미 있으면 쉼표로 이어 적기): shared_preload_libraries = 'pg_stat_statements'\n"
+                        + "  3. 서버 재시작 — Windows: 서비스(services.msc)에서 postgresql-x64-<버전> 다시 시작, 또는 pg_ctl restart -D <데이터 폴더>\n"
+                        + "  4. 이 DB에서 실행(수퍼유저): CREATE EXTENSION pg_stat_statements;\n"
+                        + "  5. 성능 모니터 [느린 SQL]에서 [새로 고침]\n"
+                        + "  문서: https://www.postgresql.org/docs/current/pgstatstatements.html")
                 }),
 
             new MonitorSection(MonitorSections.Waits, "대기 이벤트",

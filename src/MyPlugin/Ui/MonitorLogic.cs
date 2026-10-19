@@ -123,10 +123,35 @@ namespace MyPlugin
             return true;
         }
 
-        /// <summary>충족되지 않은 필요 조건의 상태 글(경고색): "설치·설정 필요 — …".</summary>
-        public static string RequirementMissingText(MonitorRequirement requirement)
+        /// <summary>충족되지 않은 필요 조건의 상태 글(경고색): "설치·설정 필요 — …". guideLogged면 뒤에 "(설치 절차는 메시지 탭에)".</summary>
+        public static string RequirementMissingText(MonitorRequirement requirement, bool guideLogged = false)
         {
-            return "설치·설정 필요 — " + (requirement == null ? "" : requirement.Message.Trim());
+            return "설치·설정 필요 — " + (requirement == null ? "" : requirement.Message.Trim()) + (guideLogged ? " (설치 절차는 메시지 탭에)" : "");
+        }
+
+        /// <summary>
+        /// 접속 호스트가 이 PC인지: localhost · 127.x.x.x · ::1 · 이 PC의 컴퓨터 이름(대소문자 무시). 포트·공백은 뺀다.
+        /// 서버가 이 PC여야 사용자가 직접 설치할 수 있으므로, 그때만 설치 절차를 메시지 탭에 남긴다.
+        /// </summary>
+        public static bool IsLocalHost(string host, string machineName = null)
+        {
+            var h = (host ?? "").Trim().TrimStart('[').TrimEnd(']');
+            if (h.Length == 0)
+                return false;
+            if (string.Equals(h, "localhost", StringComparison.OrdinalIgnoreCase) || h == "::1" || h.StartsWith("127.", StringComparison.Ordinal))
+                return true;
+            var machine = machineName ?? Environment.MachineName;
+            return !string.IsNullOrEmpty(machine) && (string.Equals(h, machine, StringComparison.OrdinalIgnoreCase)
+                || h.StartsWith(machine + ".", StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>메시지 탭에 남길 설치 안내(여러 줄): "[성능 모니터 · 느린 SQL] 설치·설정 필요: …" + 절차·링크. 안내가 없으면 null.</summary>
+        public static string InstallGuideMessage(MonitorSection section, MonitorRequirement requirement)
+        {
+            if (requirement == null || string.IsNullOrWhiteSpace(requirement.InstallGuide))
+                return null;
+            return "[" + Title + " · " + (section == null ? "" : section.Title) + "] 설치·설정 필요: " + requirement.Message.Trim()
+                + Environment.NewLine + requirement.InstallGuide.Trim().Replace("\n", Environment.NewLine);
         }
 
         // ---------- 행 상세 목록 ----------

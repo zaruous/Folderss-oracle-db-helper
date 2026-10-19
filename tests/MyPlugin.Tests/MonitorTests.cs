@@ -490,6 +490,12 @@ namespace MyPlugin.Tests
             Assert.Contains("pg_extension WHERE extname = 'pg_stat_statements'", top.Requirements[1].Sql);
             Assert.Contains("CREATE EXTENSION pg_stat_statements", top.Requirements[1].Message);
             Assert.Contains("shared_preload_libraries", top.Requirements[1].Message);
+            // 로컬호스트에서 메시지 탭에 남길 설치 절차·링크
+            Assert.Contains("https://www.postgresql.org/docs/current/pgstatstatements.html", top.Requirements[1].InstallGuide);
+            Assert.Contains("SHOW config_file;", top.Requirements[1].InstallGuide);
+            Assert.Contains("CREATE EXTENSION pg_stat_statements;", top.Requirements[1].InstallGuide);
+            Assert.Contains("https://www.postgresql.org/download/", top.Requirements[0].InstallGuide);
+            Assert.Equal("", new MonitorRequirement("SELECT 1", "m").InstallGuide);
             Assert.Throws<ArgumentException>(() => new MonitorRequirement("", "m"));
             Assert.Throws<ArgumentException>(() => new MonitorRequirement("SELECT 1", " "));
         }
@@ -515,6 +521,27 @@ namespace MyPlugin.Tests
             }
             var req = new MonitorRequirement("SELECT 1", " 확장을 설치하세요 ");
             Assert.Equal("설치·설정 필요 — 확장을 설치하세요", MonitorLogic.RequirementMissingText(req));
+            Assert.Equal("설치·설정 필요 — 확장을 설치하세요 (설치 절차는 메시지 탭에)", MonitorLogic.RequirementMissingText(req, true));
+        }
+
+        [Fact]
+        public void IsLocalHost_AndInstallGuideMessage()
+        {
+            foreach (var host in new[] { "localhost", "LOCALHOST", " localhost ", "127.0.0.1", "127.1.2.3", "::1", "[::1]", "MYPC", "mypc", "mypc.corp.local" })
+                Assert.True(MonitorLogic.IsLocalHost(host, "MYPC"), host);
+            foreach (var host in new[] { null, "", "db-prod.local", "10.0.0.5", "128.0.0.1", "mypc2", "localhost.example.com" })
+                Assert.False(MonitorLogic.IsLocalHost(host, "MYPC"), host ?? "null");
+            // machineName을 안 주면 이 PC 이름을 쓴다
+            Assert.True(MonitorLogic.IsLocalHost(Environment.MachineName));
+
+            var section = DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.TopSql);
+            var message = MonitorLogic.InstallGuideMessage(section, section.Requirements[1]);
+            Assert.StartsWith("[성능 모니터 · 느린 SQL] 설치·설정 필요: pg_stat_statements 확장이", message);
+            Assert.Contains(Environment.NewLine + "  1. 설정 파일 위치 확인: SHOW config_file;", message);
+            Assert.Contains("https://www.postgresql.org/docs/current/pgstatstatements.html", message);
+            Assert.DoesNotContain("\\n", message);
+            Assert.Null(MonitorLogic.InstallGuideMessage(section, new MonitorRequirement("SELECT 1", "m")));
+            Assert.Null(MonitorLogic.InstallGuideMessage(section, null));
         }
 
         /// <summary>점검 SQL을 QueryTableAsync(1행)로 읽는 흐름(SQLite): 행 없음 → 미충족, 1 → 충족.</summary>

@@ -737,7 +737,8 @@ namespace MyPlugin
                 // 연결하는 동안 다른 경로로 열렸거나 창이 닫혔을 수 있다
                 if (_closed || _monitors.ContainsKey(dbId))
                     return;
-                var window = MonitorWindow.Show(OwnerWindow(), FindProfile(dbId) ?? profile, provider, () => GetSession(dbId), () => IsRunning(dbId), HelpFolder);
+                var window = MonitorWindow.Show(OwnerWindow(), FindProfile(dbId) ?? profile, provider, () => GetSession(dbId), () => IsRunning(dbId), HelpFolder,
+                    text => AddMessage(dbId, text, MessageKind.Info));
                 _monitors[dbId] = window;
                 window.Closed += (s, e) => _monitors.Remove(dbId);
             }

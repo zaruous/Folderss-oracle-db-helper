@@ -55,6 +55,8 @@ features:
     description: >-
       섹션에 MonitorRequirement(점검 SQL·안내문)가 있으면 가져오기 전에 순서대로 점검한다. 행이 없거나 첫 값이 0·false면 조회하지 않고
       "설치·설정 필요 — …"를 경고색(Theme.Warning)으로 보인다(권한 오류의 위험색과 구분). 지금은 PostgreSQL 느린 SQL: 서버 13 이상 → pg_stat_statements 확장.
+      접속 호스트가 이 PC(localhost · 127.x · ::1 · 컴퓨터 이름)면 사용자가 직접 설치할 수 있으므로 설치 절차·링크(InstallGuide)를
+      메시지 탭(result-message-list)에 한 번 남기고 상태 글에 "(설치 절차는 메시지 탭에)"를 붙인다. 원격 서버면 남기지 않는다.
   - name: 권한 오류
     description: >-
       IDbProvider.IsPermissionDenied(Oracle ORA-00942 · 01031, PostgreSQL 42501, SQL Server 229 · 230 · 297 · 300 · 916)면
@@ -86,4 +88,4 @@ limits:
   - Oracle 11g 식별자 한도(30바이트) 때문에 한국어 별칭은 10자 이내.
 tests:
   - tests/MyPlugin.Tests/MonitorTests.cs
-related: [result-grid, table-info-window, code-spec-dialog, dialogs]
+related: [result-grid, table-info-window, code-spec-dialog, dialogs, result-message-list]

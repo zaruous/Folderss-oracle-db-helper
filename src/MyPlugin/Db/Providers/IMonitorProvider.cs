@@ -155,16 +155,23 @@ namespace MyPlugin
     /// </summary>
     internal sealed class MonitorRequirement
     {
-        public MonitorRequirement(string sql, string message)
+        public MonitorRequirement(string sql, string message, string installGuide = null)
         {
             if (string.IsNullOrWhiteSpace(sql) || string.IsNullOrWhiteSpace(message))
                 throw new ArgumentException("필요 조건의 sql·message가 비었습니다.");
             Sql = sql;
             Message = message;
+            InstallGuide = installGuide ?? "";
         }
 
         public string Sql { get; }
         public string Message { get; }
+
+        /// <summary>
+        /// 접속이 로컬호스트(이 PC의 서버)일 때 메시지 탭에 남기는 설치 절차와 링크(여러 줄). 서버가 다른 PC면 사용자가 설치할 수 없으므로 남기지 않는다.
+        /// 비면 안내 없음.
+        /// </summary>
+        public string InstallGuide { get; }
     }
 
     /// <summary>성능 모니터 섹션 하나: 제목·설명·필요 권한·조회 SQL(·사용률 차트·행 상세 목록·행 조치·필요 조건).</summary>

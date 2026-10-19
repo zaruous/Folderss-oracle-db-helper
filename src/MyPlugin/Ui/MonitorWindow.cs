@@ -27,6 +27,7 @@ namespace MyPlugin
     ///   (<see cref="MonitorSection.KeyColumn"/>)로 상세 조회(바인드 하나)를 실행해 보인다. 상세가 여럿이면 고르는 버튼. 이전 상세 조회는 취소한다.
     ///   <see cref="MonitorDetail.AsText"/>인 상세(SQL 전문·실행 계획)는 표 대신 고정폭 읽기 전용 글 상자.
     /// - <see cref="MonitorSection.Requirements"/>(확장 설치·서버 버전)는 가져오기 전에 점검해, 충족되지 않으면 조회하지 않고 설치 안내를 경고색으로 보인다(오류와 구분).
+    ///   접속이 로컬호스트면(사용자가 직접 설치할 수 있는 서버) 설치 절차·링크(<see cref="MonitorRequirement.InstallGuide"/>)를 메시지 탭에 한 번 남긴다.
     /// - <see cref="MonitorSection.Actions"/>(세션 종료)는 표의 오른쪽 메뉴에 둔다: 고른 행의 값으로 문장을 만들고 위험한 문장 확인 대화상자
     ///   (문장·경고·확인 체크)를 거쳐 실행한 뒤 섹션을 다시 가져온다. 읽기 전용 접속이면 막는다.
     /// </summary>
@@ -37,15 +38,17 @@ namespace MyPlugin
         private readonly OracleConnectionProfile _profile;
         private readonly Func<DbSession> _session;
         private readonly Func<bool> _isRunning;
+        private readonly Action<string> _log;
         private readonly List<SectionView> _sections = new List<SectionView>();
         private readonly CancellationTokenSource _closing = new CancellationTokenSource();
         private readonly DispatcherTimer _timer = new DispatcherTimer();
         private int _current = -1;
         private bool _closed;
 
-        private MonitorWindow(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<DbSession> session, Func<bool> isRunning, string helpFolder)
+        private MonitorWindow(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<DbSession> session, Func<bool> isRunning, string helpFolder, Action<string> log)
         {
             _profile = profile;
+            _log = log ?? (text => { });
             _provider = provider ?? throw new ArgumentNullException(nameof(provider));
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _isRunning = isRunning ?? (() => false);
@@ -85,14 +88,17 @@ namespace MyPlugin
             _timer.Tick += (s, e) => Load(_current, true);
         }
 
-        /// <summary>창을 만들어 보인다. 공급자에 섹션이 없으면 InvalidOperationException(부르는 쪽이 먼저 확인한다).</summary>
-        public static MonitorWindow Show(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<DbSession> session, Func<bool> isRunning, string helpFolder)
+        /// <summary>
+        /// 창을 만들어 보인다. 공급자에 섹션이 없으면 InvalidOperationException(부르는 쪽이 먼저 확인한다).
+        /// log: 메시지 탭에 남길 글(로컬호스트 접속에서 설치 절차 안내). null이면 남기지 않는다.
+        /// </summary>
+        public static MonitorWindow Show(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<DbSession> session, Func<bool> isRunning, string helpFolder, Action<string> log = null)
         {
             if (provider == null)
                 throw new ArgumentNullException(nameof(provider));
             if (provider.Monitor.Sections.Count == 0)
                 throw new InvalidOperationException(MonitorLogic.NotSupportedMessage(provider.DisplayName));
-            var monitor = new MonitorWindow(owner, profile, provider, session, isRunning, helpFolder);
+            var monitor = new MonitorWindow(owner, profile, provider, session, isRunning, helpFolder, log);
             monitor._window.Show();
             return monitor;
         }
@@ -598,7 +604,15 @@ namespace MyPlugin
                             view.Columns = new List<ResultColumn>();
                             view.Grid.Show(view.Columns, new ObservableCollection<ResultGridRow>());
                             view.Loaded = true;
-                            SetStatus(view, MonitorLogic.RequirementMissingText(requirement), Theme.Warning);
+                            // 이 PC의 서버면 사용자가 직접 설치할 수 있다 — 절차·링크를 메시지 탭에 한 번만 남긴다
+                            var guide = MonitorLogic.InstallGuideMessage(view.Section, requirement);
+                            var logged = guide != null && _profile != null && MonitorLogic.IsLocalHost(_profile.Host);
+                            if (logged && !view.GuideLogged.Contains(requirement.Sql))
+                            {
+                                view.GuideLogged.Add(requirement.Sql);
+                                _log(guide);
+                            }
+                            SetStatus(view, MonitorLogic.RequirementMissingText(requirement, logged), Theme.Warning);
                             return;
                         }
                     }
@@ -787,6 +801,8 @@ namespace MyPlugin
             public int DetailIndex { get; set; }
             public string DetailKey { get; set; }
             public CancellationTokenSource DetailWork { get; set; }
+            /// <summary>메시지 탭에 설치 안내를 이미 남긴 필요 조건(점검 SQL로 구분) — 새로 고침마다 되풀이하지 않게.</summary>
+            public HashSet<string> GuideLogged { get; } = new HashSet<string>(StringComparer.Ordinal);
             public List<ResultColumn> Columns { get; set; } = new List<ResultColumn>();
             public bool Loaded { get; set; }
             public bool Loading { get; set; }

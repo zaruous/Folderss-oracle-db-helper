@@ -123,6 +123,42 @@ namespace MyPlugin
             return null;
         }
 
+        /// <summary>글로 보이는 상세(SQL 전문·실행 계획): 행마다 첫 열을 줄바꿈으로 잇는다. 행이 없으면 "".</summary>
+        public static string DetailText(QueryTable table)
+        {
+            if (table == null || table.Rows.Count == 0)
+                return "";
+            return string.Join(Environment.NewLine, table.Rows.Select(r => r.Length > 0 ? r[0] ?? "" : ""));
+        }
+
+        // ---------- 행 조치(세션 종료) ----------
+
+        /// <summary>조치에 넣을 열 값들(action.Columns 순서). 열이 하나라도 없으면 null.</summary>
+        public static string[] ActionValues(IList<ResultColumn> columns, string[] values, MonitorAction action)
+        {
+            if (action == null)
+                return null;
+            var result = new string[action.Columns.Count];
+            for (var i = 0; i < result.Length; i++)
+            {
+                var value = KeyOf(columns, values, action.Columns[i]);
+                if (value == null)
+                    return null;
+                result[i] = value;
+            }
+            return result;
+        }
+
+        public const string ActionNoRowText = "먼저 표에서 행을 고르세요.";
+        public const string ActionReadOnlyText = "읽기 전용 접속에서는 세션 종료 같은 조치를 할 수 없습니다. 접속 관리에서 읽기 전용을 끄세요.";
+        public const string ActionBadValueText = "이 행의 값으로는 문장을 만들 수 없습니다(세션 번호가 수가 아님).";
+
+        /// <summary>조치를 실행한 뒤 상태: "실행함: ALTER SYSTEM KILL SESSION '412,53021' IMMEDIATE".</summary>
+        public static string ActionDoneText(string statement)
+        {
+            return "실행함: " + (statement ?? "").Trim();
+        }
+
         /// <summary>상세 조회 상태: "12행" (0행이면 "없음").</summary>
         public static string DetailRowsText(int rows)
         {

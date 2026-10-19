@@ -7,17 +7,48 @@ namespace MyPlugin
     /// - 11gR2에서도 돌게 LISTAGG·NULLS LAST까지만 쓴다. 따옴표 별칭은 30바이트 이내(한글 10자).
     /// - 항목·값 꼴의 UNION ALL은 첫 가지 리터럴을 VARCHAR2로 CAST한다(모두 CHAR 리터럴이면 결과가 CHAR로 패딩된다).
     /// - 기본 정보: V$DATABASE·V$INSTANCE·NLS_DATABASE_PARAMETERS·V$LOG_HISTORY(24시간 로그 스위치)·V$SESSION(사용자 세션 수).
-    /// - 테이블스페이스: 영구·UNDO는 DBA_DATA_FILES − DBA_FREE_SPACE, 임시는 DBA_TEMP_FILES와 V$TEMP_SPACE_HEADER(사용은 고수위). 최대는 자동 확장이면 MAXBYTES.
+    /// - 테이블스페이스: 영구는 DBA_DATA_FILES − DBA_FREE_SPACE, UNDO는 DBA_UNDO_EXTENTS의 ACTIVE·UNEXPIRED만 사용(만료된 익스텐트는 재사용 가능),
+    ///   임시는 V$SORT_SEGMENT.USED_BLOCKS × 블록 크기(V$TEMP_SPACE_HEADER는 고수위라 과장). 최대는 자동 확장이면 MAXBYTES.
     ///   표 위 대시보드에 테이블스페이스마다 사용률 도넛(사용(MB) / 크기(MB)). 행을 누르면 아래에 데이터 파일·세그먼트(DBA_SEGMENTS) 상세.
     /// - 리두 로그: V$LOG 그룹마다 멤버 파일(V$LOGFILE).
     /// - 잠금: V$LOCK의 TM·TX 가운데 막고 있거나(BLOCK) 기다리는(REQUEST) 것만. 객체는 ALL_OBJECTS로 푼다(권한 밖이면 빈 칸).
-    /// - 세션: V$SESSION의 사용자 세션.
+    /// - 세션: V$SESSION의 사용자 세션. 잠금·세션 행을 누르면 SQL 전문(V$SQL)·실행 계획(DBMS_XPLAN.DISPLAY_CURSOR)·세션 통계,
+    ///   오른쪽 메뉴 [세션 종료…](ALTER SYSTEM KILL SESSION … IMMEDIATE, 확인 체크 뒤).
     /// </summary>
     internal sealed class OracleMonitor : IMonitorProvider
     {
         public const string Privilege = "SELECT_CATALOG_ROLE (또는 해당 V$·DBA_ 뷰 SELECT)";
 
         private const string LockMode = "0, '없음', 1, 'Null', 2, 'Row-S', 3, 'Row-X', 4, 'Share', 5, 'S/Row-X', 6, 'Exclusive'";
+
+        /// <summary>
+        /// 세션(SID) 상세: 지금(없으면 직전) 문장의 전문과 DBMS_XPLAN.DISPLAY_CURSOR 실행 계획. 둘 다 글로 보인다.
+        /// V$SQL은 SQL_ID·CHILD_NUMBER로 찾는다(세션이 쉬는 중이면 PREV_SQL_ID).
+        /// </summary>
+        private static readonly IReadOnlyList<MonitorDetail> SessionDetails = new[]
+        {
+            new MonitorDetail("sql", "SQL 전문", "V$SQL.SQL_FULLTEXT — 이 세션이 지금 실행 중인(없으면 직전) 문장.",
+                "SELECT q.SQL_FULLTEXT FROM V$SESSION s"
+                + " JOIN V$SQL q ON q.SQL_ID = NVL(s.SQL_ID, s.PREV_SQL_ID) AND q.CHILD_NUMBER = NVL2(s.SQL_ID, s.SQL_CHILD_NUMBER, s.PREV_CHILD_NUMBER)"
+                + " WHERE s.SID = :name AND ROWNUM = 1", true),
+            new MonitorDetail("plan", "실행 계획", "DBMS_XPLAN.DISPLAY_CURSOR(SQL_ID, 자식 번호, 'TYPICAL') — 공유 풀에 남아 있는 커서의 실제 계획.",
+                "SELECT p.PLAN_TABLE_OUTPUT FROM V$SESSION s,"
+                + " TABLE(DBMS_XPLAN.DISPLAY_CURSOR(NVL(s.SQL_ID, s.PREV_SQL_ID), NVL2(s.SQL_ID, s.SQL_CHILD_NUMBER, s.PREV_CHILD_NUMBER), 'TYPICAL')) p"
+                + " WHERE s.SID = :name", true),
+            new MonitorDetail("stats", "세션 통계", "V$SESSTAT · V$STATNAME — CPU·논리/물리 읽기·리두·커밋 수 등 이 세션의 누적 통계(값이 큰 것부터 50개).",
+                "SELECT * FROM (SELECT n.NAME AS \"통계\", st.VALUE AS \"값\", n.CLASS AS \"분류\""
+                + " FROM V$SESSTAT st JOIN V$STATNAME n ON n.STATISTIC# = st.STATISTIC#"
+                + " WHERE st.SID = :name AND st.VALUE > 0 ORDER BY st.VALUE DESC) WHERE ROWNUM <= 50")
+        };
+
+        /// <summary>세션 종료: ALTER SYSTEM KILL SESSION 'sid,serial#' IMMEDIATE. 바인드가 안 되는 문장이라 두 값이 모두 수일 때만.</summary>
+        private static readonly IReadOnlyList<MonitorAction> SessionActions = new[]
+        {
+            new MonitorAction("kill", "세션 종료…", new[] { "SID", "SERIAL#" },
+                "이 세션의 커밋하지 않은 변경은 롤백되고 사용자는 ORA-00028로 끊깁니다. 되돌릴 수 없습니다.",
+                values => MonitorAction.IsDigits(values[0]) && MonitorAction.IsDigits(values[1])
+                    ? "ALTER SYSTEM KILL SESSION '" + values[0] + "," + values[1] + "' IMMEDIATE" : null)
+        };
 
         private static readonly IReadOnlyList<MonitorSection> All = new[]
         {
@@ -40,7 +71,7 @@ namespace MyPlugin
                 + ") ORDER BY ORD"),
 
             new MonitorSection(MonitorSections.Storage, "테이블스페이스",
-                "DBA_TABLESPACES · DBA_DATA_FILES · DBA_FREE_SPACE(임시는 DBA_TEMP_FILES · V$TEMP_SPACE_HEADER, 사용은 고수위). 최대는 자동 확장 한도.", Privilege,
+                "DBA_TABLESPACES · DBA_DATA_FILES · DBA_FREE_SPACE. UNDO는 만료 전(ACTIVE·UNEXPIRED) 익스텐트, 임시는 지금 쓰는 정렬 세그먼트(V$SORT_SEGMENT)만 사용으로 센다. 최대는 자동 확장 한도.", Privilege,
                 "SELECT \"테이블스페이스\", \"종류\", \"상태\", \"크기(MB)\", \"사용(MB)\", \"남음(MB)\", \"사용률(%)\", \"최대(MB)\", \"자동 확장\" FROM ("
                 + " SELECT t.TABLESPACE_NAME AS \"테이블스페이스\", t.CONTENTS AS \"종류\", t.STATUS AS \"상태\","
                 + " ROUND(f.TOTAL_BYTES / 1048576) AS \"크기(MB)\","
@@ -51,16 +82,30 @@ namespace MyPlugin
                 + " FROM DBA_TABLESPACES t"
                 + " JOIN (" + FileSums("DBA_DATA_FILES") + ") f ON f.TABLESPACE_NAME = t.TABLESPACE_NAME"
                 + " LEFT JOIN (SELECT TABLESPACE_NAME, SUM(BYTES) AS FREE_BYTES FROM DBA_FREE_SPACE GROUP BY TABLESPACE_NAME) s ON s.TABLESPACE_NAME = t.TABLESPACE_NAME"
+                + " WHERE t.CONTENTS <> 'UNDO'"
+                // UNDO: 만료 전(ACTIVE·UNEXPIRED) 익스텐트만 사용으로 센다. DBA_FREE_SPACE 기준이면 보존 기간 안의 만료된 익스텐트까지 사용으로 잡혀 늘 가득 차 보인다
                 + " UNION ALL"
                 + " SELECT t.TABLESPACE_NAME, t.CONTENTS, t.STATUS,"
                 + " ROUND(f.TOTAL_BYTES / 1048576),"
-                + " ROUND(NVL(h.USED_BYTES, 0) / 1048576),"
-                + " ROUND((f.TOTAL_BYTES - NVL(h.USED_BYTES, 0)) / 1048576),"
-                + " ROUND(NVL(h.USED_BYTES, 0) * 100 / NULLIF(f.TOTAL_BYTES, 0), 1),"
+                + " ROUND(NVL(u.USED_BYTES, 0) / 1048576),"
+                + " ROUND((f.TOTAL_BYTES - NVL(u.USED_BYTES, 0)) / 1048576),"
+                + " ROUND(NVL(u.USED_BYTES, 0) * 100 / NULLIF(f.TOTAL_BYTES, 0), 1),"
+                + " ROUND(f.MAX_BYTES / 1048576), f.AUTOEXTEND"
+                + " FROM DBA_TABLESPACES t"
+                + " JOIN (" + FileSums("DBA_DATA_FILES") + ") f ON f.TABLESPACE_NAME = t.TABLESPACE_NAME"
+                + " LEFT JOIN (SELECT TABLESPACE_NAME, SUM(BYTES) AS USED_BYTES FROM DBA_UNDO_EXTENTS WHERE STATUS IN ('ACTIVE', 'UNEXPIRED') GROUP BY TABLESPACE_NAME) u ON u.TABLESPACE_NAME = t.TABLESPACE_NAME"
+                + " WHERE t.CONTENTS = 'UNDO'"
+                // 임시: 지금 쓰고 있는 정렬 세그먼트 블록(V$SORT_SEGMENT.USED_BLOCKS). V$TEMP_SPACE_HEADER는 고수위라 늘 높게 보인다
+                + " UNION ALL"
+                + " SELECT t.TABLESPACE_NAME, t.CONTENTS, t.STATUS,"
+                + " ROUND(f.TOTAL_BYTES / 1048576),"
+                + " ROUND(NVL(h.USED_BLOCKS, 0) * t.BLOCK_SIZE / 1048576),"
+                + " ROUND((f.TOTAL_BYTES - NVL(h.USED_BLOCKS, 0) * t.BLOCK_SIZE) / 1048576),"
+                + " ROUND(NVL(h.USED_BLOCKS, 0) * t.BLOCK_SIZE * 100 / NULLIF(f.TOTAL_BYTES, 0), 1),"
                 + " ROUND(f.MAX_BYTES / 1048576), f.AUTOEXTEND"
                 + " FROM DBA_TABLESPACES t"
                 + " JOIN (" + FileSums("DBA_TEMP_FILES") + ") f ON f.TABLESPACE_NAME = t.TABLESPACE_NAME"
-                + " LEFT JOIN (SELECT TABLESPACE_NAME, SUM(BYTES_USED) AS USED_BYTES FROM V$TEMP_SPACE_HEADER GROUP BY TABLESPACE_NAME) h ON h.TABLESPACE_NAME = t.TABLESPACE_NAME"
+                + " LEFT JOIN (SELECT TABLESPACE_NAME, SUM(USED_BLOCKS) AS USED_BLOCKS FROM V$SORT_SEGMENT GROUP BY TABLESPACE_NAME) h ON h.TABLESPACE_NAME = t.TABLESPACE_NAME"
                 + ") ORDER BY \"사용률(%)\" DESC NULLS LAST, \"테이블스페이스\"",
                 new MonitorUsageChart("테이블스페이스", "사용(MB)", "크기(MB)"),
                 "테이블스페이스", new[]
@@ -103,7 +148,8 @@ namespace MyPlugin
                 + " FROM V$LOCK l JOIN V$SESSION s ON s.SID = l.SID"
                 + " LEFT JOIN ALL_OBJECTS o ON l.TYPE = 'TM' AND o.OBJECT_ID = l.ID1"
                 + " WHERE l.TYPE IN ('TM', 'TX') AND (l.BLOCK > 0 OR l.REQUEST > 0)"
-                + " ORDER BY l.BLOCK DESC, l.CTIME DESC"),
+                + " ORDER BY l.BLOCK DESC, l.CTIME DESC",
+                null, "SID", SessionDetails, SessionActions),
 
             new MonitorSection(MonitorSections.Sessions, "세션",
                 "V$SESSION의 사용자 세션(백그라운드 제외).", Privilege,
@@ -111,7 +157,8 @@ namespace MyPlugin
                 + " s.OSUSER AS \"OS 사용자\", s.MACHINE AS \"머신\", s.PROGRAM AS \"프로그램\","
                 + " s.EVENT AS \"대기 이벤트\", s.SECONDS_IN_WAIT AS \"대기(초)\", s.SQL_ID AS \"SQL_ID\","
                 + " TO_CHAR(s.LOGON_TIME, 'YYYY-MM-DD HH24:MI:SS') AS \"접속 시각\", s.BLOCKING_SESSION AS \"막는 세션\""
-                + " FROM V$SESSION s WHERE s.TYPE = 'USER' ORDER BY s.STATUS, s.SID")
+                + " FROM V$SESSION s WHERE s.TYPE = 'USER' ORDER BY s.STATUS, s.SID",
+                null, "SID", SessionDetails, SessionActions)
         };
 
         public IReadOnlyList<MonitorSection> Sections { get { return All; } }

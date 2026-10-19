@@ -11,7 +11,7 @@ namespace MyPlugin
     /// - 데이터베이스(PostgreSQL에만): pg_database마다 크기·연결 수.
     /// - WAL: 위치·파일·wal_level·archive_mode·pg_stat_archiver. 스탠바이면 재생 위치.
     /// - 잠금: pg_blocking_pids로 막히거나 막는 세션만.
-    /// - 세션: pg_stat_activity의 client backend.
+    /// - 세션: pg_stat_activity의 client backend. 잠금·세션 행을 누르면 SQL 전문·세션 정보, 오른쪽 메뉴 [세션 종료…](pg_terminate_backend).
     /// </summary>
     internal sealed class PostgresMonitor : IMonitorProvider
     {
@@ -21,6 +21,39 @@ namespace MyPlugin
         public const string Databases = "databases";
 
         private const string Elapsed = "EXTRACT(EPOCH FROM (now() - a.query_start))::int";
+
+        /// <summary>
+        /// 세션(PID) 상세: pg_stat_activity.query 전문(track_activity_query_size, 기본 1,024자까지만 서버가 보관)과 세션 정보(항목·값).
+        /// 다른 세션의 실행 계획은 PostgreSQL이 주지 않는다(EXPLAIN은 그 문장을 다시 계획해야 하므로 두지 않음).
+        /// </summary>
+        private static readonly IReadOnlyList<MonitorDetail> SessionDetails = new[]
+        {
+            new MonitorDetail("sql", "SQL 전문", "pg_stat_activity.query — 서버는 track_activity_query_size(기본 1,024자)까지만 보관한다. 다른 사용자의 세션은 pg_read_all_stats가 있어야 보인다.",
+                "SELECT a.query FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)", true),
+            new MonitorDetail("info", "세션 정보", "pg_stat_activity의 이 세션 열 전부(항목·값).",
+                "SELECT \"항목\", \"값\" FROM ("
+                + " SELECT 1 AS ord, 'usename' AS \"항목\", a.usename::text AS \"값\" FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 2, 'datname', a.datname::text FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 3, 'application_name', a.application_name FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 4, 'client_addr', a.client_addr::text || ':' || a.client_port::text FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 5, 'state', a.state FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 6, 'wait_event', a.wait_event_type || ' / ' || a.wait_event FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 7, 'backend_start', to_char(a.backend_start, 'YYYY-MM-DD HH24:MI:SS') FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 8, 'xact_start', to_char(a.xact_start, 'YYYY-MM-DD HH24:MI:SS') FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 9, 'query_start', to_char(a.query_start, 'YYYY-MM-DD HH24:MI:SS') FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 10, 'state_change', to_char(a.state_change, 'YYYY-MM-DD HH24:MI:SS') FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 11, 'backend_xid', a.backend_xid::text FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + " UNION ALL SELECT 12, 'blocked by', array_to_string(pg_blocking_pids(a.pid), ', ') FROM pg_stat_activity a WHERE a.pid = CAST(:name AS integer)"
+                + ") t ORDER BY ord")
+        };
+
+        /// <summary>세션 종료: pg_terminate_backend(pid). 값이 수일 때만.</summary>
+        private static readonly IReadOnlyList<MonitorAction> SessionActions = new[]
+        {
+            new MonitorAction("kill", "세션 종료…", new[] { "PID" },
+                "이 세션의 트랜잭션은 롤백되고 클라이언트는 끊깁니다. 되돌릴 수 없습니다.",
+                values => MonitorAction.IsDigits(values[0]) ? "SELECT pg_terminate_backend(" + values[0] + ")" : null)
+        };
 
         private static readonly IReadOnlyList<MonitorSection> All = new[]
         {
@@ -85,7 +118,8 @@ namespace MyPlugin
                 + " FROM pg_stat_activity a"
                 + " WHERE cardinality(pg_blocking_pids(a.pid)) > 0"
                 + " OR a.pid IN (SELECT unnest(pg_blocking_pids(b.pid)) FROM pg_stat_activity b)"
-                + " ORDER BY \"막는 PID\", a.pid"),
+                + " ORDER BY \"막는 PID\", a.pid",
+                null, "PID", SessionDetails, SessionActions),
 
             new MonitorSection(MonitorSections.Sessions, "세션",
                 "pg_stat_activity의 client backend(백그라운드 프로세스 제외).", Privilege,
@@ -94,7 +128,8 @@ namespace MyPlugin
                 + " a.wait_event_type AS \"대기 종류\", a.wait_event AS \"대기 이벤트\","
                 + " to_char(a.backend_start, 'YYYY-MM-DD HH24:MI:SS') AS \"접속 시각\", " + Elapsed + " AS \"실행(초)\","
                 + " left(a.query, 300) AS \"SQL\""
-                + " FROM pg_stat_activity a WHERE a.backend_type = 'client backend' ORDER BY a.state, a.query_start"),
+                + " FROM pg_stat_activity a WHERE a.backend_type = 'client backend' ORDER BY a.state, a.query_start",
+                null, "PID", SessionDetails, SessionActions),
 
             new MonitorSection(Databases, "데이터베이스",
                 "pg_database마다 pg_database_size()와 연결 수(이 서버의 모든 DB).", Privilege,

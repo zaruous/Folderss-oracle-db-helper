@@ -254,8 +254,9 @@ namespace MyPlugin.Tests
                     var bare = Regex.Replace(detail.Sql, "'[^']*'", "''");
                     foreach (var word in new[] { "INSERT ", "UPDATE ", "DELETE ", "DROP ", "ALTER ", "TRUNCATE ", "EXEC " })
                         Assert.False(Regex.IsMatch(bare, @"\b" + word, RegexOptions.IgnoreCase), provider.Kind + " " + detail.Id + ": " + word);
-                    // 행 수 제한이 SQL 안에 있다
+                    // 행 수 제한이 SQL 안에 있다(파일 목록은 테이블스페이스당 몇 개라 제한 없음)
                     Assert.Matches(@"ROWNUM <= 200|LIMIT 200|TOP \(200\)|ORDER BY 1", detail.Sql);
+                    Assert.False(detail.AsText);
                     var query = detail.Query("MES_DATA");
                     Assert.Same(detail.Sql, query.Sql);
                     Assert.Single(query.Parameters);
@@ -268,13 +269,107 @@ namespace MyPlugin.Tests
             Assert.Contains("DBA_SEGMENTS", DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Details[1].Sql);
             Assert.Contains("reltablespace = 0", DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Details[0].Sql);
             Assert.Contains("sys.allocation_units", DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Details[0].Sql);
-            // 다른 섹션에는 상세가 없다
+            // 기본 정보·로그(·데이터베이스)에는 상세·조치가 없다
             foreach (var provider in Real)
-            foreach (var section in provider.Monitor.Sections.Where(s => s.Id != MonitorSections.Storage))
+            foreach (var section in provider.Monitor.Sections.Where(s => s.Id == MonitorSections.Info || s.Id == MonitorSections.Log || s.Id == PostgresMonitor.Databases))
             {
                 Assert.Empty(section.Details);
                 Assert.Null(section.KeyColumn);
+                Assert.Empty(section.Actions);
             }
+            Assert.Empty(DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Actions);
+        }
+
+        [Fact]
+        public void Oracle_Storage_TempAndUndoUsage_UseCurrentUsageViews()
+        {
+            var sql = DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Sql;
+            Assert.Contains("V$SORT_SEGMENT", sql);
+            Assert.Contains("USED_BLOCKS", sql);
+            Assert.Contains("t.BLOCK_SIZE", sql);
+            Assert.Contains("DBA_UNDO_EXTENTS WHERE STATUS IN ('ACTIVE', 'UNEXPIRED')", sql);
+            Assert.Contains("WHERE t.CONTENTS <> 'UNDO'", sql);
+            Assert.Contains("WHERE t.CONTENTS = 'UNDO'", sql);
+            Assert.DoesNotContain("V$TEMP_SPACE_HEADER", sql);
+        }
+
+        // ---------- 세션 상세·세션 종료 ----------
+
+        [Fact]
+        public void SessionsAndLocks_HaveSessionDetails_TextForSqlAndPlan()
+        {
+            foreach (var provider in Real)
+            foreach (var id in new[] { MonitorSections.Sessions, MonitorSections.Locks })
+            {
+                var section = provider.Monitor.Sections.First(s => s.Id == id);
+                Assert.NotEmpty(section.Details);
+                Assert.False(string.IsNullOrEmpty(section.KeyColumn));
+                Assert.Contains("\"" + section.KeyColumn + "\"", section.Sql.Replace("[", "\"").Replace("]", "\""));
+                var sql = section.Details.First(d => d.Id == "sql");
+                Assert.True(sql.AsText);
+                var marker = provider == DbProviders.SqlServer ? "@" + MonitorDetail.KeyParameter : ":" + MonitorDetail.KeyParameter;
+                foreach (var detail in section.Details)
+                    Assert.Contains(marker, detail.Sql);
+                Assert.Single(section.Actions);
+                Assert.Equal("kill", section.Actions[0].Id);
+                Assert.EndsWith("…", section.Actions[0].Title);
+                Assert.False(string.IsNullOrWhiteSpace(section.Actions[0].Warning));
+                Assert.Contains(section.KeyColumn, section.Actions[0].Columns);
+            }
+            Assert.True(DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Details.First(d => d.Id == "plan").AsText);
+            Assert.Contains("DBMS_XPLAN.DISPLAY_CURSOR", DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Details.First(d => d.Id == "plan").Sql);
+            Assert.Contains("V$SESSTAT", DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Details.First(d => d.Id == "stats").Sql);
+            // PostgreSQL은 다른 세션의 실행 계획을 주지 않는다
+            Assert.DoesNotContain(DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Details, d => d.Id == "plan");
+            Assert.Contains("CAST(:name AS integer)", DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Details[0].Sql);
+            Assert.Contains("sys.dm_exec_text_query_plan", DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Details.First(d => d.Id == "plan").Sql);
+            Assert.Contains("most_recent_sql_handle", DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Details[0].Sql);
+        }
+
+        [Fact]
+        public void KillActions_BuildStatement_OnlyFromDigits()
+        {
+            var oracle = DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Actions[0];
+            Assert.Equal(new[] { "SID", "SERIAL#" }, oracle.Columns);
+            Assert.Equal("ALTER SYSTEM KILL SESSION '412,53021' IMMEDIATE", oracle.Build(new[] { "412", "53021" }));
+            Assert.Null(oracle.Build(new[] { "412", "53021' OR 1=1 --" }));
+            Assert.Null(oracle.Build(new[] { "412", null }));
+            Assert.Null(oracle.Build(new[] { "412" }));
+            Assert.Null(oracle.Build(null));
+            var pg = DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Actions[0];
+            Assert.Equal("SELECT pg_terminate_backend(412)", pg.Build(new[] { "412" }));
+            Assert.Null(pg.Build(new[] { "412; DROP TABLE x" }));
+            var mssql = DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Actions[0];
+            Assert.Equal("KILL 57", mssql.Build(new[] { "57" }));
+            Assert.Null(mssql.Build(new[] { "-57" }));
+            Assert.True(MonitorAction.IsDigits("0123"));
+            Assert.False(MonitorAction.IsDigits(""));
+            Assert.False(MonitorAction.IsDigits(null));
+            Assert.False(MonitorAction.IsDigits("12 "));
+            Assert.Throws<ArgumentException>(() => new MonitorAction("k", "t", new string[0], "w", v => "x"));
+            Assert.Throws<ArgumentException>(() => new MonitorAction("k", "t", new[] { "A" }, "w", null));
+        }
+
+        [Fact]
+        public void ActionValues_DetailText_ActionTexts()
+        {
+            var columns = new List<ResultColumn> { new ResultColumn { Name = "SID" }, new ResultColumn { Name = "SERIAL#" }, new ResultColumn { Name = "사용자" } };
+            var action = DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Sessions).Actions[0];
+            Assert.Equal(new[] { "412", "53021" }, MonitorLogic.ActionValues(columns, new[] { "412", "53021", "SCOTT" }, action));
+            Assert.Null(MonitorLogic.ActionValues(columns, new[] { "412", null, "SCOTT" }, action));
+            Assert.Null(MonitorLogic.ActionValues(new List<ResultColumn> { new ResultColumn { Name = "SID" } }, new[] { "412" }, action));
+            Assert.Null(MonitorLogic.ActionValues(columns, new[] { "412", "1", "x" }, null));
+
+            var table = new QueryTable();
+            table.Columns.Add("PLAN_TABLE_OUTPUT");
+            table.Rows.Add(new[] { "Plan hash value: 1" });
+            table.Rows.Add(new[] { (string)null });
+            table.Rows.Add(new[] { "| 0 | SELECT STATEMENT |" });
+            Assert.Equal("Plan hash value: 1" + Environment.NewLine + "" + Environment.NewLine + "| 0 | SELECT STATEMENT |", MonitorLogic.DetailText(table));
+            Assert.Equal("", MonitorLogic.DetailText(new QueryTable()));
+            Assert.Equal("", MonitorLogic.DetailText(null));
+            Assert.Equal("실행함: KILL 57", MonitorLogic.ActionDoneText(" KILL 57 "));
+            Assert.Contains("읽기 전용", MonitorLogic.ActionReadOnlyText);
         }
 
         [Fact]

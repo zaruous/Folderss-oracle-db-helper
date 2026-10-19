@@ -25,6 +25,9 @@ namespace MyPlugin
     ///   (80% 이상 경고색, 90% 이상 위험색, 최대 12개 — 나머지는 "외 N개는 표에서"). 코드로 그리는 Path라 차트 라이브러리는 없다.
     /// - 섹션에 <see cref="MonitorSection.Details"/>가 있으면 표 아래 분할선 밑에 상세 영역: 표의 행(또는 도넛)을 누르면 그 행의 키
     ///   (<see cref="MonitorSection.KeyColumn"/>)로 상세 조회(바인드 하나)를 실행해 보인다. 상세가 여럿이면 고르는 버튼. 이전 상세 조회는 취소한다.
+    ///   <see cref="MonitorDetail.AsText"/>인 상세(SQL 전문·실행 계획)는 표 대신 고정폭 읽기 전용 글 상자.
+    /// - <see cref="MonitorSection.Actions"/>(세션 종료)는 표의 오른쪽 메뉴에 둔다: 고른 행의 값으로 문장을 만들고 위험한 문장 확인 대화상자
+    ///   (문장·경고·확인 체크)를 거쳐 실행한 뒤 섹션을 다시 가져온다. 읽기 전용 접속이면 막는다.
     /// </summary>
     internal sealed class MonitorWindow
     {
@@ -227,6 +230,11 @@ namespace MyPlugin
                 panel.Children.Add(dashBorder);
             }
             view.Grid = CopyableGrid(() => view.Columns, () => view.Grid);
+            foreach (var action in view.Section.Actions)
+            {
+                var act = action;
+                view.Grid.AddMenuAction(act.Title, () => true, () => RunAction(view, act));
+            }
             if (view.Section.Details.Count == 0)
             {
                 panel.Children.Add(view.Grid.View);
@@ -319,8 +327,108 @@ namespace MyPlugin
             DockPanel.SetDock(topBorder, Dock.Top);
             panel.Children.Add(topBorder);
             view.DetailGrid = CopyableGrid(() => view.DetailColumns, () => view.DetailGrid);
-            panel.Children.Add(view.DetailGrid.View);
+            view.DetailText = new TextBox
+            {
+                IsReadOnly = true,
+                FontFamily = Theme.Mono,
+                FontSize = 12,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.NoWrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(6, 4, 6, 4),
+                Visibility = Visibility.Collapsed
+            };
+            Theme.Background(view.DetailText, Theme.PanelBackground);
+            Theme.Foreground(view.DetailText);
+            AutomationProperties.SetName(view.DetailText, "상세 글");
+            var host = new Grid();
+            host.Children.Add(view.DetailGrid.View);
+            host.Children.Add(view.DetailText);
+            panel.Children.Add(host);
             return panel;
+        }
+
+        /// <summary>상세가 글(AsText)이면 글 상자, 아니면 표를 보인다.</summary>
+        private static void ShowDetailMode(SectionView view, bool asText)
+        {
+            view.DetailText.Visibility = asText ? Visibility.Visible : Visibility.Collapsed;
+            view.DetailGrid.View.Visibility = asText ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        // ================= 행 조치(세션 종료) =================
+
+        /// <summary>표의 오른쪽 메뉴 조치: 고른 행 → 문장 → 확인 대화상자 → 실행 → 섹션 새로 고침.</summary>
+        private async void RunAction(SectionView view, MonitorAction action)
+        {
+            try
+            {
+                if (_closed)
+                    return;
+                var row = view.Grid.SelectedRows().FirstOrDefault();
+                if (row == null)
+                {
+                    Dialogs.Show(_window, action.Title.TrimEnd('…'), MonitorLogic.ActionNoRowText, false);
+                    return;
+                }
+                if (_profile != null && _profile.ReadOnly)
+                {
+                    Dialogs.Show(_window, action.Title.TrimEnd('…'), MonitorLogic.ActionReadOnlyText, true);
+                    return;
+                }
+                var statement = action.Build(MonitorLogic.ActionValues(view.Columns, row.Values, action));
+                if (statement == null)
+                {
+                    Dialogs.Show(_window, action.Title.TrimEnd('…'), MonitorLogic.ActionBadValueText, true);
+                    return;
+                }
+                var session = _session();
+                if (session == null || !session.IsOpen || session.IsBroken)
+                {
+                    SetStatus(view, MonitorLogic.NoSessionText, true);
+                    return;
+                }
+                if (!Dialogs.ConfirmDanger(_window, _profile, new SqlStatement { Text = statement, Danger = action.Warning }))
+                    return;
+                if (_closed)
+                    return;
+                if (_isRunning())
+                {
+                    SetStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), true);
+                    return;
+                }
+                SetStatus(view, MonitorLogic.LoadingText, false);
+                try
+                {
+                    await session.RunAsync((connection, transaction) =>
+                    {
+                        using (var command = connection.CreateCommand())
+                        {
+                            command.Transaction = transaction;
+                            command.CommandText = statement;
+                            return command.ExecuteNonQuery();
+                        }
+                    }, _closing.Token);
+                    if (_closed)
+                        return;
+                    SetStatus(view, MonitorLogic.ActionDoneText(statement), false);
+                    Load(view.Index, true);
+                }
+                catch (OperationCanceledException)
+                {
+                    // 창을 닫았다
+                }
+                catch (Exception ex)
+                {
+                    if (!_closed)
+                        SetStatus(view, MonitorLogic.FailedText(DbSession.DescribeError(ex)), true);
+                }
+            }
+            catch (Exception)
+            {
+                // async void — 예외를 밖으로 내보내면 Folderss가 멈춘다
+            }
         }
 
         private static void SelectDetailButton(SectionView view)
@@ -345,10 +453,12 @@ namespace MyPlugin
                 view.DetailTitle.Text = MonitorLogic.DetailTitleText(detail, key);
                 view.DetailTitle.SetResourceReference(TextBlock.ForegroundProperty, Theme.PrimaryText);
                 view.DetailTitle.ToolTip = detail.Description;
+                ShowDetailMode(view, detail.AsText);
                 if (string.IsNullOrEmpty(key))
                 {
                     view.DetailColumns = new List<ResultColumn>();
                     view.DetailGrid.Show(view.DetailColumns, new ObservableCollection<ResultGridRow>());
+                    view.DetailText.Text = "";
                     SetDetailStatus(view, "", false);
                     return;
                 }
@@ -367,15 +477,24 @@ namespace MyPlugin
                 try
                 {
                     var table = new QueryTable();
-                    var rows = await session.QueryAsync(detail.Query(key), record => ReadRow(record, table), work.Token);
+                    var full = detail.AsText;
+                    var rows = await session.QueryAsync(detail.Query(key), record => ReadRow(record, table, full), work.Token);
                     if (_closed || work.IsCancellationRequested)
                         return;
                     table.Rows.AddRange(rows);
-                    view.DetailColumns = MonitorLogic.Columns(table);
-                    var gridRows = new ObservableCollection<ResultGridRow>();
-                    for (var i = 0; i < table.Rows.Count; i++)
-                        gridRows.Add(new ResultGridRow(i + 1, table.Rows[i]));
-                    view.DetailGrid.Show(view.DetailColumns, gridRows);
+                    if (detail.AsText)
+                    {
+                        view.DetailText.Text = MonitorLogic.DetailText(table);
+                        view.DetailText.ScrollToHome();
+                    }
+                    else
+                    {
+                        view.DetailColumns = MonitorLogic.Columns(table);
+                        var gridRows = new ObservableCollection<ResultGridRow>();
+                        for (var i = 0; i < table.Rows.Count; i++)
+                            gridRows.Add(new ResultGridRow(i + 1, table.Rows[i]));
+                        view.DetailGrid.Show(view.DetailColumns, gridRows);
+                    }
                     SetDetailStatus(view, MonitorLogic.DetailRowsText(table.Rows.Count), false);
                 }
                 catch (OperationCanceledException)
@@ -396,8 +515,11 @@ namespace MyPlugin
             }
         }
 
-        /// <summary>상세 조회의 한 행을 글자로. 첫 행에서 열 이름을 받아 둔다(행이 없으면 열도 없다).</summary>
-        private static string[] ReadRow(IDataRecord record, QueryTable table)
+        /// <summary>
+        /// 상세 조회의 한 행을 글자로. 첫 행에서 열 이름을 받아 둔다(행이 없으면 열도 없다).
+        /// fullText면 글자 값을 자르지 않는다(SQL 전문·실행 계획 — 표의 4,000자 제한을 받지 않게).
+        /// </summary>
+        private static string[] ReadRow(IDataRecord record, QueryTable table, bool fullText)
         {
             var count = record.FieldCount;
             if (table.Columns.Count == 0)
@@ -405,7 +527,13 @@ namespace MyPlugin
                     table.Columns.Add(record.GetName(i));
             var values = new string[count];
             for (var i = 0; i < count; i++)
-                values[i] = record.IsDBNull(i) ? null : ValueFormatter.Format(record.GetValue(i));
+            {
+                if (record.IsDBNull(i))
+                    continue;
+                var value = record.GetValue(i);
+                var text = value as string;
+                values[i] = fullText && text != null ? text : ValueFormatter.Format(value);
+            }
             return values;
         }
 
@@ -634,6 +762,7 @@ namespace MyPlugin
             // 행 상세 영역(섹션에 Details가 있을 때만)
             public ResultGridView DetailGrid { get; set; }
             public List<ResultColumn> DetailColumns { get; set; } = new List<ResultColumn>();
+            public TextBox DetailText { get; set; }
             public TextBlock DetailTitle { get; set; }
             public TextBlock DetailStatus { get; set; }
             public List<Button> DetailButtons { get; } = new List<Button>();

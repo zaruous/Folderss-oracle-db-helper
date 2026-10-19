@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MyPlugin
 {
@@ -65,7 +66,7 @@ namespace MyPlugin
         /// <summary>바인드 이름(접두 없이). 공급자 SQL은 :name 또는 @name으로 쓴다.</summary>
         public const string KeyParameter = "name";
 
-        public MonitorDetail(string id, string title, string description, string sql)
+        public MonitorDetail(string id, string title, string description, string sql, bool asText = false)
         {
             if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(sql))
                 throw new ArgumentException("상세 목록의 id·title·sql이 비었습니다.");
@@ -73,12 +74,19 @@ namespace MyPlugin
             Title = title;
             Description = description ?? "";
             Sql = sql;
+            AsText = asText;
         }
 
         public string Id { get; }
         public string Title { get; }
         public string Description { get; }
         public string Sql { get; }
+
+        /// <summary>
+        /// true면 표가 아니라 글(고정폭 읽기 전용 상자)로 보인다: 결과 첫 열을 행 순서대로 줄바꿈으로 잇는다(SQL 전문·실행 계획).
+        /// 글은 자르지 않는다(표의 4,000자 제한과 다름).
+        /// </summary>
+        public bool AsText { get; }
 
         /// <summary>키 값을 바인드한 조회.</summary>
         public SqlQuery Query(string key)
@@ -89,11 +97,57 @@ namespace MyPlugin
         }
     }
 
-    /// <summary>성능 모니터 섹션 하나: 제목·설명·필요 권한·조회 SQL(·사용률 차트·행 상세 목록).</summary>
+    /// <summary>
+    /// 섹션 표의 한 행에 하는 조치(세션 종료). 행의 열 값들로 문장을 만들고, 창이 확인 대화상자(문장·경고·확인 체크)를 거쳐 실행한다.
+    /// - 바인드가 안 되는 문장(ALTER SYSTEM KILL SESSION, KILL)이라 값은 <see cref="Build"/>가 검사해 문장에 직접 넣는다.
+    ///   값이 형식에 맞지 않으면(숫자가 아님 등) null — 창은 조치를 끈다. 되돌릴 수 없으므로 읽기 전용 접속에서는 창이 막는다.
+    /// </summary>
+    internal sealed class MonitorAction
+    {
+        private readonly Func<string[], string> _build;
+
+        public MonitorAction(string id, string title, IReadOnlyList<string> columns, string warning, Func<string[], string> build)
+        {
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(title) || columns == null || columns.Count == 0 || build == null)
+                throw new ArgumentException("조치의 id·title·columns·build가 비었습니다.");
+            Id = id;
+            Title = title;
+            Columns = columns;
+            Warning = warning ?? "";
+            _build = build;
+        }
+
+        public string Id { get; }
+
+        /// <summary>메뉴 글: "세션 종료…".</summary>
+        public string Title { get; }
+
+        /// <summary>문장에 넣을 결과 열 이름들(순서대로 <see cref="Build"/>에 넘긴다).</summary>
+        public IReadOnlyList<string> Columns { get; }
+
+        /// <summary>확인 대화상자의 경고 문구.</summary>
+        public string Warning { get; }
+
+        /// <summary>열 값들(Columns 순서)로 실행 문장. 값이 비었거나 형식에 맞지 않으면 null.</summary>
+        public string Build(string[] values)
+        {
+            if (values == null || values.Length != Columns.Count || values.Any(v => string.IsNullOrWhiteSpace(v)))
+                return null;
+            return _build(values);
+        }
+
+        /// <summary>문장에 직접 넣어도 안전한 값인지: 숫자(음수 없음)만. 세션 번호·시리얼은 모두 수다.</summary>
+        public static bool IsDigits(string value)
+        {
+            return !string.IsNullOrEmpty(value) && value.All(char.IsDigit);
+        }
+    }
+
+    /// <summary>성능 모니터 섹션 하나: 제목·설명·필요 권한·조회 SQL(·사용률 차트·행 상세 목록·행 조치).</summary>
     internal sealed class MonitorSection
     {
         public MonitorSection(string id, string title, string description, string privilege, string sql, MonitorUsageChart chart = null,
-            string keyColumn = null, IReadOnlyList<MonitorDetail> details = null)
+            string keyColumn = null, IReadOnlyList<MonitorDetail> details = null, IReadOnlyList<MonitorAction> actions = null)
         {
             if (string.IsNullOrWhiteSpace(id))
                 throw new ArgumentException("id가 비었습니다.", nameof(id));
@@ -108,6 +162,7 @@ namespace MyPlugin
             Sql = sql;
             Chart = chart;
             Details = details ?? Array.Empty<MonitorDetail>();
+            Actions = actions ?? Array.Empty<MonitorAction>();
             if (Details.Count > 0 && string.IsNullOrWhiteSpace(keyColumn))
                 throw new ArgumentException("상세 목록이 있으면 keyColumn이 있어야 합니다.", nameof(keyColumn));
             KeyColumn = Details.Count > 0 ? keyColumn : null;
@@ -136,6 +191,9 @@ namespace MyPlugin
 
         /// <summary>행을 눌렀을 때 아래에 보이는 상세 목록들(없으면 빈 목록). 여럿이면 고르는 버튼이 생긴다.</summary>
         public IReadOnlyList<MonitorDetail> Details { get; }
+
+        /// <summary>행의 오른쪽 메뉴에 두는 조치들(세션 종료). 없으면 빈 목록.</summary>
+        public IReadOnlyList<MonitorAction> Actions { get; }
     }
 
     /// <summary>섹션이 없는 공급자(Generic)용.</summary>

@@ -10,7 +10,7 @@ namespace MyPlugin
     /// - 데이터 파일: 현재 DB의 sys.database_files(FILEPROPERTY SpaceUsed) — 테이블스페이스에 해당. 로그 파일도 한 줄. 행을 누르면 그 파일 그룹의 객체 상세.
     /// - 트랜잭션 로그: sys.dm_db_log_space_usage · log_reuse_wait_desc · 마지막 전체/로그 백업.
     /// - 잠금: blocking_session_id로 막히거나 막는 세션(요청 없이 트랜잭션만 연 채 막는 세션도).
-    /// - 세션: sys.dm_exec_sessions의 사용자 세션.
+    /// - 세션: sys.dm_exec_sessions의 사용자 세션. 잠금·세션 행을 누르면 SQL 전문·실행 계획(XML)·세션 정보, 오른쪽 메뉴 [세션 종료…](KILL).
     /// </summary>
     internal sealed class SqlServerMonitor : IMonitorProvider
     {
@@ -18,6 +18,45 @@ namespace MyPlugin
 
         private const string CurrentDb = "FROM sys.databases WHERE database_id = DB_ID()";
         private const string Mb = "* 8 / 1024.0";
+
+        /// <summary>
+        /// 세션 상세: 실행 중이면 그 요청의 문장(sys.dm_exec_requests.sql_handle), 쉬면 마지막 문장(sys.dm_exec_connections.most_recent_sql_handle).
+        /// 실행 계획은 실행 중인 요청의 plan_handle에서(sys.dm_exec_text_query_plan, XML 글). 쉬는 세션은 비어 있다.
+        /// </summary>
+        private static readonly IReadOnlyList<MonitorDetail> SessionDetails = new[]
+        {
+            new MonitorDetail("sql", "SQL 전문", "sys.dm_exec_sql_text — 실행 중이면 그 요청의 문장, 쉬면 이 연결의 마지막 문장.",
+                "SELECT t.text FROM sys.dm_exec_connections c"
+                + " CROSS APPLY sys.dm_exec_sql_text(COALESCE((SELECT TOP (1) r.sql_handle FROM sys.dm_exec_requests r WHERE r.session_id = c.session_id), c.most_recent_sql_handle)) t"
+                + " WHERE c.session_id = CONVERT(int, @name)", true),
+            new MonitorDetail("plan", "실행 계획", "sys.dm_exec_text_query_plan — 실행 중인 요청의 계획(XML). 쉬는 세션은 비어 있다.",
+                "SELECT p.query_plan FROM sys.dm_exec_requests r"
+                + " CROSS APPLY sys.dm_exec_text_query_plan(r.plan_handle, r.statement_start_offset, r.statement_end_offset) p"
+                + " WHERE r.session_id = CONVERT(int, @name)", true),
+            new MonitorDetail("info", "세션 정보", "sys.dm_exec_sessions · sys.dm_exec_requests의 이 세션 열(항목·값).",
+                "SELECT [항목], [값] FROM ("
+                + " SELECT 1 AS ord, N'login_name' AS [항목], CONVERT(nvarchar(256), s.login_name) AS [값] FROM sys.dm_exec_sessions s WHERE s.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 2, N'host / program', s.host_name + N' / ' + s.program_name FROM sys.dm_exec_sessions s WHERE s.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 3, N'database', DB_NAME(s.database_id) FROM sys.dm_exec_sessions s WHERE s.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 4, N'status', s.status FROM sys.dm_exec_sessions s WHERE s.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 5, N'login_time', CONVERT(nvarchar(30), s.login_time, 120) FROM sys.dm_exec_sessions s WHERE s.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 6, N'last_request', CONVERT(nvarchar(30), s.last_request_start_time, 120) + N' ~ ' + CONVERT(nvarchar(30), s.last_request_end_time, 120) FROM sys.dm_exec_sessions s WHERE s.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 7, N'open_transaction_count', CONVERT(nvarchar(10), s.open_transaction_count) FROM sys.dm_exec_sessions s WHERE s.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 8, N'cpu_time(ms) / reads / writes', CONVERT(nvarchar(20), s.cpu_time) + N' / ' + CONVERT(nvarchar(20), s.logical_reads) + N' / ' + CONVERT(nvarchar(20), s.writes) FROM sys.dm_exec_sessions s WHERE s.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 9, N'isolation_level', CONVERT(nvarchar(10), s.transaction_isolation_level) FROM sys.dm_exec_sessions s WHERE s.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 10, N'request: command / wait', r.command + N' / ' + ISNULL(r.wait_type, N'-') + N' ' + ISNULL(r.wait_resource, N'') FROM sys.dm_exec_requests r WHERE r.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 11, N'request: blocking_session_id', CONVERT(nvarchar(10), r.blocking_session_id) FROM sys.dm_exec_requests r WHERE r.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT 12, N'request: percent_complete', CONVERT(nvarchar(10), CONVERT(decimal(5, 1), r.percent_complete)) FROM sys.dm_exec_requests r WHERE r.session_id = CONVERT(int, @name)"
+                + ") t ORDER BY ord")
+        };
+
+        /// <summary>세션 종료: KILL n. 값이 수일 때만(KILL은 바인드가 안 된다).</summary>
+        private static readonly IReadOnlyList<MonitorAction> SessionActions = new[]
+        {
+            new MonitorAction("kill", "세션 종료…", new[] { "세션" },
+                "이 세션의 트랜잭션은 롤백되고 클라이언트는 끊깁니다. 되돌릴 수 없습니다.",
+                values => MonitorAction.IsDigits(values[0]) ? "KILL " + values[0] : null)
+        };
 
         private static readonly IReadOnlyList<MonitorSection> All = new[]
         {
@@ -88,7 +127,8 @@ namespace MyPlugin
                 + " OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t"
                 + " WHERE r.blocking_session_id <> 0"
                 + " OR s.session_id IN (SELECT b.blocking_session_id FROM sys.dm_exec_requests b WHERE b.blocking_session_id <> 0)"
-                + " ORDER BY r.blocking_session_id, s.session_id"),
+                + " ORDER BY r.blocking_session_id, s.session_id",
+                null, "세션", SessionDetails, SessionActions),
 
             new MonitorSection(MonitorSections.Sessions, "세션",
                 "sys.dm_exec_sessions의 사용자 세션(시스템 세션 제외). 실행 중이면 sys.dm_exec_requests의 명령·대기.", Privilege,
@@ -99,7 +139,8 @@ namespace MyPlugin
                 + " FROM sys.dm_exec_sessions s"
                 + " LEFT JOIN sys.dm_exec_requests r ON r.session_id = s.session_id"
                 + " OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t"
-                + " WHERE s.is_user_process = 1 ORDER BY s.status, s.session_id")
+                + " WHERE s.is_user_process = 1 ORDER BY s.status, s.session_id",
+                null, "세션", SessionDetails, SessionActions)
         };
 
         public IReadOnlyList<MonitorSection> Sections { get { return All; } }

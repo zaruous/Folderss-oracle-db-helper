@@ -176,6 +176,10 @@ WHERE (s.INST_ID, s.SID) IN (SELECT INST_ID, SID FROM w UNION SELECT BLOCKING_IN
 - Top SQL 행은 지금 [느린 SQL]의 상세(전문·실행 계획·자식 커서)를 그대로 쓴다. Top 세션 행은 세션 상세를 쓴다.
 - **수집 부하를 보인다**(표본 SQL 소요 ÷ 주기). 20%를 넘으면 주기를 스스로 늘리고 그 사실을 상태 글에 남긴다.
 - 표본은 **전용 세션**으로 모은다. 섹션 조회(무거운 DBA_FREE_SPACE 등)가 표본 주기를 밀지 않게 하려는 것으로, DB에는 세션이 하나 더 생긴다.
+- **언제 모으나**(D2):
+  - 기본은 모니터 창이 열린 동안이다.
+  - 설정에서 접속별 "상시 표본"을 켜면 DB Helper가 열린 동안 계속 모은다.
+  - 표본 엔진은 창과 떨어진 서비스(DB마다 하나)이고, 창은 그 버퍼를 본다. 그래서 상시 표본이 켜져 있으면 창을 연 순간 그 전 1시간이 보인다.
 - 차트는 도넛처럼 WPF Path로 직접 그린다. 차트 라이브러리는 쓰지 않는다.
 
 ### 계약
@@ -311,6 +315,7 @@ internal static class CheckRunner  { /* 전용 세션에서 항목을 차례로 
 ```
 
 - 임계값은 2.4와 같은 표를 쓴다(접속별 덮어쓰기).
+- 기본 묶음 항목은 코드에 두고, **사용자 항목·덮어쓰기·실행 결과는 SQLite**에 둔다(아래 "저장소").
 - 엑셀 변수는 다음과 같다. 정의서의 `ExcelTemplate`(`#sheet`·`#foreach`)을 그대로 쓴다.
   - `$report`(title·date·author·generatedAt)
   - `$dbs` → `$db`(name·address·version·role·summary(ok·warn·crit·skip·error)·checks)
@@ -349,17 +354,76 @@ internal static class CheckRunner  { /* 전용 세션에서 항목을 차례로 
 - **FRA**: `SPACE_USED`에는 예전 FRA에 만든 파일도 들어간다. 반드시 `SPACE_RECLAIMABLE`을 뺀다.
 - **DB 링크 연결 시험**은 부작용(원격 세션)이 있어 기본 묶음에서 뺀다.
 
-## 7. 결정이 필요한 것
+### 저장소 — 이력 설계의 SQLite(history.db)에 함께 (결정 2026-10-19)
 
-| # | 질문 | 선택지 | 추천 |
-|---|---|---|---|
-| D1 | 구현 순서 | — | **3장 잠금 트리 → 5장 전체 DB → 6장 일일 점검 → 4장 활성 세션 이력**. 잠금 트리가 가장 작고, 세션 키·GV$·RAC 종료 같은 공통 기반을 먼저 세운다. 전체 DB와 일일 점검은 지표·임계값·여러 DB 실행기·엑셀을 함께 쓴다. 활성 세션 이력이 가장 크다(차트·표본 엔진·전용 세션) |
-| D2 | 활성 세션 표본은 언제 모으나 | (a) 모니터 창이 열린 동안 (b) DB Helper가 열린 동안, 접속별 "상시 표본" 켬 (c) (b) + 분 단위 요약을 파일에 | (a)로 시작하고 (b)를 설정 선택지로. (b)여야 "방금 무슨 일이 있었나"에 답한다(MaxGauge의 가치). (c)는 이력 설계 5-3과 함께 정하되, 파일에 SQL_ID를 남겨도 되는지(지금 원칙은 숫자만)를 함께 정한다 |
-| D3 | 전체 DB 대상 | 저장된 모든 접속 / 고른 것만 | 저장된 비밀번호가 있는 모든 접속 + 타일 메뉴 [이 화면에서 빼기] |
-| D4 | 사용률 기준 | 지금 크기 / 최대 크기 | 타일·점검은 최대 기준 + 표기, 섹션 표에는 둘 다 |
-| D5 | 점검 결과 보관(직전 대비) | 안 함 / history.db에 상태만 | 1차는 안 함(엑셀이 기록). 2차에 history.db에 항목별 상태·값만 |
-| D6 | 사용자 점검 항목 | 안 됨 / JSON으로 추가 | 허용 — SQL + 규칙 + 안내를 JSON 파일로(팀이 같은 파일을 나눠 씀). GCM 정의서의 사용자 SQL과 같은 수준 |
-| D7 | RAC | 새 기능만 GV$ / 기존 섹션도 | 새 기능은 처음부터 GV$. 기존 섹션 전환은 RAC 실측 환경을 구한 뒤 |
+사용자 점검 항목, 항목별 켬·끔과 임계값 덮어쓰기, 실행 결과를 이력 설계 5절의 `history.db`에 같은 방식으로 둔다(테이블 추가, `schema_version` 올림).
+
+> 이 SQLite 계층은 아직 구현되지 않았다(이력 설계 5-3에서 결정만 함). 그래서 일일 점검 단계(9장 8-3a)에서 먼저 만든다.
+> 첫 작업은 Windows의 Folderss 안에서 `e_sqlite3`가 불러지는지 확인하는 PoC다.
+> 실패하면 점검 항목·결과는 JSON 파일로 대체한다(이력 설계의 JSONL 대체안과 같은 판단).
+
+```sql
+CREATE TABLE check_item (            -- 사용자 점검 항목(기본 묶음은 코드에 있고 여기 없다)
+  id         TEXT PRIMARY KEY,       -- 'user.<이름>' — 기본 항목 id('ora.*')와 겹치지 않게
+  kind       TEXT NOT NULL,          -- oracle · postgres · mssql
+  category   TEXT NOT NULL,
+  title      TEXT NOT NULL,
+  sql        TEXT NOT NULL,          -- SELECT 한 문장만(저장 전에 SqlScript로 검사 — 지금 섹션 SQL 시험과 같은 기준)
+  rule       TEXT NOT NULL,          -- JSON: {"type":"anyRow","level":"warn"} · {"type":"threshold","column":"VALUE","warn":80,"crit":90} · {"type":"byLevel"} · {"type":"info"}
+  advice     TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE check_override (        -- 기본·사용자 항목의 켬·끔과 임계값을 전체('') 또는 DB(db_key)별로
+  db_key  TEXT NOT NULL DEFAULT '',
+  item_id TEXT NOT NULL,
+  enabled INTEGER,                   -- NULL이면 위 단계 값을 따른다(DB → 전체 → 기본)
+  warn    REAL,
+  crit    REAL,
+  PRIMARY KEY (db_key, item_id)
+) WITHOUT ROWID;
+CREATE TABLE check_run (
+  id          INTEGER PRIMARY KEY,
+  db_key      TEXT NOT NULL REFERENCES db(db_key),
+  started_at  TEXT NOT NULL,         -- UTC ISO-8601
+  elapsed_ms  INTEGER,
+  app_version TEXT                   -- 플러그인 버전(기본 묶음이 바뀐 결과를 구분)
+);
+CREATE TABLE check_result (
+  run_id    INTEGER NOT NULL REFERENCES check_run(id) ON DELETE CASCADE,
+  item_id   TEXT NOT NULL,
+  status    TEXT NOT NULL,           -- ok · warn · crit · skip · error
+  value     REAL,                    -- 판정에 쓴 수(없으면 NULL)
+  row_count INTEGER,
+  reason    TEXT,                    -- 건너뜀·오류의 이유 분류('privilege' · 'version' · 'timeout' …) — 오류 문장 원문은 넣지 않는다
+  PRIMARY KEY (run_id, item_id)
+) WITHOUT ROWID;
+```
+
+- **발견 행은 저장하지 않는다.** 결과에는 상태·값·행 수·이유 분류만 남긴다.
+  - 행에는 객체·사용자 이름 같은 DB 내용이 들어 있어서, 이력 설계의 "파일에는 숫자와 테이블스페이스 이름만" 원칙을 지키려는 것이다.
+  - 행은 엑셀 산출물과 결과 창(그 실행 동안)에만 있다.
+  - 사용자 항목의 SQL은 사용자가 쓴 설정이라 저장한다.
+- **직전 대비**(AHF의 "악화" 표시): 같은 DB의 직전 `check_run`과 항목별 상태·값을 비교해 결과 창·엑셀에 "↑ 나빠짐 / ↓ 좋아짐 / 새로 생김"을 보인다.
+- **언제 기록하나**:
+  - 사용자가 점검을 실행할 때마다 기록한다. 주기적 지표 이력(기본 끔)과 달리, 사용자가 직접 실행한 결과이기 때문이다.
+  - 설정 탭 "성능 모니터"에서 끌 수 있고, 보관 기간은 이력과 같은 값(기본 90일)이다.
+- **나눠 쓰기**: SQLite는 PC마다 따로라, 사용자 항목은 [내보내기]·[가져오기](JSON 파일 하나)로 팀에 나눈다. 가져올 때 같은 id가 있으면 덮어쓸지 묻는다.
+- **편집 화면**: 점검 결과 창의 [항목 관리…]에서 추가·고치기·지우기를 한다.
+  - [시험 실행]은 고른 DB에 대고 SQL을 한 번 돌려 판정 결과를 미리 보인다.
+  - 규칙 편집기는 결과 열 이름을 고르는 콤보로, 열 이름을 손으로 치지 않게 한다.
+
+## 7. 결정 사항
+
+| # | 질문 | 결정(2026-10-19) |
+|---|---|---|
+| D1 | 구현 순서 | **3장 잠금 트리 → 5장 전체 DB → 6장 일일 점검 → 4장 활성 세션 이력**. 잠금 트리가 가장 작고 세션 키·GV$·RAC 종료 같은 공통 기반을 먼저 세운다. 전체 DB와 일일 점검은 지표·임계값·여러 DB 실행기·엑셀을 함께 쓴다. 활성 세션 이력이 가장 크다(차트·표본 엔진·전용 세션) |
+| D2 | 활성 세션 표본은 언제 모으나 | **기본은 모니터 창이 열린 동안, 설정에서 접속별 "상시 표본"을 켜면 DB Helper가 열린 동안 계속.** 표본 엔진은 창과 떨어진 서비스로 두고 창은 그 버퍼를 본다(창을 열면 그 전 표본부터 보인다). 파일 저장(분 단위 요약)은 나중에 이력 5-3과 함께 정하며, SQL_ID를 파일에 남겨도 되는지를 그때 결정 |
+| D3 | 전체 DB 대상 | (추천안으로 진행) 저장된 비밀번호가 있는 모든 접속 + 타일 메뉴 [이 화면에서 빼기] |
+| D4 | 사용률 기준 | (추천안으로 진행) 타일·점검은 최대 기준 + 표기, 섹션 표에는 둘 다 |
+| D5 | 점검 결과 보관(직전 대비) | **SQLite(history.db)에 기록** — 상태·값·행 수·이유 분류만(발견 행 제외). 6장 "저장소" |
+| D6 | 사용자 점검 항목 | **SQLite에 저장하고 화면에서 추가·고치기**, 팀 공유는 JSON 내보내기·가져오기. 6장 "저장소" |
+| D7 | RAC | (추천안으로 진행) 새 기능은 처음부터 GV$. 기존 섹션 전환은 RAC 실측 환경을 구한 뒤 |
 
 ## 8. 하지 않는 것
 
@@ -375,6 +439,8 @@ internal static class CheckRunner  { /* 전용 세션에서 항목을 차례로 
 | 8-0 | 2장 공통 기반: `IMonitorProvider` 확장, 세션 키, 대기 분류, 지표 목록, 상태·임계값 | 중립 로직 단위 테스트, PG·SQL Server·Generic은 null·빈 목록으로 기존 테스트 통과 |
 | 8-1 | 3장 잠금 트리 | `LockTreeLogic` 테스트(근원·자손 수·유발 대기·순환·여러 블로커·최소 대기). XE 11g·19c에서 2단 연쇄(A→B→C)와 쉬는 근원을 만들어 실측(`FINAL_BLOCKING_SESSION`과 근원 일치), 근원 종료 뒤 B·C 진행 |
 | 8-2 | 5장 전체 DB | `OverviewLogic` 경계값 테스트, 접속 실패·비밀번호 없음·시간 초과 타일, 동시 4개 제한 테스트. 실측: 3개 이상 DB를 동시에 |
-| 8-3 | 6장 일일 점검 + 엑셀 | `CheckRunner` 테스트(시간 제한·권한·필요 조건·하나 실패해도 계속), 기본 양식 렌더 테스트. 실측: SELECT_CATALOG_ROLE 계정으로 전체 묶음, 11g의 경고 로그 건너뜀 안내 |
+| 8-3a | SQLite 저장소(이력 설계 5-3의 파일·스키마 버전·손상 처리) + 점검 테이블 | ① Windows Folderss 안에서 `history.db` 열고 쓰고 읽기 PoC(실패하면 JSON 대체로 전환) ② 스키마 생성·버전 올림·새 버전 파일은 읽기만 ③ 두 연결 동시 쓰기(busy_timeout) ④ 손상 파일이면 기록만 끄고 예외 없음 |
+| 8-3b | 6장 일일 점검 실행·판정·엑셀 | `CheckRunner` 테스트(시간 제한·권한·필요 조건·하나 실패해도 계속), 직전 대비 비교 테스트, 결과에 발견 행이 저장되지 않음 테스트, 기본 양식 렌더 테스트. 실측: SELECT_CATALOG_ROLE 계정으로 전체 묶음, 11g의 경고 로그 건너뜀 안내 |
+| 8-3c | 사용자 점검 항목 관리 | SELECT 한 문장 검사·규칙 JSON 검사·id 충돌 테스트, 내보내기→가져오기 왕복 테스트, [시험 실행] 실측 |
 | 8-4 | 4장 활성 세션 이력 | `SampleBuffer`·`SampleLogic` 테스트(구간 집계·분류 몫·Top N·메모리 상한·STATE 판정). 실측: 표본 1회 소요(세션 100개), 수집 부하 표시, 일부러 만든 부하(CPU·잠금·I/O)가 차트 분류로 나뉘는지 |
 | 8-5 | PostgreSQL·SQL Server | 2.3 대응표 확정 후 공급자별로 같은 화면이 동작 — 각 기능의 실측을 같은 방식으로 |

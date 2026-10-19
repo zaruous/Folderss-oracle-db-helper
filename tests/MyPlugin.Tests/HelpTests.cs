@@ -23,7 +23,7 @@ namespace MyPlugin.Tests
         public void Pages_Exist_AndLocalLinksResolve()
         {
             var folder = HelpFolder();
-            foreach (var page in new[] { HelpLogic.Index, HelpLogic.Connections, HelpLogic.TableSpec, HelpLogic.CodeSpec })
+            foreach (var page in new[] { HelpLogic.Index, HelpLogic.Connections, HelpLogic.TableSpec, HelpLogic.CodeSpec, HelpLogic.Monitor })
             {
                 var path = HelpLogic.LocalPath(folder, page);
                 Assert.True(path != null, page + " 없음");
@@ -62,6 +62,7 @@ namespace MyPlugin.Tests
             Assert.Equal(HelpLogic.OnlineBase + HelpLogic.Index, HelpLogic.PageUri(null, null).AbsoluteUri);
             Assert.True(HelpLogic.PageUri(HelpFolder(), HelpLogic.Index).IsFile);
             Assert.Equal("DB Helper 도움말 — GCM 정의서", HelpLogic.Title(HelpLogic.CodeSpec));
+            Assert.Equal("DB Helper 도움말 — 성능 모니터", HelpLogic.Title(HelpLogic.Monitor));
             Assert.Equal("DB Helper 도움말", HelpLogic.Title(HelpLogic.Index));
         }
     }

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>성능 모니터 — DB Helper 도움말</title>
+<link rel="stylesheet" href="help.css">
+</head>
+<body>
+<div class="nav"><a href="index.html">개요·단축키</a><a href="connections.html">접속</a><a href="table-spec.html">테이블 정의서</a><a href="gcm-spec.html">GCM 정의서</a><a href="monitor.html">성능 모니터</a></div>
+<h1>성능 모니터</h1>
+<p><b>도구 &gt; 성능 모니터…</b>(트리에서 대상 DB를 고른 뒤) 또는 트리의 DB 행 오른쪽 메뉴에서 엽니다. 연결이 없으면 먼저 연결합니다. 창은 모달이 아니라 열어 둔 채 SQL을 쓸 수 있고, DB마다 하나만 뜹니다(같은 DB에서 다시 열면 그 창이 앞으로).</p>
+<ul>
+  <li>섹션은 처음 고를 때 가져옵니다. <b>[새로 고침]</b>(<span class="kbd">F5</span>)과 <b>자동 새로 고침</b>(끔 · 5초 · 15초 · 60초)은 보고 있는 섹션만 다시 가져옵니다.</li>
+  <li>표는 결과 그리드와 같아 열 머리로 정렬하고 <span class="kbd">Ctrl</span>+C·오른쪽 메뉴로 복사합니다. 섹션 하나는 최대 2,000행까지 가져옵니다.</li>
+  <li>조회는 그 DB의 세션(트랜잭션)을 SQL 탭과 함께 씁니다. 그 DB에서 문장이 실행 중이면 기다리지 않고 알립니다. 자료를 바꾸는 문장은 없습니다.</li>
+  <li>권한이 없는 섹션은 그 섹션만 "권한이 없어 가져오지 못했습니다 — 필요 권한: …"으로 보이고 다른 섹션은 그대로 동작합니다.</li>
+</ul>
+
+<h2>섹션과 DBMS별 원천</h2>
+<table>
+<tr><th>섹션</th><th>Oracle</th><th>PostgreSQL</th><th>SQL Server</th></tr>
+<tr><td>기본 정보</td><td>V$DATABASE · V$INSTANCE · NLS 문자 집합 · 24시간 로그 스위치(V$LOG_HISTORY) · 사용자 세션 수</td><td>version() · 서버 주소 · 시작 시각 · 복구(스탠바이) 여부 · DB 크기 · 연결 수/max_connections · shared_buffers · work_mem</td><td>@@SERVERNAME · 버전·에디션 · 시작 시각(tempdb 생성 시각) · 현재 DB의 복구 모델·상태·호환성 수준·정렬 · 사용자 연결 수</td></tr>
+<tr><td>저장 공간</td><td><b>테이블스페이스</b>: 크기·사용·남음·사용률·최대(자동 확장 한도). 영구·UNDO는 DBA_DATA_FILES − DBA_FREE_SPACE, 임시는 DBA_TEMP_FILES · V$TEMP_SPACE_HEADER(사용은 고수위)</td><td><b>테이블스페이스</b>: pg_tablespace 크기·위치. 남은 용량은 파일 시스템이 정하므로 서버 OS에서 봅니다. 별도 <b>데이터베이스</b> 섹션에 DB별 크기·연결 수</td><td><b>데이터 파일</b>: 현재 DB의 sys.database_files — 크기·사용·남음·사용률·최대·증가·경로(로그 파일 포함). 다른 DB는 그 DB로 접속해서 봅니다</td></tr>
+<tr><td>로그</td><td><b>리두 로그</b>: V$LOG 그룹(시퀀스·크기·아카이브·상태·첫 기록)과 멤버 파일</td><td><b>WAL</b>: 현재 위치·파일(스탠바이는 재생 위치) · wal_level · max_wal_size · archive_mode · pg_stat_archiver(아카이브 수·마지막·실패)</td><td><b>트랜잭션 로그</b>: 로그 크기·사용·사용률(sys.dm_db_log_space_usage) · 로그 재사용 대기 · 마지막 전체/로그 백업(msdb)</td></tr>
+<tr><td>잠금</td><td>V$LOCK의 TM·TX 가운데 막고 있거나(BLOCK) 기다리는(REQUEST) 것: 세션·막는 세션·모드·객체·지속 초·SQL_ID</td><td>pg_blocking_pids()로 막혀 있거나 막는 세션: PID·막는 PID·대기 이벤트·지속 초·SQL</td><td>blocking_session_id로 막혀 있거나 막는 세션(트랜잭션만 연 채 쉬는 세션 포함): 대기 종류·자원·명령·SQL</td></tr>
+<tr><td>세션</td><td>V$SESSION 사용자 세션: 상태·OS 사용자·머신·프로그램·대기 이벤트·SQL_ID·접속 시각</td><td>pg_stat_activity의 client backend: 상태·응용·클라이언트·대기·접속 시각·실행 초·SQL</td><td>sys.dm_exec_sessions 사용자 세션: 상태·호스트·프로그램·명령·대기·CPU·논리 읽기·SQL</td></tr>
+</table>
+<p>비어 있는 잠금 표는 "잠금 대기가 없다"는 뜻입니다.</p>
+
+<h2>필요 권한</h2>
+<table>
+<tr><th>DBMS</th><th>권한</th><th>없을 때</th></tr>
+<tr><td>Oracle</td><td><code>SELECT_CATALOG_ROLE</code>(또는 V$DATABASE·V$INSTANCE·V$SESSION·V$LOCK·V$LOG·V$LOGFILE·V$LOG_HISTORY·V$TEMP_SPACE_HEADER·DBA_TABLESPACES·DBA_DATA_FILES·DBA_TEMP_FILES·DBA_FREE_SPACE SELECT)</td><td>ORA-00942(뷰가 안 보임) — 섹션마다 "권한이 없어 가져오지 못했습니다". 잠금의 객체 이름은 ALL_OBJECTS라 권한 밖 객체는 빈 칸</td></tr>
+<tr><td>PostgreSQL</td><td><code>pg_read_all_stats</code> 역할(또는 superuser)</td><td>대부분 오류 없이 돌지만 다른 사용자 세션의 SQL은 <code>&lt;insufficient privilege&gt;</code>, 테이블스페이스·데이터베이스 크기는 42501</td></tr>
+<tr><td>SQL Server</td><td><code>VIEW SERVER STATE</code>(세션·잠금·트랜잭션 로그), msdb 읽기(백업 정보)</td><td>세션·잠금은 자기 세션만 보이거나 오류 300, 트랜잭션 로그는 오류 300·916</td></tr>
+</table>
+<div class="note">운영 DB의 계정에는 조회 권한만 주세요. 모니터는 SELECT만 실행하지만, 같은 세션으로 SQL 탭의 문장도 실행됩니다.</div>
+
+<h2>버전</h2>
+<ul>
+  <li>Oracle 11gR2 이상(LISTAGG). PostgreSQL 10 이상(pg_current_wal_lsn · backend_type · pg_blocking_pids). SQL Server 2012 이상(sys.dm_db_log_space_usage).</li>
+</ul>
+</body>
+</html>

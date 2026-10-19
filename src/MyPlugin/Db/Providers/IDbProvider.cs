@@ -10,6 +10,7 @@ namespace MyPlugin
     /// 화면과 세션은 중립 모델(OracleConnectionProfile·SchemaInfo·DbObjectInfo·ColumnInfo·QueryTable …)만 알고, DBMS 고유 코드는 공급자 안에만 둔다.
     /// 새 DBMS는 이 인터페이스를 구현해 <see cref="DbProviders"/>에 등록하면 접속 관리·트리·SQL 실행·GCM 정의서가 그대로 동작한다.
     /// (테이블 정보 F4·테이블 정의서는 <see cref="IMetadataProvider.SupportsTableInfo"/>가 true인 공급자만 — 아직 Oracle뿐.)
+    /// 성능 모니터 창은 <see cref="Monitor"/>의 섹션(조회 SQL)만 보고 그린다 — 섹션이 없는 공급자(Generic)는 모니터를 열지 않는다.
     /// </summary>
     internal interface IDbProvider
     {
@@ -27,6 +28,9 @@ namespace MyPlugin
         ISqlDialect Dialect { get; }
 
         IMetadataProvider Metadata { get; }
+
+        /// <summary>성능 모니터 섹션(기본 정보·저장 공간·로그·잠금·세션 …). 지원하지 않으면 <see cref="NoMonitor.Instance"/>.</summary>
+        IMonitorProvider Monitor { get; }
 
         /// <summary>공급자별 필수 항목 검사(호스트·포트·서비스/데이터베이스·사용자). 문제가 없으면 빈 목록. label은 "'이름'" 꼴 접두.</summary>
         List<string> Validate(OracleConnectionProfile profile, string label);
@@ -58,6 +62,11 @@ namespace MyPlugin
 
         /// <summary>연결이 끊긴 오류인지(공급자 고유 오류 번호). 모르면 false.</summary>
         bool IsBroken(Exception ex);
+
+        /// <summary>
+        /// 권한이 없어 실패한 오류인지(성능 모니터가 "필요 권한"을 함께 알린다). Oracle은 뷰가 안 보일 때도 ORA-00942라 "권한이 없거나 뷰가 없음"으로 본다. 모르면 false.
+        /// </summary>
+        bool IsPermissionDenied(Exception ex);
     }
 
     /// <summary>

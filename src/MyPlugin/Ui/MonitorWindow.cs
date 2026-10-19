@@ -1,0 +1,325 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
+
+namespace MyPlugin
+{
+    /// <summary>
+    /// 성능 모니터 창(모달 아님 — 열어 둔 채 SQL을 쓸 수 있다, Esc로 닫음). DB마다 하나(DbHelperView가 같은 DB면 있는 창을 앞으로).
+    /// 위: DB 배지·주소, 자동 새로 고침(끔·5초·15초·60초), [새로 고침]·[도움말]·[닫기].
+    /// 가운데: 공급자(<see cref="IMonitorProvider"/>)의 섹션마다 고르는 버튼 + 설명 + 상태(갱신 시각·행 수 / 오류) + 표(결과 그리드 — 정렬·복사 됨).
+    /// - 섹션은 처음 고를 때 가져오고, [새로 고침]·자동 새로 고침은 보고 있는 섹션만 다시 가져온다(무거운 DBA_FREE_SPACE 등을 매번 다 읽지 않게).
+    /// - 세션은 그 DB의 지금 세션을 그때그때 받는다(끊었다 다시 연결해도 창을 다시 열 필요가 없다). 그 DB에서 사용자 문장이 실행 중이면 기다리지 않고 알린다.
+    /// - 권한 오류(<see cref="IDbProvider.IsPermissionDenied"/>)는 섹션의 필요 권한과 함께 보인다. 섹션마다 따로 실패한다.
+    /// </summary>
+    internal sealed class MonitorWindow
+    {
+        private readonly Window _window;
+        private readonly IDbProvider _provider;
+        private readonly OracleConnectionProfile _profile;
+        private readonly Func<DbSession> _session;
+        private readonly Func<bool> _isRunning;
+        private readonly List<SectionView> _sections = new List<SectionView>();
+        private readonly CancellationTokenSource _closing = new CancellationTokenSource();
+        private readonly DispatcherTimer _timer = new DispatcherTimer();
+        private int _current = -1;
+        private bool _closed;
+
+        private MonitorWindow(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<DbSession> session, Func<bool> isRunning, string helpFolder)
+        {
+            _profile = profile;
+            _provider = provider ?? throw new ArgumentNullException(nameof(provider));
+            _session = session ?? throw new ArgumentNullException(nameof(session));
+            _isRunning = isRunning ?? (() => false);
+            _window = new Window
+            {
+                Title = DialogKit.TitleFor(MonitorLogic.Title, profile),
+                Width = 960,
+                Height = 600,
+                MinWidth = 560,
+                MinHeight = 340,
+                ShowInTaskbar = false,
+                ResizeMode = ResizeMode.CanResizeWithGrip
+            };
+            Theme.ApplyWindow(_window);
+            DialogKit.SetOwner(_window, owner);
+            _window.Content = Build(helpFolder);
+            _window.PreviewKeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Escape)
+                {
+                    e.Handled = true;
+                    _window.Close();
+                }
+                else if (e.Key == Key.F5)
+                {
+                    e.Handled = true;
+                    Load(_current, true);
+                }
+            };
+            _window.Loaded += (s, e) => Select(0);
+            _window.Closed += (s, e) =>
+            {
+                _closed = true;
+                _timer.Stop();
+                _closing.Cancel();
+            };
+            _timer.Tick += (s, e) => Load(_current, true);
+        }
+
+        /// <summary>창을 만들어 보인다. 공급자에 섹션이 없으면 InvalidOperationException(부르는 쪽이 먼저 확인한다).</summary>
+        public static MonitorWindow Show(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<DbSession> session, Func<bool> isRunning, string helpFolder)
+        {
+            if (provider == null)
+                throw new ArgumentNullException(nameof(provider));
+            if (provider.Monitor.Sections.Count == 0)
+                throw new InvalidOperationException(MonitorLogic.NotSupportedMessage(provider.DisplayName));
+            var monitor = new MonitorWindow(owner, profile, provider, session, isRunning, helpFolder);
+            monitor._window.Show();
+            return monitor;
+        }
+
+        /// <summary>창이 닫혔을 때(DbHelperView가 DB별 창 목록에서 뺀다).</summary>
+        public event EventHandler Closed
+        {
+            add { _window.Closed += value; }
+            remove { _window.Closed -= value; }
+        }
+
+        public void Activate()
+        {
+            if (_closed)
+                return;
+            if (_window.WindowState == WindowState.Minimized)
+                _window.WindowState = WindowState.Normal;
+            _window.Activate();
+        }
+
+        // ================= 화면 =================
+
+        private FrameworkElement Build(string helpFolder)
+        {
+            var root = new DockPanel { Margin = new Thickness(14, 12, 14, 12) };
+            var header = Header(helpFolder);
+            DockPanel.SetDock(header, Dock.Top);
+            root.Children.Add(header);
+
+            var strip = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+            var host = new Grid();
+            var index = 0;
+            foreach (var section in _provider.Monitor.Sections)
+            {
+                var view = new SectionView(section, index++);
+                Border underline;
+                view.Button = WorkspaceUi.SelectorButton(Theme.Text(section.Title), out underline);
+                view.Underline = underline;
+                AutomationProperties.SetName(view.Button, section.Title);
+                var i = view.Index;
+                view.Button.Click += (s, e) => Select(i);
+                strip.Children.Add(view.Button);
+                view.Panel = SectionPanel(view);
+                host.Children.Add(view.Panel);
+                _sections.Add(view);
+            }
+            var stripBorder = new Border { Child = strip, BorderThickness = new Thickness(0, 0, 0, 1) };
+            stripBorder.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
+            DockPanel.SetDock(stripBorder, Dock.Top);
+            root.Children.Add(stripBorder);
+            var hostBorder = new Border { Child = host, BorderThickness = new Thickness(1, 0, 1, 1) };
+            hostBorder.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
+            root.Children.Add(hostBorder);
+            return root;
+        }
+
+        private FrameworkElement Header(string helpFolder)
+        {
+            var panel = new DockPanel();
+
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            var label = Theme.Text("자동 새로 고침", Theme.SecondaryText);
+            label.VerticalAlignment = VerticalAlignment.Center;
+            label.Margin = new Thickness(0, 0, 6, 0);
+            buttons.Children.Add(label);
+            var interval = new ComboBox { MinWidth = 72, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
+            foreach (var seconds in MonitorLogic.RefreshSeconds)
+                interval.Items.Add(new ComboBoxItem { Content = MonitorLogic.RefreshText(seconds), Tag = seconds });
+            interval.SelectedIndex = 0;
+            interval.SelectionChanged += (s, e) =>
+            {
+                var item = interval.SelectedItem as ComboBoxItem;
+                var seconds = item == null ? 0 : (int)item.Tag;
+                _timer.Stop();
+                if (seconds > 0)
+                {
+                    _timer.Interval = TimeSpan.FromSeconds(seconds);
+                    _timer.Start();
+                }
+            };
+            AutomationProperties.SetName(interval, "자동 새로 고침");
+            buttons.Children.Add(interval);
+            var refresh = new Button { Content = "새로 고침", Padding = new Thickness(12, 3, 12, 3), Margin = new Thickness(0, 0, 6, 0), ToolTip = "보고 있는 섹션을 다시 가져옵니다 (F5)" };
+            refresh.Click += (s, e) => Load(_current, true);
+            buttons.Children.Add(refresh);
+            var help = new Button { Content = "도움말", Padding = new Thickness(12, 3, 12, 3), Margin = new Thickness(0, 0, 6, 0) };
+            help.Click += (s, e) => HelpWindow.Show(_window, helpFolder, HelpLogic.Monitor);
+            buttons.Children.Add(help);
+            var close = new Button { Content = "닫기", Padding = new Thickness(16, 3, 16, 3), IsCancel = true };
+            close.Click += (s, e) => _window.Close();
+            buttons.Children.Add(close);
+            DockPanel.SetDock(buttons, Dock.Right);
+            panel.Children.Add(buttons);
+
+            var title = new WrapPanel { VerticalAlignment = VerticalAlignment.Center };
+            var name = Theme.Text(MonitorLogic.Title);
+            name.FontSize = 16;
+            name.FontWeight = FontWeights.SemiBold;
+            name.Margin = new Thickness(0, 0, 8, 0);
+            title.Children.Add(name);
+            var badge = Theme.DbBadge(_profile);
+            badge.Margin = new Thickness(0, 0, 8, 0);
+            title.Children.Add(badge);
+            var address = Theme.Text(_provider.DisplayName + " · " + ConnectionManagerLogic.Address(_profile), Theme.SecondaryText);
+            address.VerticalAlignment = VerticalAlignment.Center;
+            title.Children.Add(address);
+            panel.Children.Add(title);
+            return panel;
+        }
+
+        private FrameworkElement SectionPanel(SectionView view)
+        {
+            var panel = new DockPanel { Visibility = Visibility.Collapsed };
+            var top = new DockPanel { Margin = new Thickness(8, 6, 8, 6) };
+            view.Status = Theme.Text("", Theme.SecondaryText);
+            view.Status.TextWrapping = TextWrapping.Wrap;
+            view.Status.MaxWidth = 420;
+            view.Status.TextAlignment = TextAlignment.Right;
+            view.Status.VerticalAlignment = VerticalAlignment.Center;
+            DockPanel.SetDock(view.Status, Dock.Right);
+            top.Children.Add(view.Status);
+            var description = Theme.Secondary(view.Section.Description);
+            description.TextWrapping = TextWrapping.Wrap;
+            description.VerticalAlignment = VerticalAlignment.Center;
+            description.Margin = new Thickness(0, 0, 12, 0);
+            top.Children.Add(description);
+            DockPanel.SetDock(top, Dock.Top);
+            panel.Children.Add(top);
+            view.Grid = new ResultGridView(all =>
+            {
+                var rows = all ? view.Grid.RowsInViewOrder() : view.Grid.SelectedRows();
+                DialogKit.TryCopy(WorkspaceLogic.ToTsv(all ? view.Columns.Select(c => c.Name) : null, rows.Select(r => r.Values)));
+            }, text => DialogKit.TryCopy(text));
+            panel.Children.Add(view.Grid.View);
+            return panel;
+        }
+
+        private void Select(int index)
+        {
+            if (_closed || index < 0 || index >= _sections.Count)
+                return;
+            _current = index;
+            for (var i = 0; i < _sections.Count; i++)
+            {
+                _sections[i].Panel.Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+                WorkspaceUi.SetSelected(_sections[i].Button, _sections[i].Underline, i == index);
+            }
+            Load(index, false);
+        }
+
+        // ================= 가져오기 =================
+
+        /// <summary>섹션 하나를 가져온다. force가 아니면 이미 가져온 섹션은 그대로 둔다. 가져오는 중이면 겹쳐 실행하지 않는다.</summary>
+        private async void Load(int index, bool force)
+        {
+            try
+            {
+                if (_closed || index < 0 || index >= _sections.Count)
+                    return;
+                var view = _sections[index];
+                if (view.Loading || (view.Loaded && !force))
+                    return;
+                var session = _session();
+                if (session == null || !session.IsOpen || session.IsBroken)
+                {
+                    SetStatus(view, MonitorLogic.NoSessionText, true);
+                    return;
+                }
+                if (_isRunning())
+                {
+                    SetStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), true);
+                    return;
+                }
+                view.Loading = true;
+                SetStatus(view, MonitorLogic.LoadingText, false);
+                try
+                {
+                    var table = await session.QueryTableAsync(view.Section.Sql, MonitorLogic.MaxRows, _closing.Token);
+                    if (_closed)
+                        return;
+                    view.Columns = MonitorLogic.Columns(table);
+                    var rows = new ObservableCollection<ResultGridRow>();
+                    for (var i = 0; i < table.Rows.Count; i++)
+                        rows.Add(new ResultGridRow(i + 1, table.Rows[i]));
+                    view.Grid.Show(view.Columns, rows);
+                    view.Loaded = true;
+                    SetStatus(view, MonitorLogic.RefreshedText(DateTime.Now, table.Rows.Count), false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // 창을 닫았다
+                }
+                catch (Exception ex)
+                {
+                    if (_closed)
+                        return;
+                    var reason = DbSession.DescribeError(ex);
+                    SetStatus(view, _provider.IsPermissionDenied(ex) ? MonitorLogic.PermissionDeniedText(view.Section, reason) : MonitorLogic.FailedText(reason), true);
+                }
+                finally
+                {
+                    view.Loading = false;
+                }
+            }
+            catch (Exception)
+            {
+                // async void — 예외를 밖으로 내보내면 Folderss가 멈춘다
+            }
+        }
+
+        private static void SetStatus(SectionView view, string text, bool error)
+        {
+            view.Status.Text = text ?? "";
+            if (error)
+                view.Status.Foreground = Theme.Danger;
+            else
+                view.Status.SetResourceReference(TextBlock.ForegroundProperty, Theme.SecondaryText);
+        }
+
+        /// <summary>섹션 하나의 화면 조각과 상태.</summary>
+        private sealed class SectionView
+        {
+            public SectionView(MonitorSection section, int index)
+            {
+                Section = section;
+                Index = index;
+            }
+
+            public MonitorSection Section { get; }
+            public int Index { get; }
+            public Button Button { get; set; }
+            public Border Underline { get; set; }
+            public FrameworkElement Panel { get; set; }
+            public TextBlock Status { get; set; }
+            public ResultGridView Grid { get; set; }
+            public List<ResultColumn> Columns { get; set; } = new List<ResultColumn>();
+            public bool Loaded { get; set; }
+            public bool Loading { get; set; }
+        }
+    }
+}

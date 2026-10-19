@@ -40,6 +40,7 @@ controls:
   - {id: object-source-window, name: ObjectSourceWindow, kind: window, title: 소스 창}
   - {id: table-spec-dialog, name: TableSpecDialog, kind: dialog, title: 테이블 정의서 만들기}
   - {id: code-spec-dialog, name: CodeSpecDialog, kind: dialog, title: GCM 정의서 만들기}
+  - {id: monitor-window, name: MonitorWindow, kind: window, title: 성능 모니터 창}
   - {id: connection-manager, name: ConnectionManager, kind: dialog, title: 접속 관리}
   - {id: connection-settings-page, name: ConnectionSettingsPage, kind: settings-page, title: 설정 창 DB 접속 탭}
   - {id: help-window, name: HelpWindow, kind: window, title: 도움말 창}

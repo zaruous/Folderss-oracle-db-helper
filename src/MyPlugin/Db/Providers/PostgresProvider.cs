@@ -16,6 +16,7 @@ namespace MyPlugin
         public const string KindName = "postgres";
 
         private readonly IMetadataProvider _metadata = new PostgresMetadata();
+        private readonly IMonitorProvider _monitor = new PostgresMonitor();
 
         public string Kind { get { return KindName; } }
         public string DisplayName { get { return "PostgreSQL"; } }
@@ -23,6 +24,7 @@ namespace MyPlugin
         public string ServiceLabel { get { return "데이터베이스"; } }
         public ISqlDialect Dialect { get { return SqlDialects.Generic; } }
         public IMetadataProvider Metadata { get { return _metadata; } }
+        public IMonitorProvider Monitor { get { return _monitor; } }
 
         public List<string> Validate(OracleConnectionProfile profile, string label)
         {
@@ -87,6 +89,13 @@ namespace MyPlugin
             }
             var npgsql = ex as NpgsqlException;
             return npgsql != null && (npgsql.InnerException is System.IO.IOException || npgsql.InnerException is System.Net.Sockets.SocketException);
+        }
+
+        /// <summary>42501 insufficient_privilege.</summary>
+        public bool IsPermissionDenied(Exception ex)
+        {
+            var pg = ex as PostgresException;
+            return pg != null && pg.SqlState == PostgresErrorCodes.InsufficientPrivilege;
         }
     }
 }

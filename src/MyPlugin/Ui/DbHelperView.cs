@@ -31,6 +31,8 @@ namespace MyPlugin
 
         private readonly IPluginManager _manager;
         private readonly Dictionary<string, DbState> _dbs = new Dictionary<string, DbState>(StringComparer.Ordinal);
+        // 열려 있는 성능 모니터 창(DB마다 하나). 닫히면 뺀다.
+        private readonly Dictionary<string, MonitorWindow> _monitors = new Dictionary<string, MonitorWindow>(StringComparer.Ordinal);
         // 저장된 목록에서 빠졌지만 아직 연결이 살아 있어 목록에 남겨 둔 접속(끊으면 뺀다)
         private readonly HashSet<string> _orphans = new HashSet<string>(StringComparer.Ordinal);
         private readonly DbTreePanel _tree;
@@ -327,6 +329,15 @@ namespace MyPlugin
                 Dialogs.Show(OwnerWindow(), CodeSpecLogic.Title, "트리에서 대상 DB(또는 그 안의 객체)를 고른 뒤 다시 누르세요.", false);
             else
                 CreateCodeSpec(dbId);
+        }
+
+        void IShellCommands.ShowMonitor()
+        {
+            var dbId = _tree.SelectedDbId();
+            if (dbId == null)
+                Dialogs.Show(OwnerWindow(), MonitorLogic.Title, MonitorLogic.PickDbMessage, false);
+            else
+                ShowMonitor(dbId);
         }
 
         public void ShowShortcuts()
@@ -685,6 +696,50 @@ namespace MyPlugin
                 // 콤보로 다른 접속을 골랐다: 그 DB로 다시 연다(연결이 안 돼 있으면 비밀번호를 묻고 연결)
                 if (next != null && !_closed)
                     CreateCodeSpec(next.DbId, next.Sql);
+            }
+            catch (Exception ex)
+            {
+                ReportUnexpected(ex, dbId);
+            }
+        }
+
+        /// <summary>
+        /// 성능 모니터 창(DB마다 하나). 연결이 없으면 연결한다(비밀번호를 물을 수 있음). 창은 그 DB의 지금 세션을 그때그때 받으므로
+        /// 다시 연결해도 그대로 쓴다. 공급자에 모니터 섹션이 없으면(Generic) 알리고 열지 않는다.
+        /// </summary>
+        public async void ShowMonitor(string dbId)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(dbId) || _closed)
+                    return;
+                var profile = FindProfile(dbId);
+                if (profile == null)
+                    return;
+                var provider = DbProviders.For(profile);
+                if (provider.Monitor.Sections.Count == 0)
+                {
+                    Dialogs.Show(OwnerWindow(), MonitorLogic.Title, MonitorLogic.NotSupportedMessage(provider.DisplayName), false);
+                    return;
+                }
+                MonitorWindow existing;
+                if (_monitors.TryGetValue(dbId, out existing))
+                {
+                    existing.Activate();
+                    return;
+                }
+                var session = GetSession(dbId);
+                if (session == null || session.IsBroken)
+                {
+                    if (!await ConnectAsync(dbId) || GetSession(dbId) == null)
+                        return;
+                }
+                // 연결하는 동안 다른 경로로 열렸거나 창이 닫혔을 수 있다
+                if (_closed || _monitors.ContainsKey(dbId))
+                    return;
+                var window = MonitorWindow.Show(OwnerWindow(), FindProfile(dbId) ?? profile, provider, () => GetSession(dbId), () => IsRunning(dbId), HelpFolder);
+                _monitors[dbId] = window;
+                window.Closed += (s, e) => _monitors.Remove(dbId);
             }
             catch (Exception ex)
             {

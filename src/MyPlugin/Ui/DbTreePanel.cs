@@ -81,6 +81,9 @@ namespace MyPlugin
         /// <summary>도구 메뉴 [GCM 정의서 만들기…]: 그 DB의 사용자 SQL 창(필요하면 연결한다).</summary>
         void CreateCodeSpec(string dbId);
 
+        /// <summary>트리 메뉴·도구 메뉴 [성능 모니터…]: 그 DB의 성능 모니터 창(필요하면 연결한다. 같은 DB의 창이 있으면 앞으로).</summary>
+        void ShowMonitor(string dbId);
+
         /// <summary>메시지 탭에 오류 한 줄.</summary>
         void ReportError(string dbId, string text);
     }
@@ -862,6 +865,8 @@ namespace MyPlugin
                 menu.Items.Add(new Separator());
                 menu.Items.Add(MenuAction(CodeSpecLogic.Title + "…", true, () => _host.CreateCodeSpec(dbId),
                     "이 DB('" + profile.Name + "')에서 공통 코드 조회 SQL을 실행해 정의서를 만듭니다"));
+                menu.Items.Add(MenuAction(MonitorLogic.Title + "…", DbProviders.For(profile).Monitor.Sections.Count > 0, () => _host.ShowMonitor(dbId),
+                    "이 DB('" + profile.Name + "')의 기본 정보 · 테이블스페이스(남은 용량) · 로그 · 잠금 · 세션을 봅니다"));
             }
             if (row.Kind == TreeRowKind.Object && TreeGroups.HasColumns(row.ObjectType))
             {

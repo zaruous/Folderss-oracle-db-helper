@@ -11,7 +11,7 @@ namespace MyPlugin
     /// - 데이터베이스(PostgreSQL에만): pg_database마다 크기·연결 수.
     /// - WAL: 위치·파일·wal_level·archive_mode·pg_stat_archiver. 스탠바이면 재생 위치.
     /// - 잠금: pg_blocking_pids로 막히거나 막는 세션만.
-    /// - 느린 SQL: pg_stat_statements(확장 필요, 13+ 열 이름) 누적 소요 상위 50. 대기 이벤트: 이 순간 활성 세션의 wait_event 집계(누적 통계는 없다).
+    /// - 느린 SQL: pg_stat_statements(확장 필요, 13+ 열 이름) 누적 소요 상위 50. 가져오기 전에 버전·확장 설치를 점검해 안 되면 설치 안내(MonitorRequirement). 대기 이벤트: 이 순간 활성 세션의 wait_event 집계(누적 통계는 없다).
     /// - 세션: pg_stat_activity의 client backend. 잠금·세션 행을 누르면 SQL 전문·세션 정보, 오른쪽 메뉴 [세션 종료…](pg_terminate_backend).
     /// </summary>
     internal sealed class PostgresMonitor : IMonitorProvider
@@ -144,6 +144,15 @@ namespace MyPlugin
                 {
                     new MonitorDetail("sql", "SQL 전문", "pg_stat_statements.query — 상수가 $1·$2로 정규화된 문장. 실행 계획은 pg_stat_statements가 주지 않는다(EXPLAIN은 실제 값이 필요).",
                         "SELECT s.query FROM pg_stat_statements s WHERE s.queryid = CAST(:name AS bigint) LIMIT 1", true)
+                },
+                null, new[]
+                {
+                    // 열 이름이 13에서 바뀌었다(total_time → total_exec_time). 먼저 버전을 보고, 그다음 확장이 이 DB에 만들어졌는지 본다
+                    new MonitorRequirement("SELECT CASE WHEN current_setting('server_version_num')::int >= 130000 THEN 1 ELSE 0 END",
+                        "PostgreSQL 13 이상에서만 지원합니다. 12 이하는 pg_stat_statements의 열 이름(total_time)이 달라 이 섹션을 쓸 수 없습니다."),
+                    new MonitorRequirement("SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'",
+                        "pg_stat_statements 확장이 이 데이터베이스에 설치돼 있지 않습니다. 관리자가 postgresql.conf의 shared_preload_libraries에 pg_stat_statements를 넣고 서버를 재시작한 뒤,"
+                        + " 이 DB에서 CREATE EXTENSION pg_stat_statements; 를 실행해야 합니다.")
                 }),
 
             new MonitorSection(MonitorSections.Waits, "대기 이벤트",

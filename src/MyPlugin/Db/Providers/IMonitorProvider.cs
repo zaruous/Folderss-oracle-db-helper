@@ -147,11 +147,32 @@ namespace MyPlugin
         }
     }
 
-    /// <summary>성능 모니터 섹션 하나: 제목·설명·필요 권한·조회 SQL(·사용률 차트·행 상세 목록·행 조치).</summary>
+    /// <summary>
+    /// 섹션을 가져오기 전에 확인하는 필요 조건(확장 설치·서버 버전 같은, 권한이 아니라 "설치·설정"이 필요한 것).
+    /// 점검 SQL은 값 하나를 돌려준다: 행이 없거나 첫 값이 NULL·0·false·'f'면 충족되지 않은 것(<see cref="MonitorLogic.RequirementMet"/>).
+    /// 충족되지 않으면 섹션 조회를 하지 않고 <see cref="Message"/>(무엇을 어떻게 설치·설정해야 하는지)를 경고색으로 보인다.
+    /// 점검 SQL 자체가 실패하면(권한 등) 그 오류를 보인다.
+    /// </summary>
+    internal sealed class MonitorRequirement
+    {
+        public MonitorRequirement(string sql, string message)
+        {
+            if (string.IsNullOrWhiteSpace(sql) || string.IsNullOrWhiteSpace(message))
+                throw new ArgumentException("필요 조건의 sql·message가 비었습니다.");
+            Sql = sql;
+            Message = message;
+        }
+
+        public string Sql { get; }
+        public string Message { get; }
+    }
+
+    /// <summary>성능 모니터 섹션 하나: 제목·설명·필요 권한·조회 SQL(·사용률 차트·행 상세 목록·행 조치·필요 조건).</summary>
     internal sealed class MonitorSection
     {
         public MonitorSection(string id, string title, string description, string privilege, string sql, MonitorUsageChart chart = null,
-            string keyColumn = null, IReadOnlyList<MonitorDetail> details = null, IReadOnlyList<MonitorAction> actions = null)
+            string keyColumn = null, IReadOnlyList<MonitorDetail> details = null, IReadOnlyList<MonitorAction> actions = null,
+            IReadOnlyList<MonitorRequirement> requirements = null)
         {
             if (string.IsNullOrWhiteSpace(id))
                 throw new ArgumentException("id가 비었습니다.", nameof(id));
@@ -167,6 +188,7 @@ namespace MyPlugin
             Chart = chart;
             Details = details ?? Array.Empty<MonitorDetail>();
             Actions = actions ?? Array.Empty<MonitorAction>();
+            Requirements = requirements ?? Array.Empty<MonitorRequirement>();
             if (Details.Count > 0 && string.IsNullOrWhiteSpace(keyColumn))
                 throw new ArgumentException("상세 목록이 있으면 keyColumn이 있어야 합니다.", nameof(keyColumn));
             KeyColumn = Details.Count > 0 ? keyColumn : null;
@@ -198,6 +220,9 @@ namespace MyPlugin
 
         /// <summary>행의 오른쪽 메뉴에 두는 조치들(세션 종료). 없으면 빈 목록.</summary>
         public IReadOnlyList<MonitorAction> Actions { get; }
+
+        /// <summary>가져오기 전에 순서대로 점검하는 필요 조건(확장 설치·서버 버전). 처음 충족되지 않은 것의 안내를 보인다. 없으면 빈 목록.</summary>
+        public IReadOnlyList<MonitorRequirement> Requirements { get; }
     }
 
     /// <summary>섹션이 없는 공급자(Generic)용.</summary>

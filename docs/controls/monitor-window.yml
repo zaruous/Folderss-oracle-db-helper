@@ -51,6 +51,10 @@ features:
     description: >-
       섹션은 처음 고를 때 가져오고, [새로 고침] · 자동 새로 고침은 보고 있는 섹션만 다시 가져온다.
       세션은 그 DB의 지금 세션을 그때그때 받으므로 다시 연결해도 창을 다시 열 필요가 없다. 그 DB에서 문장이 실행 중이면 기다리지 않고 알린다.
+  - name: 필요 조건 점검(설치·버전)
+    description: >-
+      섹션에 MonitorRequirement(점검 SQL·안내문)가 있으면 가져오기 전에 순서대로 점검한다. 행이 없거나 첫 값이 0·false면 조회하지 않고
+      "설치·설정 필요 — …"를 경고색(Theme.Warning)으로 보인다(권한 오류의 위험색과 구분). 지금은 PostgreSQL 느린 SQL: 서버 13 이상 → pg_stat_statements 확장.
   - name: 권한 오류
     description: >-
       IDbProvider.IsPermissionDenied(Oracle ORA-00942 · 01031, PostgreSQL 42501, SQL Server 229 · 230 · 297 · 300 · 916)면
@@ -63,8 +67,8 @@ keyboard:
 theme:
   - part: 창·표
     keys: [WindowBackground, PanelBackground, PrimaryText, SecondaryText, BorderBrush, AccentBrush]
-  - part: 오류 상태
-    keys: [Theme.Danger]
+  - part: 오류 상태 · 설치 필요 상태
+    keys: [Theme.Danger, Theme.Warning]
   - part: 사용률 도넛
     keys: [BorderBrush, AccentBrush, Theme.Warning, Theme.Danger]
 states:

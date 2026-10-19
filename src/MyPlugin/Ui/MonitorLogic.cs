@@ -102,6 +102,33 @@ namespace MyPlugin
             return decimal.TryParse(text, NumberStyles.Float, Inv, out ignored);
         }
 
+        // ---------- 필요 조건(확장 설치·버전) ----------
+
+        /// <summary>점검 SQL 결과가 "충족"인지: 행이 있고 첫 값이 NULL·0·false·f·no·n이 아니면 충족.</summary>
+        public static bool RequirementMet(QueryTable table)
+        {
+            if (table == null || table.Rows.Count == 0 || table.Rows[0].Length == 0)
+                return false;
+            var value = (table.Rows[0][0] ?? "").Trim();
+            switch (value.ToLowerInvariant())
+            {
+                case "":
+                case "0":
+                case "false":
+                case "f":
+                case "no":
+                case "n":
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>충족되지 않은 필요 조건의 상태 글(경고색): "설치·설정 필요 — …".</summary>
+        public static string RequirementMissingText(MonitorRequirement requirement)
+        {
+            return "설치·설정 필요 — " + (requirement == null ? "" : requirement.Message.Trim());
+        }
+
         // ---------- 행 상세 목록 ----------
 
         public const string DetailHintText = "표의 행이나 도넛을 누르면 상세 목록을 보입니다.";

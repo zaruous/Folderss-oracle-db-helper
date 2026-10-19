@@ -470,6 +470,67 @@ namespace MyPlugin.Tests
             Assert.Contains("NOT LIKE 'BROKER%'", DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.Waits).Sql);
         }
 
+        // ---------- 필요 조건(확장 설치·버전) ----------
+
+        [Fact]
+        public void Requirements_OnlyPostgresTopSql_VersionThenExtension()
+        {
+            foreach (var provider in Real)
+            foreach (var section in provider.Monitor.Sections)
+            {
+                if (provider == DbProviders.Postgres && section.Id == MonitorSections.TopSql)
+                    continue;
+                Assert.Empty(section.Requirements);
+            }
+            var top = DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.TopSql);
+            Assert.Equal(2, top.Requirements.Count);
+            Assert.Contains("server_version_num", top.Requirements[0].Sql);
+            Assert.Contains("130000", top.Requirements[0].Sql);
+            Assert.Contains("13 이상", top.Requirements[0].Message);
+            Assert.Contains("pg_extension WHERE extname = 'pg_stat_statements'", top.Requirements[1].Sql);
+            Assert.Contains("CREATE EXTENSION pg_stat_statements", top.Requirements[1].Message);
+            Assert.Contains("shared_preload_libraries", top.Requirements[1].Message);
+            Assert.Throws<ArgumentException>(() => new MonitorRequirement("", "m"));
+            Assert.Throws<ArgumentException>(() => new MonitorRequirement("SELECT 1", " "));
+        }
+
+        [Fact]
+        public void RequirementMet_ByFirstValue_AndMissingText()
+        {
+            Assert.False(MonitorLogic.RequirementMet(null));
+            Assert.False(MonitorLogic.RequirementMet(new QueryTable()));
+            foreach (var value in new[] { null, "", "0", "false", "f", "FALSE", "no", "N" })
+            {
+                var table = new QueryTable();
+                table.Columns.Add("x");
+                table.Rows.Add(new[] { value });
+                Assert.False(MonitorLogic.RequirementMet(table), value ?? "null");
+            }
+            foreach (var value in new[] { "1", "true", "t", "yes", "pg_stat_statements", "2" })
+            {
+                var table = new QueryTable();
+                table.Columns.Add("x");
+                table.Rows.Add(new[] { value });
+                Assert.True(MonitorLogic.RequirementMet(table), value);
+            }
+            var req = new MonitorRequirement("SELECT 1", " 확장을 설치하세요 ");
+            Assert.Equal("설치·설정 필요 — 확장을 설치하세요", MonitorLogic.RequirementMissingText(req));
+        }
+
+        /// <summary>점검 SQL을 QueryTableAsync(1행)로 읽는 흐름(SQLite): 행 없음 → 미충족, 1 → 충족.</summary>
+        [Fact]
+        public async System.Threading.Tasks.Task Requirement_Check_WithSqlite()
+        {
+            using (var connection = new SqliteConnection("Data Source=:memory:"))
+            using (var session = new DbSession(connection))
+            {
+                await session.OpenAsync();
+                Assert.False(MonitorLogic.RequirementMet(await session.QueryTableAsync("SELECT 1 WHERE 1 = 0", 1)));
+                Assert.False(MonitorLogic.RequirementMet(await session.QueryTableAsync("SELECT CASE WHEN 120000 >= 130000 THEN 1 ELSE 0 END", 1)));
+                Assert.True(MonitorLogic.RequirementMet(await session.QueryTableAsync("SELECT CASE WHEN 160000 >= 130000 THEN 1 ELSE 0 END", 1)));
+            }
+        }
+
         // ---------- 사용률 차트(대시보드) ----------
 
         [Fact]

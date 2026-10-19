@@ -26,6 +26,7 @@ namespace MyPlugin
     /// - 섹션에 <see cref="MonitorSection.Details"/>가 있으면 표 아래 분할선 밑에 상세 영역: 표의 행(또는 도넛)을 누르면 그 행의 키
     ///   (<see cref="MonitorSection.KeyColumn"/>)로 상세 조회(바인드 하나)를 실행해 보인다. 상세가 여럿이면 고르는 버튼. 이전 상세 조회는 취소한다.
     ///   <see cref="MonitorDetail.AsText"/>인 상세(SQL 전문·실행 계획)는 표 대신 고정폭 읽기 전용 글 상자.
+    /// - <see cref="MonitorSection.Requirements"/>(확장 설치·서버 버전)는 가져오기 전에 점검해, 충족되지 않으면 조회하지 않고 설치 안내를 경고색으로 보인다(오류와 구분).
     /// - <see cref="MonitorSection.Actions"/>(세션 종료)는 표의 오른쪽 메뉴에 둔다: 고른 행의 값으로 문장을 만들고 위험한 문장 확인 대화상자
     ///   (문장·경고·확인 체크)를 거쳐 실행한 뒤 섹션을 다시 가져온다. 읽기 전용 접속이면 막는다.
     /// </summary>
@@ -386,7 +387,7 @@ namespace MyPlugin
                 var session = _session();
                 if (session == null || !session.IsOpen || session.IsBroken)
                 {
-                    SetStatus(view, MonitorLogic.NoSessionText, true);
+                    SetStatus(view, MonitorLogic.NoSessionText, Theme.Danger);
                     return;
                 }
                 if (!Dialogs.ConfirmDanger(_window, _profile, new SqlStatement { Text = statement, Danger = action.Warning }))
@@ -395,10 +396,10 @@ namespace MyPlugin
                     return;
                 if (_isRunning())
                 {
-                    SetStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), true);
+                    SetStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), Theme.Danger);
                     return;
                 }
-                SetStatus(view, MonitorLogic.LoadingText, false);
+                SetStatus(view, MonitorLogic.LoadingText, null);
                 try
                 {
                     await session.RunAsync((connection, transaction) =>
@@ -412,7 +413,7 @@ namespace MyPlugin
                     }, _closing.Token);
                     if (_closed)
                         return;
-                    SetStatus(view, MonitorLogic.ActionDoneText(statement), false);
+                    SetStatus(view, MonitorLogic.ActionDoneText(statement), null);
                     Load(view.Index, true);
                 }
                 catch (OperationCanceledException)
@@ -422,7 +423,7 @@ namespace MyPlugin
                 catch (Exception ex)
                 {
                     if (!_closed)
-                        SetStatus(view, MonitorLogic.FailedText(DbSession.DescribeError(ex)), true);
+                        SetStatus(view, MonitorLogic.FailedText(DbSession.DescribeError(ex)), Theme.Danger);
                 }
             }
             catch (Exception)
@@ -459,21 +460,21 @@ namespace MyPlugin
                     view.DetailColumns = new List<ResultColumn>();
                     view.DetailGrid.Show(view.DetailColumns, new ObservableCollection<ResultGridRow>());
                     view.DetailText.Text = "";
-                    SetDetailStatus(view, "", false);
+                    SetDetailStatus(view, "", null);
                     return;
                 }
                 var session = _session();
                 if (session == null || !session.IsOpen || session.IsBroken)
                 {
-                    SetDetailStatus(view, MonitorLogic.NoSessionText, true);
+                    SetDetailStatus(view, MonitorLogic.NoSessionText, Theme.Danger);
                     return;
                 }
                 if (_isRunning())
                 {
-                    SetDetailStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), true);
+                    SetDetailStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), Theme.Danger);
                     return;
                 }
-                SetDetailStatus(view, MonitorLogic.LoadingText, false);
+                SetDetailStatus(view, MonitorLogic.LoadingText, null);
                 try
                 {
                     var table = new QueryTable();
@@ -495,7 +496,7 @@ namespace MyPlugin
                             gridRows.Add(new ResultGridRow(i + 1, table.Rows[i]));
                         view.DetailGrid.Show(view.DetailColumns, gridRows);
                     }
-                    SetDetailStatus(view, MonitorLogic.DetailRowsText(table.Rows.Count), false);
+                    SetDetailStatus(view, MonitorLogic.DetailRowsText(table.Rows.Count), null);
                 }
                 catch (OperationCanceledException)
                 {
@@ -506,7 +507,7 @@ namespace MyPlugin
                     if (_closed || work.IsCancellationRequested)
                         return;
                     var reason = DbSession.DescribeError(ex);
-                    SetDetailStatus(view, _provider.IsPermissionDenied(ex) ? MonitorLogic.PermissionDeniedText(view.Section, reason) : MonitorLogic.FailedText(reason), true);
+                    SetDetailStatus(view, _provider.IsPermissionDenied(ex) ? MonitorLogic.PermissionDeniedText(view.Section, reason) : MonitorLogic.FailedText(reason), Theme.Danger);
                 }
             }
             catch (Exception)
@@ -537,11 +538,11 @@ namespace MyPlugin
             return values;
         }
 
-        private static void SetDetailStatus(SectionView view, string text, bool error)
+        private static void SetDetailStatus(SectionView view, string text, Brush color)
         {
             view.DetailStatus.Text = text ?? "";
-            if (error)
-                view.DetailStatus.Foreground = Theme.Danger;
+            if (color != null)
+                view.DetailStatus.Foreground = color;
             else
                 view.DetailStatus.SetResourceReference(TextBlock.ForegroundProperty, Theme.SecondaryText);
         }
@@ -574,18 +575,33 @@ namespace MyPlugin
                 var session = _session();
                 if (session == null || !session.IsOpen || session.IsBroken)
                 {
-                    SetStatus(view, MonitorLogic.NoSessionText, true);
+                    SetStatus(view, MonitorLogic.NoSessionText, Theme.Danger);
                     return;
                 }
                 if (_isRunning())
                 {
-                    SetStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), true);
+                    SetStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), Theme.Danger);
                     return;
                 }
                 view.Loading = true;
-                SetStatus(view, MonitorLogic.LoadingText, false);
+                SetStatus(view, MonitorLogic.LoadingText, null);
                 try
                 {
+                    // 필요 조건(확장 설치·버전)을 먼저 본다 — 충족되지 않으면 조회하지 않고 설치 안내(경고색, 오류 아님)
+                    foreach (var requirement in view.Section.Requirements)
+                    {
+                        var check = await session.QueryTableAsync(requirement.Sql, 1, _closing.Token);
+                        if (_closed)
+                            return;
+                        if (!MonitorLogic.RequirementMet(check))
+                        {
+                            view.Columns = new List<ResultColumn>();
+                            view.Grid.Show(view.Columns, new ObservableCollection<ResultGridRow>());
+                            view.Loaded = true;
+                            SetStatus(view, MonitorLogic.RequirementMissingText(requirement), Theme.Warning);
+                            return;
+                        }
+                    }
                     var table = await session.QueryTableAsync(view.Section.Sql, MonitorLogic.MaxRows, _closing.Token);
                     if (_closed)
                         return;
@@ -596,7 +612,7 @@ namespace MyPlugin
                     view.Grid.Show(view.Columns, rows);
                     ShowDashboard(view, table);
                     view.Loaded = true;
-                    SetStatus(view, MonitorLogic.RefreshedText(DateTime.Now, table.Rows.Count), false);
+                    SetStatus(view, MonitorLogic.RefreshedText(DateTime.Now, table.Rows.Count), null);
                 }
                 catch (OperationCanceledException)
                 {
@@ -607,7 +623,7 @@ namespace MyPlugin
                     if (_closed)
                         return;
                     var reason = DbSession.DescribeError(ex);
-                    SetStatus(view, _provider.IsPermissionDenied(ex) ? MonitorLogic.PermissionDeniedText(view.Section, reason) : MonitorLogic.FailedText(reason), true);
+                    SetStatus(view, _provider.IsPermissionDenied(ex) ? MonitorLogic.PermissionDeniedText(view.Section, reason) : MonitorLogic.FailedText(reason), Theme.Danger);
                 }
                 finally
                 {
@@ -732,11 +748,12 @@ namespace MyPlugin
             return geometry;
         }
 
-        private static void SetStatus(SectionView view, string text, bool error)
+        /// <summary>상태 글. color가 null이면 보조 글자색, 아니면 그 색(오류 Danger · 설치 필요 Warning).</summary>
+        private static void SetStatus(SectionView view, string text, Brush color)
         {
             view.Status.Text = text ?? "";
-            if (error)
-                view.Status.Foreground = Theme.Danger;
+            if (color != null)
+                view.Status.Foreground = color;
             else
                 view.Status.SetResourceReference(TextBlock.ForegroundProperty, Theme.SecondaryText);
         }

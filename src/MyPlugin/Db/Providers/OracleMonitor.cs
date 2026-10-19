@@ -11,7 +11,8 @@ namespace MyPlugin
     ///   임시는 V$SORT_SEGMENT.USED_BLOCKS × 블록 크기(V$TEMP_SPACE_HEADER는 고수위라 과장). 최대는 자동 확장이면 MAXBYTES.
     ///   표 위 대시보드에 테이블스페이스마다 사용률 도넛(사용(MB) / 크기(MB)). 행을 누르면 아래에 데이터 파일·세그먼트(DBA_SEGMENTS) 상세.
     /// - 리두 로그: V$LOG 그룹마다 멤버 파일(V$LOGFILE).
-    /// - 잠금: V$LOCK의 TM·TX 가운데 막고 있거나(BLOCK) 기다리는(REQUEST) 것만. 객체는 ALL_OBJECTS로 푼다(권한 밖이면 빈 칸).
+    /// - 잠금: V$LOCK의 TM·TX 가운데 막고 있거나(BLOCK) 기다리는(REQUEST) 것만. 객체는 ALL_OBJECTS로 푼다 — TM은 ID1, 행 잠금을 기다리는 TX는
+    ///   V$SESSION.ROW_WAIT_OBJ#(권한 밖이거나 막는 쪽 TX면 빈 칸).
     /// - 느린 SQL: V$SQLAREA 누적 소요 상위 50(SQL_ID 상세: 전문·DISPLAY_CURSOR·자식 커서). 대기 이벤트: V$SYSTEM_EVENT(Idle 제외)와 지금 대기 세션 수.
     /// - 세션: V$SESSION의 사용자 세션. 잠금·세션 행을 누르면 SQL 전문(V$SQL)·실행 계획(DBMS_XPLAN.DISPLAY_CURSOR)·세션 통계,
     ///   오른쪽 메뉴 [세션 종료…](ALTER SYSTEM KILL SESSION … IMMEDIATE, 확인 체크 뒤).
@@ -144,10 +145,12 @@ namespace MyPlugin
                 + " s.BLOCKING_SESSION AS \"막는 세션\", l.TYPE AS \"잠금 종류\","
                 + " DECODE(l.LMODE, " + LockMode + ", TO_CHAR(l.LMODE)) AS \"보유 모드\","
                 + " DECODE(l.REQUEST, " + LockMode + ", TO_CHAR(l.REQUEST)) AS \"요청 모드\","
-                + " o.OWNER || '.' || o.OBJECT_NAME AS \"객체\", l.CTIME AS \"지속(초)\","
+                // Oracle은 NULL을 빈 글자로 잇는다 — 객체가 없으면 '.'이 아니라 빈 칸이 되게 CASE로 감싼다
+                + " CASE WHEN o.OBJECT_NAME IS NOT NULL THEN o.OWNER || '.' || o.OBJECT_NAME END AS \"객체\", l.CTIME AS \"지속(초)\","
                 + " s.SQL_ID AS \"SQL_ID\", s.PROGRAM AS \"프로그램\", s.MACHINE AS \"머신\""
                 + " FROM V$LOCK l JOIN V$SESSION s ON s.SID = l.SID"
-                + " LEFT JOIN ALL_OBJECTS o ON l.TYPE = 'TM' AND o.OBJECT_ID = l.ID1"
+                // TM은 ID1이 객체 번호. 행 잠금(TX)을 기다리는 세션은 V$SESSION.ROW_WAIT_OBJ#가 기다리는 테이블(막는 쪽 TX는 객체를 알 수 없어 빈 칸)
+                + " LEFT JOIN ALL_OBJECTS o ON o.OBJECT_ID = CASE WHEN l.TYPE = 'TM' THEN l.ID1 WHEN l.REQUEST > 0 AND s.ROW_WAIT_OBJ# > 0 THEN s.ROW_WAIT_OBJ# END"
                 + " WHERE l.TYPE IN ('TM', 'TX') AND (l.BLOCK > 0 OR l.REQUEST > 0)"
                 + " ORDER BY l.BLOCK DESC, l.CTIME DESC",
                 null, "SID", SessionDetails, SessionActions),

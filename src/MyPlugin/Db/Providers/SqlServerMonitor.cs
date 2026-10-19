@@ -22,14 +22,16 @@ namespace MyPlugin
 
         /// <summary>
         /// 세션 상세: 실행 중이면 그 요청의 문장(sys.dm_exec_requests.sql_handle), 쉬면 마지막 문장(sys.dm_exec_connections.most_recent_sql_handle).
+        /// MARS 세션은 dm_exec_connections에 물리 연결 1행 + 논리 연결 행들이 있어(물리 행의 핸들은 0) 한 문장만 고른다 — 요청이 먼저, 그다음 최근에 읽은 연결.
         /// 실행 계획은 실행 중인 요청의 plan_handle에서(sys.dm_exec_text_query_plan, XML 글). 쉬는 세션은 비어 있다.
         /// </summary>
         private static readonly IReadOnlyList<MonitorDetail> SessionDetails = new[]
         {
-            new MonitorDetail("sql", "SQL 전문", "sys.dm_exec_sql_text — 실행 중이면 그 요청의 문장, 쉬면 이 연결의 마지막 문장.",
-                "SELECT t.text FROM sys.dm_exec_connections c"
-                + " CROSS APPLY sys.dm_exec_sql_text(COALESCE((SELECT TOP (1) r.sql_handle FROM sys.dm_exec_requests r WHERE r.session_id = c.session_id), c.most_recent_sql_handle)) t"
-                + " WHERE c.session_id = CONVERT(int, @name)", true),
+            new MonitorDetail("sql", "SQL 전문", "sys.dm_exec_sql_text — 실행 중이면 그 요청의 문장, 쉬면 이 세션의 마지막 문장.",
+                "SELECT TOP (1) t.text FROM ("
+                + " SELECT r.sql_handle AS h, 0 AS src, r.start_time AS at FROM sys.dm_exec_requests r WHERE r.session_id = CONVERT(int, @name)"
+                + " UNION ALL SELECT c.most_recent_sql_handle, 1, c.last_read FROM sys.dm_exec_connections c WHERE c.session_id = CONVERT(int, @name)"
+                + ") h CROSS APPLY sys.dm_exec_sql_text(h.h) t WHERE t.text IS NOT NULL ORDER BY h.src, h.at DESC", true),
             new MonitorDetail("plan", "실행 계획", "sys.dm_exec_text_query_plan — 실행 중인 요청의 계획(XML). 쉬는 세션은 비어 있다.",
                 "SELECT p.query_plan FROM sys.dm_exec_requests r"
                 + " CROSS APPLY sys.dm_exec_text_query_plan(r.plan_handle, r.statement_start_offset, r.statement_end_offset) p"
@@ -64,7 +66,9 @@ namespace MyPlugin
             new MonitorSection(MonitorSections.Info, "기본 정보",
                 "@@SERVERNAME · SERVERPROPERTY · sys.databases(현재 DB) · sys.dm_exec_sessions 연결 수. 시작 시각은 tempdb 생성 시각.", Privilege,
                 "SELECT [항목], [값] FROM ("
-                + " SELECT 1 AS ord, N'서버' AS [항목], CONVERT(nvarchar(256), @@SERVERNAME) AS [값]"
+                // 값 열의 정렬 규칙을 첫 가지에서 정한다. SERVERPROPERTY는 서버 정렬, sys.databases 열은 Latin1_General_CI_AS_KS_WS라
+                // 그대로 UNION ALL 하면 "Cannot resolve collation conflict"(실측: 2022 SQL_Latin1_General_CP1_CI_AS · 2008 Korean_Wansung_CI_AS)
+                + " SELECT 1 AS ord, N'서버' AS [항목], CONVERT(nvarchar(256), @@SERVERNAME) COLLATE DATABASE_DEFAULT AS [값]"
                 + " UNION ALL SELECT 2, N'버전', CONVERT(nvarchar(128), SERVERPROPERTY('ProductVersion')) + N' ' + CONVERT(nvarchar(128), SERVERPROPERTY('ProductLevel'))"
                 + " UNION ALL SELECT 3, N'에디션', CONVERT(nvarchar(256), SERVERPROPERTY('Edition'))"
                 + " UNION ALL SELECT 4, N'시작 시각', CONVERT(nvarchar(30), (SELECT create_date FROM sys.databases WHERE name = N'tempdb'), 120)"

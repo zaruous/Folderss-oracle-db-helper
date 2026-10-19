@@ -5,7 +5,7 @@ namespace MyPlugin
     /// <summary>
     /// PostgreSQL 성능 모니터 섹션(pg_catalog · pg_stat_*). PostgreSQL 10 이상(pg_current_wal_lsn·backend_type·pg_blocking_pids).
     /// - 권한이 없어도 대부분 오류 없이 돌지만, 다른 사용자 세션의 query는 "&lt;insufficient privilege&gt;"로 보이고(pg_read_all_stats 역할이 있어야 보임)
-    ///   pg_tablespace_size·pg_database_size는 권한이 없으면 42501이다.
+    ///   pg_tablespace_size·pg_database_size는 권한이 없으면 42501이라 허용 조건(<see cref="SizeAllowed"/>)일 때만 불러 그 행의 크기만 비운다.
     /// - 기본 정보: version()·current_database()·서버 주소·시작 시각·복구 여부·DB 크기·연결 수/max_connections.
     /// - 테이블스페이스: pg_tablespace와 크기·위치. 남은 용량은 파일 시스템이 정하므로 여기서는 알 수 없다. 행을 누르면 그 안의 객체(pg_class) 상세.
     /// - 데이터베이스(PostgreSQL에만): pg_database마다 크기·연결 수.
@@ -75,11 +75,15 @@ namespace MyPlugin
                 + ") t ORDER BY ord"),
 
             new MonitorSection(MonitorSections.Storage, "테이블스페이스",
-                "pg_tablespace · pg_tablespace_size(). 남은 용량은 파일 시스템이 정하므로 서버 OS에서 확인한다.", Privilege,
+                "pg_tablespace · pg_tablespace_size(). 남은 용량은 파일 시스템이 정하므로 서버 OS에서 확인한다. 크기를 볼 권한이 없는 테이블스페이스(CREATE 권한·pg_read_all_stats가 없고 이 DB의 기본도 아님)는 크기를 비운다.", Privilege,
                 "SELECT t.spcname AS \"테이블스페이스\", pg_get_userbyid(t.spcowner) AS \"소유자\","
                 + " COALESCE(NULLIF(pg_tablespace_location(t.oid), ''), '(데이터 폴더)') AS \"위치\","
-                + " round(pg_tablespace_size(t.oid) / 1048576.0) AS \"크기(MB)\", pg_size_pretty(pg_tablespace_size(t.oid)) AS \"크기\""
-                + " FROM pg_tablespace t ORDER BY pg_tablespace_size(t.oid) DESC, t.spcname",
+                + " round(t.bytes / 1048576.0) AS \"크기(MB)\", COALESCE(pg_size_pretty(t.bytes), '(권한 필요)') AS \"크기\""
+                // pg_tablespace_size는 볼 권한이 없으면 42501로 문장 전체를 실패시킨다(일반 계정은 pg_global에서) — 허용 조건일 때만 잰다
+                + " FROM (SELECT p.oid, p.spcname, p.spcowner, CASE WHEN " + SizeAllowed("has_tablespace_privilege(p.oid, 'CREATE')")
+                + " OR p.oid = (SELECT d.dattablespace FROM pg_database d WHERE d.datname = current_database())"
+                + " THEN pg_tablespace_size(p.oid) END AS bytes FROM pg_tablespace p) t"
+                + " ORDER BY t.bytes DESC NULLS LAST, t.spcname",
                 null, "테이블스페이스", new[]
                 {
                     new MonitorDetail("relations", "객체", "pg_class — 이 테이블스페이스에 저장된 테이블·인덱스·TOAST(DB 기본 테이블스페이스면 reltablespace = 0인 것), 큰 것부터 200개(현재 DB만).",
@@ -174,14 +178,27 @@ namespace MyPlugin
                 + " GROUP BY a.wait_event_type, a.wait_event ORDER BY count(*) DESC, 1, 2"),
 
             new MonitorSection(Databases, "데이터베이스",
-                "pg_database마다 pg_database_size()와 연결 수(이 서버의 모든 DB).", Privilege,
+                "pg_database마다 pg_database_size()와 연결 수(이 서버의 모든 DB). CONNECT 권한이 없는 DB는 크기를 비운다(pg_read_all_stats면 모두 보임).", Privilege,
                 "SELECT d.datname AS \"데이터베이스\", pg_get_userbyid(d.datdba) AS \"소유자\", pg_encoding_to_char(d.encoding) AS \"인코딩\","
-                + " round(pg_database_size(d.oid) / 1048576.0) AS \"크기(MB)\", pg_size_pretty(pg_database_size(d.oid)) AS \"크기\","
+                + " round(d.bytes / 1048576.0) AS \"크기(MB)\", COALESCE(pg_size_pretty(d.bytes), '(권한 필요)') AS \"크기\","
                 + " (SELECT count(*) FROM pg_stat_activity a WHERE a.datid = d.oid) AS \"연결 수\","
                 + " CASE WHEN d.datallowconn THEN '예' ELSE '아니요' END AS \"접속 허용\""
-                + " FROM pg_database d WHERE NOT d.datistemplate ORDER BY pg_database_size(d.oid) DESC, d.datname")
+                // pg_database_size도 CONNECT 권한이 없는 DB가 하나라도 있으면 42501로 문장 전체가 실패한다
+                + " FROM (SELECT p.oid, p.datname, p.datdba, p.encoding, p.datallowconn,"
+                + " CASE WHEN " + SizeAllowed("has_database_privilege(p.oid, 'CONNECT')") + " THEN pg_database_size(p.oid) END AS bytes"
+                + " FROM pg_database p WHERE NOT p.datistemplate) d"
+                + " ORDER BY d.bytes DESC NULLS LAST, d.datname")
         };
 
         public IReadOnlyList<MonitorSection> Sections { get { return All; } }
+
+        /// <summary>
+        /// 크기 함수(pg_tablespace_size·pg_database_size)를 불러도 되는 조건: 객체 권한(CREATE·CONNECT) 또는 pg_read_all_stats의 권한.
+        /// 서버가 함수 안에서 같은 조건을 검사해 실패하면 42501로 문장 전체가 실패하므로, 조건이 맞을 때만 CASE로 부른다(수퍼유저는 모두 참).
+        /// </summary>
+        private static string SizeAllowed(string objectPrivilege)
+        {
+            return "(" + objectPrivilege + " OR pg_has_role('pg_read_all_stats', 'USAGE'))";
+        }
     }
 }

@@ -120,7 +120,7 @@ namespace MyPlugin.Tests
             Assert.Contains("pg_stat_archiver", sections[MonitorSections.Log].Sql);
             Assert.Contains("pg_blocking_pids(a.pid)", sections[MonitorSections.Locks].Sql);
             Assert.Contains("backend_type = 'client backend'", sections[MonitorSections.Sessions].Sql);
-            Assert.Contains("pg_database_size(d.oid)", sections[PostgresMonitor.Databases].Sql);
+            Assert.Contains("pg_database_size(p.oid)", sections[PostgresMonitor.Databases].Sql);
         }
 
         [Fact]
@@ -629,6 +629,63 @@ namespace MyPlugin.Tests
             Assert.Null(MonitorLogic.MoreChartsText(12, 12));
             Assert.Equal("외 3개는 표에서", MonitorLogic.MoreChartsText(15, 12));
             Assert.Equal(12, MonitorLogic.MaxCharts);
+        }
+
+        // ---------- 실측(2026-10-19)에서 찾은 것 ----------
+
+        /// <summary>SQL Server 기본 정보: SERVERPROPERTY(서버 정렬)와 sys.databases 열(Latin1_General_CI_AS_KS_WS)을 UNION ALL 하면 정렬 충돌 — 첫 가지에서 값 열의 정렬을 정한다.</summary>
+        [Fact]
+        public void SqlServer_Info_PinsValueCollation_InFirstBranch()
+        {
+            var sql = DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.Info).Sql;
+            var collate = sql.IndexOf("COLLATE DATABASE_DEFAULT AS [값]", StringComparison.Ordinal);
+            Assert.True(collate > 0);
+            Assert.True(collate < sql.IndexOf("UNION ALL", StringComparison.Ordinal));
+        }
+
+        /// <summary>SQL Server 세션 SQL 전문: MARS 세션은 dm_exec_connections에 행이 여럿이라 같은 문장이 행 수만큼 반복됐다 — 한 문장만, 요청 먼저.</summary>
+        [Fact]
+        public void SqlServer_SessionSql_PicksOneStatement_RequestFirst()
+        {
+            foreach (var id in new[] { MonitorSections.Sessions, MonitorSections.Locks })
+            {
+                var sql = DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == id).Details.First(d => d.Id == "sql").Sql;
+                Assert.StartsWith("SELECT TOP (1) t.text FROM (", sql);
+                Assert.Contains("sys.dm_exec_requests r WHERE r.session_id = CONVERT(int, @name)", sql);
+                Assert.Contains("sys.dm_exec_connections c WHERE c.session_id = CONVERT(int, @name)", sql);
+                Assert.Contains("WHERE t.text IS NOT NULL", sql);
+                Assert.EndsWith("ORDER BY h.src, h.at DESC", sql);
+            }
+        }
+
+        /// <summary>Oracle 잠금 객체: NULL || '.' || NULL은 '.'이라 객체가 없는 TX 행에 '.'이 보였다. 행 잠금을 기다리는 TX는 ROW_WAIT_OBJ#의 테이블.</summary>
+        [Fact]
+        public void Oracle_Locks_ObjectBlankWhenUnknown_WaitingTxShowsTable()
+        {
+            var sql = DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Locks).Sql;
+            Assert.Contains("CASE WHEN o.OBJECT_NAME IS NOT NULL THEN o.OWNER || '.' || o.OBJECT_NAME END AS \"객체\"", sql);
+            Assert.Contains("WHEN l.TYPE = 'TM' THEN l.ID1", sql);
+            Assert.Contains("WHEN l.REQUEST > 0 AND s.ROW_WAIT_OBJ# > 0 THEN s.ROW_WAIT_OBJ#", sql);
+        }
+
+        /// <summary>
+        /// PostgreSQL 크기 함수는 볼 권한이 없으면 42501로 문장 전체를 실패시킨다(일반 계정은 pg_global 때문에 테이블스페이스 섹션을 통째로 못 봤다).
+        /// 서버의 허용 조건일 때만 한 번 부르고, 아니면 그 행의 크기만 비운다.
+        /// </summary>
+        [Fact]
+        public void Postgres_SizeFunctions_OnlyWhenAllowed_RowStaysVisible()
+        {
+            var sections = DbProviders.Postgres.Monitor.Sections.ToDictionary(s => s.Id);
+            var storage = sections[MonitorSections.Storage].Sql;
+            Assert.Equal(1, Regex.Matches(storage, @"pg_tablespace_size\(").Count);
+            Assert.Contains("CASE WHEN (has_tablespace_privilege(p.oid, 'CREATE') OR pg_has_role('pg_read_all_stats', 'USAGE'))"
+                + " OR p.oid = (SELECT d.dattablespace FROM pg_database d WHERE d.datname = current_database()) THEN pg_tablespace_size(p.oid) END", storage);
+            Assert.Contains("ORDER BY t.bytes DESC NULLS LAST", storage);
+            var databases = sections[PostgresMonitor.Databases].Sql;
+            Assert.Equal(1, Regex.Matches(databases, @"pg_database_size\(").Count);
+            Assert.Contains("CASE WHEN (has_database_privilege(p.oid, 'CONNECT') OR pg_has_role('pg_read_all_stats', 'USAGE')) THEN pg_database_size(p.oid) END", databases);
+            foreach (var sql in new[] { storage, databases })
+                Assert.Contains("COALESCE(pg_size_pretty(", sql);
         }
 
         /// <summary>섹션 SQL을 QueryTableAsync로 읽는 흐름(SQLite): 열 이름이 별칭 그대로이고 MaxRows만큼만 읽는다.</summary>

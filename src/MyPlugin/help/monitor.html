@@ -39,8 +39,8 @@
 <h2>필요 권한</h2>
 <table>
 <tr><th>DBMS</th><th>권한</th><th>없을 때</th></tr>
-<tr><td>Oracle</td><td><code>SELECT_CATALOG_ROLE</code>(또는 V$DATABASE·V$INSTANCE·V$SESSION·V$LOCK·V$LOG·V$LOGFILE·V$LOG_HISTORY·V$TEMP_SPACE_HEADER·DBA_TABLESPACES·DBA_DATA_FILES·DBA_TEMP_FILES·DBA_FREE_SPACE SELECT)</td><td>ORA-00942(뷰가 안 보임) — 섹션마다 "권한이 없어 가져오지 못했습니다". 잠금의 객체 이름은 ALL_OBJECTS라 권한 밖 객체는 빈 칸</td></tr>
-<tr><td>PostgreSQL</td><td><code>pg_read_all_stats</code> 역할(또는 superuser)</td><td>대부분 오류 없이 돌지만 다른 사용자 세션의 SQL은 <code>&lt;insufficient privilege&gt;</code>, 테이블스페이스·데이터베이스 크기는 42501</td></tr>
+<tr><td>Oracle</td><td><code>SELECT_CATALOG_ROLE</code>(또는 V$DATABASE·V$INSTANCE·V$SESSION·V$LOCK·V$LOG·V$LOGFILE·V$LOG_HISTORY·V$TEMP_SPACE_HEADER·DBA_TABLESPACES·DBA_DATA_FILES·DBA_TEMP_FILES·DBA_FREE_SPACE SELECT)</td><td>ORA-00942(뷰가 안 보임) — 섹션마다 "권한이 없어 가져오지 못했습니다". 잠금의 객체 이름은 ALL_OBJECTS라 권한 밖 객체는 빈 칸(행 잠금을 기다리는 세션은 기다리는 테이블, 막는 쪽은 빈 칸)</td></tr>
+<tr><td>PostgreSQL</td><td><code>pg_read_all_stats</code> 역할(또는 superuser)</td><td>대부분 오류 없이 돌지만 다른 사용자 세션의 SQL은 <code>&lt;insufficient privilege&gt;</code>. 볼 권한이 없는 테이블스페이스(CREATE 권한이 없고 이 DB의 기본도 아님)·데이터베이스(CONNECT 권한 없음)는 크기만 "(권한 필요)"로 비고 나머지 행은 보입니다</td></tr>
 <tr><td>SQL Server</td><td><code>VIEW SERVER STATE</code>(세션·잠금·트랜잭션 로그), msdb 읽기(백업 정보)</td><td>세션·잠금은 자기 세션만 보이거나 오류 300, 트랜잭션 로그는 오류 300·916</td></tr>
 </table>
 <div class="note">운영 DB의 계정에는 조회 권한만 주세요. 모니터는 SELECT만 실행하지만, 같은 세션으로 SQL 탭의 문장도 실행됩니다.</div>

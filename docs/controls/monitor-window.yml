@@ -63,6 +63,8 @@ features:
     description: >-
       IDbProvider.IsPermissionDenied(Oracle ORA-00942 · 01031, PostgreSQL 42501, SQL Server 229 · 230 · 297 · 300 · 916)면
       섹션의 필요 권한과 함께 "권한이 없어 가져오지 못했습니다"로 보인다. 섹션마다 따로 실패한다.
+      PostgreSQL 크기 함수(pg_tablespace_size · pg_database_size)는 서버의 허용 조건(CREATE · CONNECT 권한, pg_read_all_stats, 현재 DB의 기본 테이블스페이스)일 때만
+      불러, 볼 수 없는 행은 크기만 "(권한 필요)"로 비우고 섹션은 실패하지 않는다(일반 계정이 pg_global 때문에 테이블스페이스 섹션 전체를 못 보던 문제).
 keyboard:
   - keys: F5
     action: 보고 있는 섹션 새로 고침.
@@ -80,7 +82,11 @@ states:
   - 가져오는 중 → "가져오는 중…". 끝나면 "갱신 HH:mm:ss · N행 · 0.8초"(2,000행이면 "앞 2,000행 · 더 있을 수 있음").
 limits:
   - 모니터 전용 세션은 DB 쪽에서 세션 하나를 더 쓴다(세션 목록에 이 창의 세션도 보인다). 저장된 비밀번호가 없으면 SQL 탭 연결과 별도로 한 번 더 묻는다.
-  - 섹션 SQL은 실제 DBMS 없이 모양만 시험한다(V$ · pg_catalog · sys.dm_*는 SQLite로 흉내 낼 수 없다).
+  - 단위 테스트는 섹션 SQL의 모양만 본다(V$ · pg_catalog · sys.dm_*는 SQLite로 흉내 낼 수 없다). 2026-10-19에 Folderss 1.8.8 안에서 Oracle 11.2 XE · 19.9,
+    PostgreSQL 16, SQL Server 2022에 대고 모든 섹션 · 상세 · 실제 잠금 · 세션 종료를 실측했다. SQL Server 2008 R2 이하는 로그 · 잠금 · 세션 · 느린 SQL이
+    실패한다(2012부터 있는 DMV · 열).
+  - SQL Server 세션의 SQL 전문은 한 문장만 보인다. MARS 연결은 sys.dm_exec_connections에 행이 여럿이라(물리 1 + 논리) 요청 → 최근에 읽은 연결 순으로 하나를 고른다.
+  - Oracle 잠금의 객체는 TM이면 그 테이블, 행 잠금을 기다리는 TX면 V$SESSION.ROW_WAIT_OBJ#의 테이블이다. 막는 쪽 TX는 빈 칸(어느 행을 잡았는지 V$로 알 수 없다).
   - PostgreSQL 테이블스페이스는 남은 용량을 알 수 없다(파일 시스템이 한도). SQL Server 저장 공간은 현재 DB의 파일만.
   - 사용률 도넛 말고 이력 그래프 · 임계값 알림은 없다. 도넛의 문턱(80 · 90%)은 고정이다.
   - SQL Server 상세는 파일이 아니라 파일 그룹 단위다(한 파일 그룹에 파일이 여럿이면 같은 객체 목록). PostgreSQL 상세는 현재 DB의 객체만.

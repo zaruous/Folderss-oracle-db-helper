@@ -30,6 +30,11 @@ features:
       섹션에 MonitorUsageChart(이름·사용·전체 열)가 있으면 표 위에 행마다 사용률 도넛(가운데 %, 아래 이름과 "사용 / 전체").
       80% 이상 경고색, 90% 이상 위험색, 최대 12개(나머지는 "외 N개는 표에서"). Oracle 테이블스페이스 · SQL Server 데이터 파일에 있고,
       한도가 없는 PostgreSQL 테이블스페이스에는 없다. WPF Path로 그려 차트 라이브러리가 없다.
+  - name: 행 상세 목록
+    description: >-
+      섹션에 KeyColumn·Details가 있으면(저장 공간) 표 아래 분할선 밑에 상세 영역. 표의 행이나 도넛을 누르면 그 행의 키를 바인드(name)한
+      상세 조회를 실행해 보인다(이전 상세 조회는 취소). 상세가 여럿이면 고르는 버튼(Oracle 데이터 파일 · 세그먼트). PostgreSQL은 객체(pg_class),
+      SQL Server는 파일 그룹의 객체(sys.allocation_units). 행 수는 SQL 안에서 200개로 제한.
   - name: 가져오기
     description: >-
       섹션은 처음 고를 때 가져오고, [새로 고침] · 자동 새로 고침은 보고 있는 섹션만 다시 가져온다.
@@ -58,6 +63,8 @@ limits:
   - 섹션 SQL은 실제 DBMS 없이 모양만 시험한다(V$ · pg_catalog · sys.dm_*는 SQLite로 흉내 낼 수 없다).
   - PostgreSQL 테이블스페이스는 남은 용량을 알 수 없다(파일 시스템이 한도). SQL Server 저장 공간은 현재 DB의 파일만.
   - 사용률 도넛 말고 이력 그래프 · 임계값 알림은 없다. 도넛의 문턱(80 · 90%)은 고정이다.
+  - SQL Server 상세는 파일이 아니라 파일 그룹 단위다(한 파일 그룹에 파일이 여럿이면 같은 객체 목록). PostgreSQL 상세는 현재 DB의 객체만.
+  - 세션 · 잠금 등 다른 섹션에는 행 상세가 없다.
   - Oracle 11g 식별자 한도(30바이트) 때문에 한국어 별칭은 10자 이내.
 tests:
   - tests/MyPlugin.Tests/MonitorTests.cs

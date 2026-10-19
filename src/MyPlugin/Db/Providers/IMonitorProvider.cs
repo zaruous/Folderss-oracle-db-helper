@@ -55,10 +55,45 @@ namespace MyPlugin
         public string TotalColumn { get; }
     }
 
-    /// <summary>성능 모니터 섹션 하나: 제목·설명·필요 권한·조회 SQL(·사용률 차트).</summary>
+    /// <summary>
+    /// 섹션 표의 한 행을 눌렀을 때 아래에 보이는 상세 목록 하나(테이블스페이스의 데이터 파일·세그먼트 등).
+    /// 조회는 바인드 하나(이름 "name" — 공급자 방언대로 :name·@name)로 그 행의 키(<see cref="MonitorSection.KeyColumn"/> 값)를 받는다.
+    /// 결과 열 별칭이 머리글인 것은 섹션과 같다. 행 수는 SQL 안에서 제한한다(200행 정도).
+    /// </summary>
+    internal sealed class MonitorDetail
+    {
+        /// <summary>바인드 이름(접두 없이). 공급자 SQL은 :name 또는 @name으로 쓴다.</summary>
+        public const string KeyParameter = "name";
+
+        public MonitorDetail(string id, string title, string description, string sql)
+        {
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(sql))
+                throw new ArgumentException("상세 목록의 id·title·sql이 비었습니다.");
+            Id = id;
+            Title = title;
+            Description = description ?? "";
+            Sql = sql;
+        }
+
+        public string Id { get; }
+        public string Title { get; }
+        public string Description { get; }
+        public string Sql { get; }
+
+        /// <summary>키 값을 바인드한 조회.</summary>
+        public SqlQuery Query(string key)
+        {
+            var query = new SqlQuery { Sql = Sql };
+            query.Parameters.Add(new KeyValuePair<string, object>(KeyParameter, key ?? ""));
+            return query;
+        }
+    }
+
+    /// <summary>성능 모니터 섹션 하나: 제목·설명·필요 권한·조회 SQL(·사용률 차트·행 상세 목록).</summary>
     internal sealed class MonitorSection
     {
-        public MonitorSection(string id, string title, string description, string privilege, string sql, MonitorUsageChart chart = null)
+        public MonitorSection(string id, string title, string description, string privilege, string sql, MonitorUsageChart chart = null,
+            string keyColumn = null, IReadOnlyList<MonitorDetail> details = null)
         {
             if (string.IsNullOrWhiteSpace(id))
                 throw new ArgumentException("id가 비었습니다.", nameof(id));
@@ -72,6 +107,10 @@ namespace MyPlugin
             Privilege = privilege ?? "";
             Sql = sql;
             Chart = chart;
+            Details = details ?? Array.Empty<MonitorDetail>();
+            if (Details.Count > 0 && string.IsNullOrWhiteSpace(keyColumn))
+                throw new ArgumentException("상세 목록이 있으면 keyColumn이 있어야 합니다.", nameof(keyColumn));
+            KeyColumn = Details.Count > 0 ? keyColumn : null;
         }
 
         /// <summary>식별자(<see cref="MonitorSections"/> 또는 DBMS 고유). 소문자.</summary>
@@ -91,6 +130,12 @@ namespace MyPlugin
 
         /// <summary>표 위에 그릴 사용률 원형 차트. 없으면 null(표만).</summary>
         public MonitorUsageChart Chart { get; }
+
+        /// <summary>행의 키가 되는 결과 열 이름(상세 목록의 바인드 값). 상세 목록이 없으면 null.</summary>
+        public string KeyColumn { get; }
+
+        /// <summary>행을 눌렀을 때 아래에 보이는 상세 목록들(없으면 빈 목록). 여럿이면 고르는 버튼이 생긴다.</summary>
+        public IReadOnlyList<MonitorDetail> Details { get; }
     }
 
     /// <summary>섹션이 없는 공급자(Generic)용.</summary>

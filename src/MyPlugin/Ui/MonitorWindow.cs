@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Windows;
@@ -22,6 +23,8 @@ namespace MyPlugin
     /// - 권한 오류(<see cref="IDbProvider.IsPermissionDenied"/>)는 섹션의 필요 권한과 함께 보인다. 섹션마다 따로 실패한다.
     /// - 섹션에 <see cref="MonitorSection.Chart"/>가 있으면(테이블스페이스·데이터 파일) 표 위 대시보드에 행마다 사용률 도넛을 그린다
     ///   (80% 이상 경고색, 90% 이상 위험색, 최대 12개 — 나머지는 "외 N개는 표에서"). 코드로 그리는 Path라 차트 라이브러리는 없다.
+    /// - 섹션에 <see cref="MonitorSection.Details"/>가 있으면 표 아래 분할선 밑에 상세 영역: 표의 행(또는 도넛)을 누르면 그 행의 키
+    ///   (<see cref="MonitorSection.KeyColumn"/>)로 상세 조회(바인드 하나)를 실행해 보인다. 상세가 여럿이면 고르는 버튼. 이전 상세 조회는 취소한다.
     /// </summary>
     internal sealed class MonitorWindow
     {
@@ -223,13 +226,196 @@ namespace MyPlugin
                 DockPanel.SetDock(dashBorder, Dock.Top);
                 panel.Children.Add(dashBorder);
             }
-            view.Grid = new ResultGridView(all =>
+            view.Grid = CopyableGrid(() => view.Columns, () => view.Grid);
+            if (view.Section.Details.Count == 0)
             {
-                var rows = all ? view.Grid.RowsInViewOrder() : view.Grid.SelectedRows();
-                DialogKit.TryCopy(WorkspaceLogic.ToTsv(all ? view.Columns.Select(c => c.Name) : null, rows.Select(r => r.Values)));
-            }, text => DialogKit.TryCopy(text));
-            panel.Children.Add(view.Grid.View);
+                panel.Children.Add(view.Grid.View);
+                return panel;
+            }
+            // 표 아래 분할선, 그 아래 상세 영역(행을 누르면 채워진다)
+            view.Grid.View.SelectionChanged += (s, e) =>
+            {
+                var row = view.Grid.SelectedRows().FirstOrDefault();
+                if (row != null)
+                    ShowDetail(view, MonitorLogic.KeyOf(view.Columns, row.Values, view.Section.KeyColumn));
+            };
+            var split = new Grid();
+            split.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 80 });
+            split.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            split.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2, GridUnitType.Star), MinHeight = 80 });
+            split.Children.Add(view.Grid.View);
+            var splitter = new GridSplitter
+            {
+                Height = 5,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                ResizeDirection = GridResizeDirection.Rows,
+                ResizeBehavior = GridResizeBehavior.PreviousAndNext,
+                ShowsPreview = false,
+                Focusable = false
+            };
+            Theme.Background(splitter, Theme.SurfaceBackground);
+            Grid.SetRow(splitter, 1);
+            split.Children.Add(splitter);
+            var detail = DetailPanel(view);
+            Grid.SetRow(detail, 2);
+            split.Children.Add(detail);
+            panel.Children.Add(split);
             return panel;
+        }
+
+        private static ResultGridView CopyableGrid(Func<List<ResultColumn>> columns, Func<ResultGridView> self)
+        {
+            return new ResultGridView(all =>
+            {
+                var grid = self();
+                var rows = all ? grid.RowsInViewOrder() : grid.SelectedRows();
+                DialogKit.TryCopy(WorkspaceLogic.ToTsv(all ? columns().Select(c => c.Name) : null, rows.Select(r => r.Values)));
+            }, text => DialogKit.TryCopy(text));
+        }
+
+        // ================= 행 상세 목록 =================
+
+        private FrameworkElement DetailPanel(SectionView view)
+        {
+            var panel = new DockPanel();
+            var top = new DockPanel { Margin = new Thickness(8, 4, 8, 4) };
+            view.DetailStatus = Theme.Text("", Theme.SecondaryText);
+            view.DetailStatus.VerticalAlignment = VerticalAlignment.Center;
+            view.DetailStatus.TextWrapping = TextWrapping.Wrap;
+            view.DetailStatus.MaxWidth = 420;
+            view.DetailStatus.TextAlignment = TextAlignment.Right;
+            DockPanel.SetDock(view.DetailStatus, Dock.Right);
+            top.Children.Add(view.DetailStatus);
+            var left = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            view.DetailTitle = Theme.Text(MonitorLogic.DetailHintText, Theme.SecondaryText);
+            view.DetailTitle.VerticalAlignment = VerticalAlignment.Center;
+            view.DetailTitle.Margin = new Thickness(0, 0, 12, 0);
+            left.Children.Add(view.DetailTitle);
+            if (view.Section.Details.Count > 1)
+            {
+                for (var i = 0; i < view.Section.Details.Count; i++)
+                {
+                    var index = i;
+                    Border underline;
+                    var button = WorkspaceUi.SelectorButton(Theme.Text(view.Section.Details[i].Title), out underline);
+                    AutomationProperties.SetName(button, view.Section.Details[i].Title);
+                    button.Click += (s, e) =>
+                    {
+                        view.DetailIndex = index;
+                        SelectDetailButton(view);
+                        ShowDetail(view, view.DetailKey);
+                    };
+                    view.DetailButtons.Add(button);
+                    view.DetailUnderlines.Add(underline);
+                    left.Children.Add(button);
+                }
+                SelectDetailButton(view);
+            }
+            top.Children.Add(left);
+            var topBorder = new Border { Child = top, BorderThickness = new Thickness(0, 0, 0, 1) };
+            topBorder.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
+            Theme.Background(topBorder, Theme.SurfaceBackground);
+            DockPanel.SetDock(topBorder, Dock.Top);
+            panel.Children.Add(topBorder);
+            view.DetailGrid = CopyableGrid(() => view.DetailColumns, () => view.DetailGrid);
+            panel.Children.Add(view.DetailGrid.View);
+            return panel;
+        }
+
+        private static void SelectDetailButton(SectionView view)
+        {
+            for (var i = 0; i < view.DetailButtons.Count; i++)
+                WorkspaceUi.SetSelected(view.DetailButtons[i], view.DetailUnderlines[i], i == view.DetailIndex);
+        }
+
+        /// <summary>키(행의 키 열 값)로 지금 고른 상세 목록을 가져온다. 진행 중인 상세 조회는 취소한다.</summary>
+        private async void ShowDetail(SectionView view, string key)
+        {
+            try
+            {
+                if (_closed || view.DetailGrid == null || view.DetailIndex >= view.Section.Details.Count)
+                    return;
+                var detail = view.Section.Details[view.DetailIndex];
+                view.DetailKey = key;
+                if (view.DetailWork != null)
+                    view.DetailWork.Cancel();
+                var work = CancellationTokenSource.CreateLinkedTokenSource(_closing.Token);
+                view.DetailWork = work;
+                view.DetailTitle.Text = MonitorLogic.DetailTitleText(detail, key);
+                view.DetailTitle.SetResourceReference(TextBlock.ForegroundProperty, Theme.PrimaryText);
+                view.DetailTitle.ToolTip = detail.Description;
+                if (string.IsNullOrEmpty(key))
+                {
+                    view.DetailColumns = new List<ResultColumn>();
+                    view.DetailGrid.Show(view.DetailColumns, new ObservableCollection<ResultGridRow>());
+                    SetDetailStatus(view, "", false);
+                    return;
+                }
+                var session = _session();
+                if (session == null || !session.IsOpen || session.IsBroken)
+                {
+                    SetDetailStatus(view, MonitorLogic.NoSessionText, true);
+                    return;
+                }
+                if (_isRunning())
+                {
+                    SetDetailStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), true);
+                    return;
+                }
+                SetDetailStatus(view, MonitorLogic.LoadingText, false);
+                try
+                {
+                    var table = new QueryTable();
+                    var rows = await session.QueryAsync(detail.Query(key), record => ReadRow(record, table), work.Token);
+                    if (_closed || work.IsCancellationRequested)
+                        return;
+                    table.Rows.AddRange(rows);
+                    view.DetailColumns = MonitorLogic.Columns(table);
+                    var gridRows = new ObservableCollection<ResultGridRow>();
+                    for (var i = 0; i < table.Rows.Count; i++)
+                        gridRows.Add(new ResultGridRow(i + 1, table.Rows[i]));
+                    view.DetailGrid.Show(view.DetailColumns, gridRows);
+                    SetDetailStatus(view, MonitorLogic.DetailRowsText(table.Rows.Count), false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // 다른 행을 골랐거나 창을 닫았다
+                }
+                catch (Exception ex)
+                {
+                    if (_closed || work.IsCancellationRequested)
+                        return;
+                    var reason = DbSession.DescribeError(ex);
+                    SetDetailStatus(view, _provider.IsPermissionDenied(ex) ? MonitorLogic.PermissionDeniedText(view.Section, reason) : MonitorLogic.FailedText(reason), true);
+                }
+            }
+            catch (Exception)
+            {
+                // async void — 예외를 밖으로 내보내면 Folderss가 멈춘다
+            }
+        }
+
+        /// <summary>상세 조회의 한 행을 글자로. 첫 행에서 열 이름을 받아 둔다(행이 없으면 열도 없다).</summary>
+        private static string[] ReadRow(IDataRecord record, QueryTable table)
+        {
+            var count = record.FieldCount;
+            if (table.Columns.Count == 0)
+                for (var i = 0; i < count; i++)
+                    table.Columns.Add(record.GetName(i));
+            var values = new string[count];
+            for (var i = 0; i < count; i++)
+                values[i] = record.IsDBNull(i) ? null : ValueFormatter.Format(record.GetValue(i));
+            return values;
+        }
+
+        private static void SetDetailStatus(SectionView view, string text, bool error)
+        {
+            view.DetailStatus.Text = text ?? "";
+            if (error)
+                view.DetailStatus.Foreground = Theme.Danger;
+            else
+                view.DetailStatus.SetResourceReference(TextBlock.ForegroundProperty, Theme.SecondaryText);
         }
 
         private void Select(int index)
@@ -308,7 +494,7 @@ namespace MyPlugin
 
         // ================= 대시보드(사용률 도넛) =================
 
-        private static void ShowDashboard(SectionView view, QueryTable table)
+        private void ShowDashboard(SectionView view, QueryTable table)
         {
             if (view.Dashboard == null)
                 return;
@@ -320,7 +506,16 @@ namespace MyPlugin
                 return;
             }
             foreach (var slice in slices)
-                view.Dashboard.Children.Add(Donut(slice));
+            {
+                var donut = Donut(slice);
+                if (view.Section.Details.Count > 0)
+                {
+                    var key = slice.Name;
+                    donut.Cursor = Cursors.Hand;
+                    donut.MouseLeftButtonUp += (s, e) => ShowDetail(view, key);
+                }
+                view.Dashboard.Children.Add(donut);
+            }
             var more = MonitorLogic.MoreChartsText(table.Rows.Count, slices.Count);
             if (more != null)
             {
@@ -436,6 +631,16 @@ namespace MyPlugin
             public ResultGridView Grid { get; set; }
             /// <summary>사용률 도넛 줄(섹션에 Chart가 있을 때만). 조각이 없으면 숨긴다.</summary>
             public WrapPanel Dashboard { get; set; }
+            // 행 상세 영역(섹션에 Details가 있을 때만)
+            public ResultGridView DetailGrid { get; set; }
+            public List<ResultColumn> DetailColumns { get; set; } = new List<ResultColumn>();
+            public TextBlock DetailTitle { get; set; }
+            public TextBlock DetailStatus { get; set; }
+            public List<Button> DetailButtons { get; } = new List<Button>();
+            public List<Border> DetailUnderlines { get; } = new List<Border>();
+            public int DetailIndex { get; set; }
+            public string DetailKey { get; set; }
+            public CancellationTokenSource DetailWork { get; set; }
             public List<ResultColumn> Columns { get; set; } = new List<ResultColumn>();
             public bool Loaded { get; set; }
             public bool Loading { get; set; }

@@ -234,6 +234,100 @@ namespace MyPlugin.Tests
             Assert.Throws<ArgumentNullException>(() => MonitorLogic.Columns(null));
         }
 
+        // ---------- 행 상세 목록 ----------
+
+        [Fact]
+        public void StorageDetails_EveryProvider_KeyColumnInSql_DetailBindsName_ReadOnly()
+        {
+            foreach (var provider in Real)
+            {
+                var storage = provider.Monitor.Sections.First(s => s.Id == MonitorSections.Storage);
+                Assert.NotEmpty(storage.Details);
+                Assert.False(string.IsNullOrEmpty(storage.KeyColumn));
+                Assert.Contains("\"" + storage.KeyColumn + "\"", storage.Sql.Replace("[", "\"").Replace("]", "\""));
+                var marker = provider == DbProviders.SqlServer ? "@" + MonitorDetail.KeyParameter : ":" + MonitorDetail.KeyParameter;
+                foreach (var detail in storage.Details)
+                {
+                    Assert.Contains(marker, detail.Sql);
+                    Assert.False(string.IsNullOrWhiteSpace(detail.Title));
+                    Assert.False(string.IsNullOrWhiteSpace(detail.Description));
+                    var bare = Regex.Replace(detail.Sql, "'[^']*'", "''");
+                    foreach (var word in new[] { "INSERT ", "UPDATE ", "DELETE ", "DROP ", "ALTER ", "TRUNCATE ", "EXEC " })
+                        Assert.False(Regex.IsMatch(bare, @"\b" + word, RegexOptions.IgnoreCase), provider.Kind + " " + detail.Id + ": " + word);
+                    // 행 수 제한이 SQL 안에 있다
+                    Assert.Matches(@"ROWNUM <= 200|LIMIT 200|TOP \(200\)|ORDER BY 1", detail.Sql);
+                    var query = detail.Query("MES_DATA");
+                    Assert.Same(detail.Sql, query.Sql);
+                    Assert.Single(query.Parameters);
+                    Assert.Equal(MonitorDetail.KeyParameter, query.Parameters[0].Key);
+                    Assert.Equal("MES_DATA", query.Parameters[0].Value);
+                }
+                Assert.Equal(storage.Details.Count, storage.Details.Select(d => d.Id).Distinct().Count());
+            }
+            Assert.Equal(new[] { "files", "segments" }, DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Details.Select(d => d.Id));
+            Assert.Contains("DBA_SEGMENTS", DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Details[1].Sql);
+            Assert.Contains("reltablespace = 0", DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Details[0].Sql);
+            Assert.Contains("sys.allocation_units", DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Details[0].Sql);
+            // 다른 섹션에는 상세가 없다
+            foreach (var provider in Real)
+            foreach (var section in provider.Monitor.Sections.Where(s => s.Id != MonitorSections.Storage))
+            {
+                Assert.Empty(section.Details);
+                Assert.Null(section.KeyColumn);
+            }
+        }
+
+        [Fact]
+        public void MonitorSection_DetailsRequireKeyColumn_DetailRejectsBlank()
+        {
+            var detail = new MonitorDetail("d", "t", null, "SELECT 1 WHERE x = :name");
+            Assert.Equal("", detail.Description);
+            Assert.Throws<ArgumentException>(() => new MonitorSection("x", "t", "d", "p", "SELECT 1", null, null, new[] { detail }));
+            Assert.Throws<ArgumentException>(() => new MonitorSection("x", "t", "d", "p", "SELECT 1", null, " ", new[] { detail }));
+            var ok = new MonitorSection("x", "t", "d", "p", "SELECT 1", null, "K", new[] { detail });
+            Assert.Equal("K", ok.KeyColumn);
+            Assert.Single(ok.Details);
+            // 상세가 없으면 keyColumn은 버린다
+            Assert.Null(new MonitorSection("x", "t", "d", "p", "SELECT 1", null, "K").KeyColumn);
+            Assert.Throws<ArgumentException>(() => new MonitorDetail("", "t", "d", "SELECT 1"));
+            Assert.Throws<ArgumentException>(() => new MonitorDetail("d", "t", "d", " "));
+            Assert.Equal("", detail.Query(null).Parameters[0].Value);
+        }
+
+        [Fact]
+        public void KeyOf_DetailTexts()
+        {
+            var columns = new List<ResultColumn> { new ResultColumn { Name = "테이블스페이스" }, new ResultColumn { Name = "크기(MB)" } };
+            Assert.Equal("MES_DATA", MonitorLogic.KeyOf(columns, new[] { "MES_DATA", "100" }, "테이블스페이스"));
+            Assert.Null(MonitorLogic.KeyOf(columns, new[] { null, "100" }, "테이블스페이스"));
+            Assert.Null(MonitorLogic.KeyOf(columns, new[] { "MES_DATA" }, "크기(MB)"));
+            Assert.Null(MonitorLogic.KeyOf(columns, new[] { "MES_DATA", "100" }, "없는열"));
+            Assert.Null(MonitorLogic.KeyOf(null, new[] { "x" }, "테이블스페이스"));
+            Assert.Null(MonitorLogic.KeyOf(columns, null, "테이블스페이스"));
+            var detail = new MonitorDetail("files", "데이터 파일", "d", "SELECT 1 WHERE x = :name");
+            Assert.Equal("데이터 파일 — MES_DATA", MonitorLogic.DetailTitleText(detail, "MES_DATA"));
+            Assert.Equal("데이터 파일 — (없음)", MonitorLogic.DetailTitleText(detail, null));
+            Assert.Equal("상세 — X", MonitorLogic.DetailTitleText(null, "X"));
+            Assert.Equal("없음", MonitorLogic.DetailRowsText(0));
+            Assert.Equal("1,200행", MonitorLogic.DetailRowsText(1200));
+            Assert.Equal("표의 행이나 도넛을 누르면 상세 목록을 보입니다.", MonitorLogic.DetailHintText);
+        }
+
+        /// <summary>상세 조회 흐름(SQLite): 바인드 name으로 행을 걸러 QueryAsync로 읽는다.</summary>
+        [Fact]
+        public async System.Threading.Tasks.Task Detail_QueryAsync_BindsKey()
+        {
+            using (var connection = new SqliteConnection("Data Source=:memory:"))
+            using (var session = new DbSession(connection))
+            {
+                await session.OpenAsync();
+                var detail = new MonitorDetail("d", "t", "d", "SELECT 'f_' || :name AS \"파일\", 7 AS \"크기(MB)\" WHERE :name = 'MES_DATA'");
+                var rows = await session.QueryAsync(detail.Query("MES_DATA"), r => new[] { r.GetString(0), r.GetValue(1).ToString() });
+                Assert.Equal(new[] { "f_MES_DATA", "7" }, rows.Single());
+                Assert.Empty(await session.QueryAsync(detail.Query("OTHER"), r => r.GetString(0)));
+            }
+        }
+
         // ---------- 사용률 차트(대시보드) ----------
 
         [Fact]

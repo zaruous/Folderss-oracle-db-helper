@@ -7,7 +7,7 @@ namespace MyPlugin
     /// - sys.dm_exec_sessions·dm_exec_requests·dm_db_log_space_usage는 VIEW SERVER STATE가 없으면 자기 세션만 보이거나 오류 300·297.
     ///   msdb.dbo.backupset은 msdb 접근 권한이 없으면 916.
     /// - 기본 정보: @@SERVERNAME · SERVERPROPERTY · 현재 DB의 복구 모델·상태·호환성 수준 · 시작 시각(tempdb 생성 시각) · 연결 수.
-    /// - 데이터 파일: 현재 DB의 sys.database_files(FILEPROPERTY SpaceUsed) — 테이블스페이스에 해당. 로그 파일도 한 줄.
+    /// - 데이터 파일: 현재 DB의 sys.database_files(FILEPROPERTY SpaceUsed) — 테이블스페이스에 해당. 로그 파일도 한 줄. 행을 누르면 그 파일 그룹의 객체 상세.
     /// - 트랜잭션 로그: sys.dm_db_log_space_usage · log_reuse_wait_desc · 마지막 전체/로그 백업.
     /// - 잠금: blocking_session_id로 막히거나 막는 세션(요청 없이 트랜잭션만 연 채 막는 세션도).
     /// - 세션: sys.dm_exec_sessions의 사용자 세션.
@@ -48,7 +48,23 @@ namespace MyPlugin
                 + " f.physical_name AS [경로]"
                 + " FROM sys.database_files f LEFT JOIN sys.filegroups fg ON fg.data_space_id = f.data_space_id"
                 + " ORDER BY f.type, f.name",
-                new MonitorUsageChart("파일", "사용(MB)", "크기(MB)")),
+                new MonitorUsageChart("파일", "사용(MB)", "크기(MB)"),
+                "파일", new[]
+                {
+                    new MonitorDetail("objects", "객체", "sys.allocation_units — 이 파일이 속한 파일 그룹에 저장된 테이블·인덱스(파일 단위로는 나뉘지 않는다), 큰 것부터 200개. 로그 파일은 비어 있다.",
+                        "SELECT TOP (200) s.name + '.' + o.name AS [객체], o.type_desc AS [종류], ISNULL(i.name, N'(힙)') AS [인덱스],"
+                        + " CONVERT(decimal(18, 1), SUM(au.total_pages) * 8 / 1024.0) AS [크기(MB)],"
+                        + " CONVERT(decimal(18, 1), SUM(au.used_pages) * 8 / 1024.0) AS [사용(MB)]"
+                        + " FROM sys.database_files f"
+                        + " JOIN sys.allocation_units au ON au.data_space_id = f.data_space_id"
+                        + " JOIN sys.partitions p ON (au.type IN (1, 3) AND p.hobt_id = au.container_id) OR (au.type = 2 AND p.partition_id = au.container_id)"
+                        + " JOIN sys.objects o ON o.object_id = p.object_id"
+                        + " JOIN sys.schemas s ON s.schema_id = o.schema_id"
+                        + " LEFT JOIN sys.indexes i ON i.object_id = p.object_id AND i.index_id = p.index_id"
+                        + " WHERE f.name = @name AND o.is_ms_shipped = 0"
+                        + " GROUP BY s.name, o.name, o.type_desc, i.name"
+                        + " ORDER BY SUM(au.total_pages) DESC")
+                }),
 
             new MonitorSection(MonitorSections.Log, "트랜잭션 로그",
                 "현재 DB의 sys.dm_db_log_space_usage · log_reuse_wait_desc · msdb.dbo.backupset의 마지막 전체·로그 백업.", Privilege,

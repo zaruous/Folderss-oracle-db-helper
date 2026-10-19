@@ -7,7 +7,7 @@ namespace MyPlugin
     /// - 권한이 없어도 대부분 오류 없이 돌지만, 다른 사용자 세션의 query는 "&lt;insufficient privilege&gt;"로 보이고(pg_read_all_stats 역할이 있어야 보임)
     ///   pg_tablespace_size·pg_database_size는 권한이 없으면 42501이다.
     /// - 기본 정보: version()·current_database()·서버 주소·시작 시각·복구 여부·DB 크기·연결 수/max_connections.
-    /// - 테이블스페이스: pg_tablespace와 크기·위치. 남은 용량은 파일 시스템이 정하므로 여기서는 알 수 없다.
+    /// - 테이블스페이스: pg_tablespace와 크기·위치. 남은 용량은 파일 시스템이 정하므로 여기서는 알 수 없다. 행을 누르면 그 안의 객체(pg_class) 상세.
     /// - 데이터베이스(PostgreSQL에만): pg_database마다 크기·연결 수.
     /// - WAL: 위치·파일·wal_level·archive_mode·pg_stat_archiver. 스탠바이면 재생 위치.
     /// - 잠금: pg_blocking_pids로 막히거나 막는 세션만.
@@ -45,7 +45,21 @@ namespace MyPlugin
                 "SELECT t.spcname AS \"테이블스페이스\", pg_get_userbyid(t.spcowner) AS \"소유자\","
                 + " COALESCE(NULLIF(pg_tablespace_location(t.oid), ''), '(데이터 폴더)') AS \"위치\","
                 + " round(pg_tablespace_size(t.oid) / 1048576.0) AS \"크기(MB)\", pg_size_pretty(pg_tablespace_size(t.oid)) AS \"크기\""
-                + " FROM pg_tablespace t ORDER BY pg_tablespace_size(t.oid) DESC, t.spcname"),
+                + " FROM pg_tablespace t ORDER BY pg_tablespace_size(t.oid) DESC, t.spcname",
+                null, "테이블스페이스", new[]
+                {
+                    new MonitorDetail("relations", "객체", "pg_class — 이 테이블스페이스에 저장된 테이블·인덱스·TOAST(DB 기본 테이블스페이스면 reltablespace = 0인 것), 큰 것부터 200개(현재 DB만).",
+                        "SELECT n.nspname || '.' || c.relname AS \"객체\","
+                        + " CASE c.relkind WHEN 'r' THEN 'TABLE' WHEN 'p' THEN 'PARTITIONED TABLE' WHEN 'i' THEN 'INDEX' WHEN 'I' THEN 'PARTITIONED INDEX'"
+                        + " WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 't' THEN 'TOAST' WHEN 'S' THEN 'SEQUENCE' ELSE c.relkind::text END AS \"종류\","
+                        + " pg_get_userbyid(c.relowner) AS \"소유자\","
+                        + " round(pg_relation_size(c.oid) / 1048576.0, 1) AS \"크기(MB)\", pg_size_pretty(pg_relation_size(c.oid)) AS \"크기\""
+                        + " FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+                        + " WHERE c.relkind IN ('r', 'p', 'i', 'I', 'm', 't', 'S')"
+                        + " AND (CASE WHEN c.reltablespace = 0 THEN (SELECT d.dattablespace FROM pg_database d WHERE d.datname = current_database()) ELSE c.reltablespace END)"
+                        + " = (SELECT t.oid FROM pg_tablespace t WHERE t.spcname = :name)"
+                        + " ORDER BY pg_relation_size(c.oid) DESC LIMIT 200")
+                }),
 
             new MonitorSection(MonitorSections.Log, "WAL",
                 "pg_current_wal_lsn() · wal_level · archive_mode · pg_stat_archiver. 스탠바이면 재생 위치를 보인다.", Privilege,

@@ -8,7 +8,7 @@ namespace MyPlugin
     /// - 항목·값 꼴의 UNION ALL은 첫 가지 리터럴을 VARCHAR2로 CAST한다(모두 CHAR 리터럴이면 결과가 CHAR로 패딩된다).
     /// - 기본 정보: V$DATABASE·V$INSTANCE·NLS_DATABASE_PARAMETERS·V$LOG_HISTORY(24시간 로그 스위치)·V$SESSION(사용자 세션 수).
     /// - 테이블스페이스: 영구·UNDO는 DBA_DATA_FILES − DBA_FREE_SPACE, 임시는 DBA_TEMP_FILES와 V$TEMP_SPACE_HEADER(사용은 고수위). 최대는 자동 확장이면 MAXBYTES.
-    ///   표 위 대시보드에 테이블스페이스마다 사용률 도넛(사용(MB) / 크기(MB)).
+    ///   표 위 대시보드에 테이블스페이스마다 사용률 도넛(사용(MB) / 크기(MB)). 행을 누르면 아래에 데이터 파일·세그먼트(DBA_SEGMENTS) 상세.
     /// - 리두 로그: V$LOG 그룹마다 멤버 파일(V$LOGFILE).
     /// - 잠금: V$LOCK의 TM·TX 가운데 막고 있거나(BLOCK) 기다리는(REQUEST) 것만. 객체는 ALL_OBJECTS로 푼다(권한 밖이면 빈 칸).
     /// - 세션: V$SESSION의 사용자 세션.
@@ -62,7 +62,27 @@ namespace MyPlugin
                 + " JOIN (" + FileSums("DBA_TEMP_FILES") + ") f ON f.TABLESPACE_NAME = t.TABLESPACE_NAME"
                 + " LEFT JOIN (SELECT TABLESPACE_NAME, SUM(BYTES_USED) AS USED_BYTES FROM V$TEMP_SPACE_HEADER GROUP BY TABLESPACE_NAME) h ON h.TABLESPACE_NAME = t.TABLESPACE_NAME"
                 + ") ORDER BY \"사용률(%)\" DESC NULLS LAST, \"테이블스페이스\"",
-                new MonitorUsageChart("테이블스페이스", "사용(MB)", "크기(MB)")),
+                new MonitorUsageChart("테이블스페이스", "사용(MB)", "크기(MB)"),
+                "테이블스페이스", new[]
+                {
+                    new MonitorDetail("files", "데이터 파일", "DBA_DATA_FILES · DBA_TEMP_FILES — 이 테이블스페이스의 파일과 자동 확장.",
+                        "SELECT f.FILE_NAME AS \"파일\", ROUND(f.BYTES / 1048576) AS \"크기(MB)\", f.AUTOEXTENSIBLE AS \"자동 확장\","
+                        + " ROUND(f.MAXBYTES / 1048576) AS \"최대(MB)\", ROUND(f.INCREMENT_BY * t.BLOCK_SIZE / 1048576) AS \"증가(MB)\","
+                        + " f.STATUS AS \"상태\", f.ONLINE_STATUS AS \"온라인\""
+                        + " FROM DBA_DATA_FILES f JOIN DBA_TABLESPACES t ON t.TABLESPACE_NAME = f.TABLESPACE_NAME WHERE f.TABLESPACE_NAME = :name"
+                        + " UNION ALL"
+                        + " SELECT f.FILE_NAME, ROUND(f.BYTES / 1048576), f.AUTOEXTENSIBLE, ROUND(f.MAXBYTES / 1048576),"
+                        + " ROUND(f.INCREMENT_BY * t.BLOCK_SIZE / 1048576), f.STATUS, CAST(NULL AS VARCHAR2(7))"
+                        + " FROM DBA_TEMP_FILES f JOIN DBA_TABLESPACES t ON t.TABLESPACE_NAME = f.TABLESPACE_NAME WHERE f.TABLESPACE_NAME = :name"
+                        + " ORDER BY 1"),
+                    new MonitorDetail("segments", "세그먼트", "DBA_SEGMENTS — 이 테이블스페이스에 저장된 테이블·인덱스·LOB(파티션은 이름으로 합침), 큰 것부터 200개.",
+                        "SELECT * FROM ("
+                        + " SELECT s.OWNER || '.' || s.SEGMENT_NAME AS \"객체\", s.SEGMENT_TYPE AS \"종류\","
+                        + " ROUND(SUM(s.BYTES) / 1048576, 1) AS \"크기(MB)\", SUM(s.EXTENTS) AS \"익스텐트\", COUNT(*) AS \"세그먼트 수\""
+                        + " FROM DBA_SEGMENTS s WHERE s.TABLESPACE_NAME = :name"
+                        + " GROUP BY s.OWNER, s.SEGMENT_NAME, s.SEGMENT_TYPE ORDER BY SUM(s.BYTES) DESC"
+                        + ") WHERE ROWNUM <= 200")
+                }),
 
             new MonitorSection(MonitorSections.Log, "리두 로그",
                 "V$LOG 그룹과 멤버 파일(V$LOGFILE). 로그 모드·24시간 로그 스위치 수는 [기본 정보]에.", Privilege,

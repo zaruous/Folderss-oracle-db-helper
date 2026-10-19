@@ -102,6 +102,33 @@ namespace MyPlugin
             return decimal.TryParse(text, NumberStyles.Float, Inv, out ignored);
         }
 
+        // ---------- 행 상세 목록 ----------
+
+        public const string DetailHintText = "표의 행이나 도넛을 누르면 상세 목록을 보입니다.";
+
+        /// <summary>상세 머리글: "데이터 파일 — MES_DATA".</summary>
+        public static string DetailTitleText(MonitorDetail detail, string key)
+        {
+            return (detail == null ? "상세" : detail.Title) + " — " + (string.IsNullOrEmpty(key) ? "(없음)" : key);
+        }
+
+        /// <summary>표 행에서 키 열의 값. 열이 없거나 값이 없으면 null.</summary>
+        public static string KeyOf(IList<ResultColumn> columns, string[] values, string keyColumn)
+        {
+            if (columns == null || values == null || string.IsNullOrEmpty(keyColumn))
+                return null;
+            for (var i = 0; i < columns.Count && i < values.Length; i++)
+                if (string.Equals(columns[i].Name, keyColumn, StringComparison.Ordinal))
+                    return string.IsNullOrEmpty(values[i]) ? null : values[i];
+            return null;
+        }
+
+        /// <summary>상세 조회 상태: "12행" (0행이면 "없음").</summary>
+        public static string DetailRowsText(int rows)
+        {
+            return rows == 0 ? "없음" : rows.ToString("N0", Inv) + "행";
+        }
+
         // ---------- 사용률 차트(대시보드) ----------
 
         /// <summary>대시보드에 그릴 최대 도넛 수(테이블스페이스·파일이 아주 많아도 표가 밀려나지 않게). 나머지는 "외 N개"로 알린다.</summary>

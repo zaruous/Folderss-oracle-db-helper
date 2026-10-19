@@ -10,6 +10,7 @@ namespace MyPlugin
     /// - 데이터 파일: 현재 DB의 sys.database_files(FILEPROPERTY SpaceUsed) — 테이블스페이스에 해당. 로그 파일도 한 줄. 행을 누르면 그 파일 그룹의 객체 상세.
     /// - 트랜잭션 로그: sys.dm_db_log_space_usage · log_reuse_wait_desc · 마지막 전체/로그 백업.
     /// - 잠금: blocking_session_id로 막히거나 막는 세션(요청 없이 트랜잭션만 연 채 막는 세션도).
+    /// - 느린 SQL: sys.dm_exec_query_stats 누적 소요 상위 50(계획 핸들 상세: 전문·계획 XML). 대기 이벤트: sys.dm_os_wait_stats(유휴·내부 대기 제외)와 지금 대기 작업 수.
     /// - 세션: sys.dm_exec_sessions의 사용자 세션. 잠금·세션 행을 누르면 SQL 전문·실행 계획(XML)·세션 정보, 오른쪽 메뉴 [세션 종료…](KILL).
     /// </summary>
     internal sealed class SqlServerMonitor : IMonitorProvider
@@ -140,7 +141,44 @@ namespace MyPlugin
                 + " LEFT JOIN sys.dm_exec_requests r ON r.session_id = s.session_id"
                 + " OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t"
                 + " WHERE s.is_user_process = 1 ORDER BY s.status, s.session_id",
-                null, "세션", SessionDetails, SessionActions)
+                null, "세션", SessionDetails, SessionActions),
+
+            new MonitorSection(MonitorSections.TopSql, "느린 SQL",
+                "sys.dm_exec_query_stats — 계획 캐시에 남은 문장 가운데 누적 소요 상위 50개(캐시에서 밀려난 문장은 없다). 행을 누르면 전문·실행 계획(XML).", Privilege,
+                "SELECT TOP (50) CONVERT(decimal(18, 1), qs.total_elapsed_time / 1000000.0) AS [소요(초)], qs.execution_count AS [실행 수],"
+                + " CONVERT(decimal(18, 1), qs.total_elapsed_time / 1000.0 / NULLIF(qs.execution_count, 0)) AS [실행당(ms)],"
+                + " CONVERT(decimal(18, 1), qs.total_worker_time / 1000000.0) AS [CPU(초)],"
+                + " qs.total_logical_reads AS [논리 읽기], qs.total_physical_reads AS [물리 읽기], qs.total_rows AS [처리 행],"
+                + " CONVERT(nvarchar(30), qs.last_execution_time, 120) AS [마지막 실행], DB_NAME(t.dbid) AS [DB],"
+                + " LEFT(SUBSTRING(t.text, (qs.statement_start_offset / 2) + 1,"
+                + " ((CASE qs.statement_end_offset WHEN -1 THEN DATALENGTH(t.text) ELSE qs.statement_end_offset END - qs.statement_start_offset) / 2) + 1), 200) AS [SQL],"
+                + " CONVERT(varchar(140), qs.plan_handle, 1) AS [계획 핸들]"
+                + " FROM sys.dm_exec_query_stats qs CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t"
+                + " ORDER BY qs.total_elapsed_time DESC",
+                null, "계획 핸들", new[]
+                {
+                    new MonitorDetail("sql", "SQL 전문", "sys.dm_exec_sql_text(plan_handle) — 그 배치 전체 문장.",
+                        "SELECT t.text FROM sys.dm_exec_sql_text(CONVERT(varbinary(64), @name, 1)) t", true),
+                    new MonitorDetail("plan", "실행 계획", "sys.dm_exec_text_query_plan(plan_handle, 0, -1) — 배치 전체의 캐시된 계획(XML).",
+                        "SELECT p.query_plan FROM sys.dm_exec_text_query_plan(CONVERT(varbinary(64), @name, 1), 0, -1) p", true)
+                }),
+
+            new MonitorSection(MonitorSections.Waits, "대기 이벤트",
+                "sys.dm_os_wait_stats — 서버 시작(또는 통계 초기화) 뒤 누적 대기 상위 50개. 유휴·내부 대기(SLEEP·BROKER·XE·QDS·HADR 등)는 뺐다. [지금 대기]는 이 순간 그 종류로 기다리는 작업 수.", Privilege,
+                "SELECT TOP (50) w.wait_type AS [대기 종류], w.waiting_tasks_count AS [대기 횟수],"
+                + " CONVERT(decimal(18, 1), w.wait_time_ms / 1000.0) AS [총 대기(초)], CONVERT(decimal(18, 1), w.signal_wait_time_ms / 1000.0) AS [시그널(초)],"
+                + " CONVERT(decimal(18, 2), w.wait_time_ms * 1.0 / NULLIF(w.waiting_tasks_count, 0)) AS [평균(ms)],"
+                + " (SELECT COUNT(*) FROM sys.dm_os_waiting_tasks wt WHERE wt.wait_type = w.wait_type) AS [지금 대기]"
+                + " FROM sys.dm_os_wait_stats w"
+                + " WHERE w.waiting_tasks_count > 0"
+                + " AND w.wait_type NOT IN ('CLR_SEMAPHORE', 'LAZYWRITER_SLEEP', 'RESOURCE_QUEUE', 'SLEEP_TASK', 'SLEEP_SYSTEMTASK', 'SQLTRACE_BUFFER_FLUSH', 'WAITFOR',"
+                + " 'LOGMGR_QUEUE', 'CHECKPOINT_QUEUE', 'REQUEST_FOR_DEADLOCK_SEARCH', 'XE_TIMER_EVENT', 'FT_IFTS_SCHEDULER_IDLE_WAIT', 'DIRTY_PAGE_POLL',"
+                + " 'SP_SERVER_DIAGNOSTICS_SLEEP', 'ONDEMAND_TASK_QUEUE', 'DBMIRROR_EVENTS_QUEUE', 'DBMIRRORING_CMD', 'SERVER_IDLE_CHECK', 'WAIT_XTP_HOST_WAIT',"
+                + " 'WAIT_XTP_OFFLINE_CKPT_NEW_LOG', 'WAIT_XTP_CKPT_CLOSE', 'SOS_WORK_DISPATCHER', 'TRACEWRITE', 'CLR_AUTO_EVENT', 'CLR_MANUAL_EVENT',"
+                + " 'DISPATCHER_QUEUE_SEMAPHORE', 'KSOURCE_WAKEUP', 'SNI_HTTP_ACCEPT', 'SQLTRACE_INCREMENTAL_FLUSH_SLEEP', 'MSQL_XP', 'PWAIT_ALL_COMPONENTS_INITIALIZED')"
+                + " AND w.wait_type NOT LIKE 'BROKER%' AND w.wait_type NOT LIKE 'XE%' AND w.wait_type NOT LIKE 'QDS%' AND w.wait_type NOT LIKE 'HADR%'"
+                + " AND w.wait_type NOT LIKE 'PREEMPTIVE_XE%' AND w.wait_type NOT LIKE 'SLEEP%' AND w.wait_type NOT LIKE 'PARALLEL_REDO%'"
+                + " ORDER BY w.wait_time_ms DESC")
         };
 
         public IReadOnlyList<MonitorSection> Sections { get { return All; } }

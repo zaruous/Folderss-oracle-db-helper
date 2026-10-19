@@ -32,8 +32,12 @@ namespace MyPlugin
         public const string Locks = "locks";
         /// <summary>세션 목록.</summary>
         public const string Sessions = "sessions";
+        /// <summary>느린 SQL: 누적 소요 시간이 큰 문장(Oracle V$SQLAREA · PostgreSQL pg_stat_statements · SQL Server sys.dm_exec_query_stats).</summary>
+        public const string TopSql = "topsql";
+        /// <summary>대기 이벤트 요약(어디서 기다리는가: 잠금·I/O·CPU).</summary>
+        public const string Waits = "waits";
 
-        public static readonly IReadOnlyList<string> Common = new[] { Info, Storage, Log, Locks, Sessions };
+        public static readonly IReadOnlyList<string> Common = new[] { Info, Storage, Log, Locks, Sessions, TopSql, Waits };
     }
 
     /// <summary>

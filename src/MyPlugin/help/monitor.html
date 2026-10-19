@@ -29,8 +29,10 @@
 <tr><td>로그</td><td><b>리두 로그</b>: V$LOG 그룹(시퀀스·크기·아카이브·상태·첫 기록)과 멤버 파일</td><td><b>WAL</b>: 현재 위치·파일(스탠바이는 재생 위치) · wal_level · max_wal_size · archive_mode · pg_stat_archiver(아카이브 수·마지막·실패)</td><td><b>트랜잭션 로그</b>: 로그 크기·사용·사용률(sys.dm_db_log_space_usage) · 로그 재사용 대기 · 마지막 전체/로그 백업(msdb)</td></tr>
 <tr><td>잠금</td><td>V$LOCK의 TM·TX 가운데 막고 있거나(BLOCK) 기다리는(REQUEST) 것: 세션·막는 세션·모드·객체·지속 초·SQL_ID</td><td>pg_blocking_pids()로 막혀 있거나 막는 세션: PID·막는 PID·대기 이벤트·지속 초·SQL</td><td>blocking_session_id로 막혀 있거나 막는 세션(트랜잭션만 연 채 쉬는 세션 포함): 대기 종류·자원·명령·SQL</td></tr>
 <tr><td>세션</td><td>V$SESSION 사용자 세션: 상태·OS 사용자·머신·프로그램·대기 이벤트·SQL_ID·접속 시각</td><td>pg_stat_activity의 client backend: 상태·응용·클라이언트·대기·접속 시각·실행 초·SQL</td><td>sys.dm_exec_sessions 사용자 세션: 상태·호스트·프로그램·명령·대기·CPU·논리 읽기·SQL</td></tr>
+<tr><td>느린 SQL</td><td>V$SQLAREA 누적 소요 상위 50(실행 수·실행당·CPU·버퍼 겟·디스크 읽기). 행을 누르면 [SQL 전문]·[실행 계획](DBMS_XPLAN.DISPLAY_CURSOR, 자식 전부)·[자식 커서](계획 해시별)</td><td>pg_stat_statements 누적 소요 상위 50 — <b>확장이 설치돼 있어야</b> 하고 PostgreSQL 13 이상의 열 이름(total_exec_time). 문장은 상수가 $1로 정규화. 행을 누르면 [SQL 전문](실행 계획은 없음)</td><td>sys.dm_exec_query_stats 누적 소요 상위 50(계획 캐시에 남은 것만). 행을 누르면 [SQL 전문]·[실행 계획](캐시 계획 XML)</td></tr>
+<tr><td>대기 이벤트</td><td>V$SYSTEM_EVENT 누적(Idle 분류 제외) 상위 50: 대기 횟수·총 대기·평균·지금 기다리는 활성 세션 수</td><td>이 순간 활성 세션의 wait_event_type·wait_event별 세션 수와 PID(누적 통계는 PostgreSQL에 없음)</td><td>sys.dm_os_wait_stats 누적(SLEEP·BROKER·XE·QDS·HADR 같은 유휴·내부 대기 제외) 상위 50: 대기 횟수·총 대기·시그널·평균·지금 대기 작업 수</td></tr>
 </table>
-<p>비어 있는 잠금 표는 "잠금 대기가 없다"는 뜻입니다.</p>
+<p>비어 있는 잠금 표는 "잠금 대기가 없다"는 뜻입니다. 느린 SQL과 대기 이벤트는 인스턴스 시작(또는 통계 초기화) 뒤 <b>누적</b>값이라 "지금 느린 것"이 아니라 "그동안 많이 쓴 것"입니다. 시간 구간을 비교하려면 두 시점의 값을 빼야 합니다.</p>
 
 <h2>필요 권한</h2>
 <table>

@@ -11,6 +11,7 @@ namespace MyPlugin
     /// - 데이터베이스(PostgreSQL에만): pg_database마다 크기·연결 수.
     /// - WAL: 위치·파일·wal_level·archive_mode·pg_stat_archiver. 스탠바이면 재생 위치.
     /// - 잠금: pg_blocking_pids로 막히거나 막는 세션만.
+    /// - 느린 SQL: pg_stat_statements(확장 필요, 13+ 열 이름) 누적 소요 상위 50. 대기 이벤트: 이 순간 활성 세션의 wait_event 집계(누적 통계는 없다).
     /// - 세션: pg_stat_activity의 client backend. 잠금·세션 행을 누르면 SQL 전문·세션 정보, 오른쪽 메뉴 [세션 종료…](pg_terminate_backend).
     /// </summary>
     internal sealed class PostgresMonitor : IMonitorProvider
@@ -130,6 +131,27 @@ namespace MyPlugin
                 + " left(a.query, 300) AS \"SQL\""
                 + " FROM pg_stat_activity a WHERE a.backend_type = 'client backend' ORDER BY a.state, a.query_start",
                 null, "PID", SessionDetails, SessionActions),
+
+            new MonitorSection(MonitorSections.TopSql, "느린 SQL",
+                "pg_stat_statements(확장이 설치돼 있어야 하고 PostgreSQL 13 이상의 열 이름) — 통계를 지운 뒤 누적 소요 상위 50개. 문장은 상수가 $1처럼 정규화돼 있다. 행을 누르면 전문.", Privilege + ", pg_stat_statements 확장",
+                "SELECT s.queryid::text AS \"쿼리 ID\", round((s.total_exec_time / 1000)::numeric, 1) AS \"소요(초)\", s.calls AS \"실행 수\","
+                + " round(s.mean_exec_time::numeric, 1) AS \"실행당(ms)\", s.rows AS \"처리 행\","
+                + " s.shared_blks_hit AS \"버퍼 히트\", s.shared_blks_read AS \"디스크 읽기\","
+                + " pg_get_userbyid(s.userid) AS \"사용자\", d.datname AS \"DB\", left(s.query, 200) AS \"SQL\""
+                + " FROM pg_stat_statements s JOIN pg_database d ON d.oid = s.dbid"
+                + " ORDER BY s.total_exec_time DESC LIMIT 50",
+                null, "쿼리 ID", new[]
+                {
+                    new MonitorDetail("sql", "SQL 전문", "pg_stat_statements.query — 상수가 $1·$2로 정규화된 문장. 실행 계획은 pg_stat_statements가 주지 않는다(EXPLAIN은 실제 값이 필요).",
+                        "SELECT s.query FROM pg_stat_statements s WHERE s.queryid = CAST(:name AS bigint) LIMIT 1", true)
+                }),
+
+            new MonitorSection(MonitorSections.Waits, "대기 이벤트",
+                "pg_stat_activity — 이 순간 활성 client backend가 기다리는 이벤트별 세션 수(누적 통계는 PostgreSQL에 없다). 대기가 없는 세션은 CPU에서 실행 중.", Privilege,
+                "SELECT COALESCE(a.wait_event_type, '(실행 중)') AS \"분류\", COALESCE(a.wait_event, '-') AS \"이벤트\", count(*) AS \"세션 수\","
+                + " string_agg(a.pid::text, ', ' ORDER BY a.pid) AS \"PID\""
+                + " FROM pg_stat_activity a WHERE a.backend_type = 'client backend' AND a.state = 'active'"
+                + " GROUP BY a.wait_event_type, a.wait_event ORDER BY count(*) DESC, 1, 2"),
 
             new MonitorSection(Databases, "데이터베이스",
                 "pg_database마다 pg_database_size()와 연결 수(이 서버의 모든 DB).", Privilege,

@@ -51,8 +51,10 @@
 - [x] 2. 세션 상세와 세션 종료 — 잠금·세션 행을 누르면 SQL 전문·실행 계획(Oracle DBMS_XPLAN, SQL Server XML)·세션 정보/통계,
       오른쪽 메뉴 [세션 종료…](ALTER SYSTEM KILL SESSION · pg_terminate_backend · KILL)는 위험한 문장 확인 대화상자 + 읽기 전용 접속 차단.
       → 잠금 연쇄(누가 누구를 막는지)를 트리로 보이는 것은 아직 아님. PR: #20 · 버전: 1.9.0
-- [ ] 3. 느린 SQL — Top SQL 섹션(Oracle V$SQLAREA, PostgreSQL pg_stat_statements(확장 유무 확인), SQL Server sys.dm_exec_query_stats)과
+- [x] 3. 느린 SQL — Top SQL 섹션(Oracle V$SQLAREA, PostgreSQL pg_stat_statements(확장 유무 확인), SQL Server sys.dm_exec_query_stats)과
       대기 이벤트 요약(V$SESSION_WAIT 집계 · pg_stat_activity wait_event 집계 · sys.dm_os_wait_stats).
+      → [느린 SQL] 누적 소요 상위 50(행 상세: 전문·실행 계획·Oracle 자식 커서), [대기 이벤트] Oracle V$SYSTEM_EVENT(Idle 제외)·SQL Server dm_os_wait_stats(유휴 제외)·
+      PostgreSQL은 이 순간 활성 세션 집계(누적 없음). pg_stat_statements는 13+ 열 이름이라 12 이하는 오류. PR: #20 · 버전: 1.9.0
 - [ ] 4. 모니터 전용 세션 분리 — 지금은 SQL 탭과 세션(트랜잭션·잠금)을 같이 써서 자동 새로 고침이 사용자 실행과 서로 기다린다.
       상세 결과 캐시와 조회 소요 시간 표시도 함께.
 - [ ] 5. 변화 보기 — 직전 스냅샷과의 차이(세션 수 증감·테이블스페이스 증가량·로그 스위치 증가), 창이 열려 있는 동안의 간단한 이력,

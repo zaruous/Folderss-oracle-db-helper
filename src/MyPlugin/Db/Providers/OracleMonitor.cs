@@ -12,6 +12,7 @@ namespace MyPlugin
     ///   표 위 대시보드에 테이블스페이스마다 사용률 도넛(사용(MB) / 크기(MB)). 행을 누르면 아래에 데이터 파일·세그먼트(DBA_SEGMENTS) 상세.
     /// - 리두 로그: V$LOG 그룹마다 멤버 파일(V$LOGFILE).
     /// - 잠금: V$LOCK의 TM·TX 가운데 막고 있거나(BLOCK) 기다리는(REQUEST) 것만. 객체는 ALL_OBJECTS로 푼다(권한 밖이면 빈 칸).
+    /// - 느린 SQL: V$SQLAREA 누적 소요 상위 50(SQL_ID 상세: 전문·DISPLAY_CURSOR·자식 커서). 대기 이벤트: V$SYSTEM_EVENT(Idle 제외)와 지금 대기 세션 수.
     /// - 세션: V$SESSION의 사용자 세션. 잠금·세션 행을 누르면 SQL 전문(V$SQL)·실행 계획(DBMS_XPLAN.DISPLAY_CURSOR)·세션 통계,
     ///   오른쪽 메뉴 [세션 종료…](ALTER SYSTEM KILL SESSION … IMMEDIATE, 확인 체크 뒤).
     /// </summary>
@@ -158,7 +159,39 @@ namespace MyPlugin
                 + " s.EVENT AS \"대기 이벤트\", s.SECONDS_IN_WAIT AS \"대기(초)\", s.SQL_ID AS \"SQL_ID\","
                 + " TO_CHAR(s.LOGON_TIME, 'YYYY-MM-DD HH24:MI:SS') AS \"접속 시각\", s.BLOCKING_SESSION AS \"막는 세션\""
                 + " FROM V$SESSION s WHERE s.TYPE = 'USER' ORDER BY s.STATUS, s.SID",
-                null, "SID", SessionDetails, SessionActions)
+                null, "SID", SessionDetails, SessionActions),
+
+            new MonitorSection(MonitorSections.TopSql, "느린 SQL",
+                "V$SQLAREA — 공유 풀에 있는 문장 가운데 누적 소요 시간(커서가 올라온 뒤 합계)이 큰 50개. 열 머리로 CPU·버퍼 겟·실행당 순으로 바꿔 볼 수 있다. 행을 누르면 전문·실행 계획.", Privilege,
+                "SELECT * FROM ("
+                + " SELECT a.SQL_ID AS \"SQL_ID\", ROUND(a.ELAPSED_TIME / 1000000, 1) AS \"소요(초)\", a.EXECUTIONS AS \"실행 수\","
+                + " ROUND(a.ELAPSED_TIME / 1000 / NULLIF(a.EXECUTIONS, 0), 1) AS \"실행당(ms)\", ROUND(a.CPU_TIME / 1000000, 1) AS \"CPU(초)\","
+                + " a.BUFFER_GETS AS \"버퍼 겟\", a.DISK_READS AS \"디스크 읽기\", a.ROWS_PROCESSED AS \"처리 행\","
+                + " a.PARSING_SCHEMA_NAME AS \"스키마\", a.MODULE AS \"모듈\", TO_CHAR(a.LAST_ACTIVE_TIME, 'YYYY-MM-DD HH24:MI:SS') AS \"마지막 실행\","
+                + " SUBSTR(a.SQL_TEXT, 1, 200) AS \"SQL\""
+                + " FROM V$SQLAREA a WHERE a.EXECUTIONS > 0 ORDER BY a.ELAPSED_TIME DESC"
+                + ") WHERE ROWNUM <= 50",
+                null, "SQL_ID", new[]
+                {
+                    new MonitorDetail("sql", "SQL 전문", "V$SQLAREA.SQL_FULLTEXT.", "SELECT q.SQL_FULLTEXT FROM V$SQLAREA q WHERE q.SQL_ID = :name", true),
+                    new MonitorDetail("plan", "실행 계획", "DBMS_XPLAN.DISPLAY_CURSOR(SQL_ID, NULL, 'TYPICAL') — 자식 커서 전부.",
+                        "SELECT p.PLAN_TABLE_OUTPUT FROM TABLE(DBMS_XPLAN.DISPLAY_CURSOR(:name, NULL, 'TYPICAL')) p", true),
+                    new MonitorDetail("children", "자식 커서", "V$SQL — 같은 SQL_ID의 자식 커서마다 계획 해시·실행 수·소요·바인드 민감 여부.",
+                        "SELECT q.CHILD_NUMBER AS \"자식\", q.PLAN_HASH_VALUE AS \"계획 해시\", q.EXECUTIONS AS \"실행 수\","
+                        + " ROUND(q.ELAPSED_TIME / 1000000, 1) AS \"소요(초)\", ROUND(q.CPU_TIME / 1000000, 1) AS \"CPU(초)\","
+                        + " q.BUFFER_GETS AS \"버퍼 겟\", q.DISK_READS AS \"디스크 읽기\", q.IS_BIND_SENSITIVE AS \"바인드 민감\","
+                        + " q.OPTIMIZER_COST AS \"비용\", TO_CHAR(q.LAST_ACTIVE_TIME, 'YYYY-MM-DD HH24:MI:SS') AS \"마지막 실행\""
+                        + " FROM V$SQL q WHERE q.SQL_ID = :name ORDER BY q.CHILD_NUMBER")
+                }),
+
+            new MonitorSection(MonitorSections.Waits, "대기 이벤트",
+                "V$SYSTEM_EVENT — 인스턴스 시작 뒤 누적 대기(Idle 분류 제외) 상위 50개. [지금 세션]은 이 순간 그 이벤트를 기다리는 활성 세션 수(V$SESSION).", Privilege,
+                "SELECT * FROM ("
+                + " SELECT e.EVENT AS \"이벤트\", e.WAIT_CLASS AS \"분류\", e.TOTAL_WAITS AS \"대기 횟수\","
+                + " ROUND(e.TIME_WAITED_MICRO / 1000000, 1) AS \"총 대기(초)\", ROUND(e.AVERAGE_WAIT * 10, 2) AS \"평균(ms)\","
+                + " (SELECT COUNT(*) FROM V$SESSION s WHERE s.EVENT = e.EVENT AND s.STATUS = 'ACTIVE' AND s.WAIT_TIME = 0) AS \"지금 세션\""
+                + " FROM V$SYSTEM_EVENT e WHERE e.WAIT_CLASS <> 'Idle' ORDER BY e.TIME_WAITED_MICRO DESC"
+                + ") WHERE ROWNUM <= 50")
         };
 
         public IReadOnlyList<MonitorSection> Sections { get { return All; } }

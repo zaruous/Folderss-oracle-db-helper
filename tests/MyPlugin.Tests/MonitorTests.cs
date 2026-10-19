@@ -269,9 +269,9 @@ namespace MyPlugin.Tests
             Assert.Contains("DBA_SEGMENTS", DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Details[1].Sql);
             Assert.Contains("reltablespace = 0", DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Details[0].Sql);
             Assert.Contains("sys.allocation_units", DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Details[0].Sql);
-            // 기본 정보·로그(·데이터베이스)에는 상세·조치가 없다
+            // 기본 정보·로그·대기 이벤트(·데이터베이스)에는 상세·조치가 없다
             foreach (var provider in Real)
-            foreach (var section in provider.Monitor.Sections.Where(s => s.Id == MonitorSections.Info || s.Id == MonitorSections.Log || s.Id == PostgresMonitor.Databases))
+            foreach (var section in provider.Monitor.Sections.Where(s => s.Id == MonitorSections.Info || s.Id == MonitorSections.Log || s.Id == MonitorSections.Waits || s.Id == PostgresMonitor.Databases))
             {
                 Assert.Empty(section.Details);
                 Assert.Null(section.KeyColumn);
@@ -421,6 +421,53 @@ namespace MyPlugin.Tests
                 Assert.Equal(new[] { "f_MES_DATA", "7" }, rows.Single());
                 Assert.Empty(await session.QueryAsync(detail.Query("OTHER"), r => r.GetString(0)));
             }
+        }
+
+        // ---------- 느린 SQL · 대기 이벤트 ----------
+
+        [Fact]
+        public void TopSql_EveryProvider_Top50_ByElapsed_WithSqlDetail()
+        {
+            foreach (var provider in Real)
+            {
+                var top = provider.Monitor.Sections.First(s => s.Id == MonitorSections.TopSql);
+                Assert.Equal("느린 SQL", top.Title);
+                Assert.Matches(@"ROWNUM <= 50|LIMIT 50|TOP \(50\)", top.Sql);
+                Assert.Contains("소요(초)", top.Sql);
+                Assert.Contains("실행당(ms)", top.Sql);
+                Assert.Contains("\"SQL\"", top.Sql.Replace("[", "\"").Replace("]", "\""));
+                Assert.False(string.IsNullOrEmpty(top.KeyColumn));
+                Assert.Contains("\"" + top.KeyColumn + "\"", top.Sql.Replace("[", "\"").Replace("]", "\""));
+                var sql = top.Details.First(d => d.Id == "sql");
+                Assert.True(sql.AsText);
+                Assert.Empty(top.Actions);
+                Assert.Null(top.Chart);
+                var waits = provider.Monitor.Sections.First(s => s.Id == MonitorSections.Waits);
+                Assert.Equal("대기 이벤트", waits.Title);
+                Assert.Empty(waits.Details);
+            }
+            var oracle = DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.TopSql);
+            Assert.Contains("V$SQLAREA", oracle.Sql);
+            Assert.Contains("ORDER BY a.ELAPSED_TIME DESC", oracle.Sql);
+            Assert.Equal(new[] { "sql", "plan", "children" }, oracle.Details.Select(d => d.Id));
+            Assert.Contains("DISPLAY_CURSOR(:name, NULL, 'TYPICAL')", oracle.Details[1].Sql);
+            Assert.Contains("WAIT_CLASS <> 'Idle'", DbProviders.Oracle.Monitor.Sections.First(s => s.Id == MonitorSections.Waits).Sql);
+
+            var pg = DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.TopSql);
+            Assert.Contains("pg_stat_statements", pg.Sql);
+            Assert.Contains("total_exec_time", pg.Sql);
+            Assert.Contains("pg_stat_statements", pg.Privilege);
+            Assert.Contains("CAST(:name AS bigint)", pg.Details[0].Sql);
+            Assert.Contains("a.state = 'active'", DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.Waits).Sql);
+
+            var mssql = DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.TopSql);
+            Assert.Contains("sys.dm_exec_query_stats", mssql.Sql);
+            Assert.Contains("statement_start_offset", mssql.Sql);
+            Assert.Equal("계획 핸들", mssql.KeyColumn);
+            Assert.Contains("CONVERT(varbinary(64), @name, 1)", mssql.Details[0].Sql);
+            Assert.Contains("CONVERT(varbinary(64), @name, 1), 0, -1", mssql.Details[1].Sql);
+            Assert.Contains("sys.dm_os_wait_stats", DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.Waits).Sql);
+            Assert.Contains("NOT LIKE 'BROKER%'", DbProviders.SqlServer.Monitor.Sections.First(s => s.Id == MonitorSections.Waits).Sql);
         }
 
         // ---------- 사용률 차트(대시보드) ----------

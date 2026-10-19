@@ -20,6 +20,8 @@
     <!-- 계약 DLL은 Folderss 본체의 것을 쓰므로 zip에 넣지 않는다 (Private=false) -->
     <PackageReference Include="ClosedXML" Version="0.105.1" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
+    <!-- 성능 모니터 이력·일일 점검 저장소(history.db). 네이티브 e_sqlite3.dll은 publish(win-x64) 때 플러그인 폴더 바로 아래에 놓이고 .deps.json으로 찾는다 -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
     <ProjectReference Include="..\..\contract\Folderss.PluginContract\Folderss.PluginContract.csproj" Private="false" />
     <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.301" />

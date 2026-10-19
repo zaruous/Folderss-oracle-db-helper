@@ -29,6 +29,149 @@ namespace MyPlugin
         /// 설계: docs/monitor-dba-design.md 5장.
         /// </summary>
         MonitorOverview Overview { get; }
+
+        /// <summary>
+        /// 일일 점검의 기본 묶음(DB 식별 SQL + 점검 항목). 지원하지 않으면 null(그 DBMS 접속은 점검 대상에서 빠진다).
+        /// 사용자 점검 항목은 SQLite 저장소(MonitorStore)에 있고 같은 형식(<see cref="MonitorCheck"/>)으로 섞여 돈다. 설계: docs/monitor-dba-design.md 6장.
+        /// </summary>
+        MonitorCheckSet CheckSet { get; }
+    }
+
+    /// <summary>점검 판정 방식.</summary>
+    internal enum CheckRuleKind
+    {
+        /// <summary>결과 행이 있으면 <see cref="CheckRule.Level"/>(없으면 정상). 값 = 행 수.</summary>
+        AnyRow,
+        /// <summary>열(<see cref="CheckRule.Column"/>) 값의 최댓값을 주의·위험 문턱과 비교. 값이 없으면 <see cref="CheckRule.MissingLevel"/>.</summary>
+        Threshold,
+        /// <summary>판정 열(<see cref="CheckRule.Column"/>)의 'OK'·'WARN'·'CRIT' 가운데 가장 나쁜 것. 값 = OK가 아닌 행 수.</summary>
+        ByLevel,
+        /// <summary>판정 없이 보이기만(상태 "정보").</summary>
+        Info
+    }
+
+    /// <summary>점검 결과 단계(규칙이 고르는 것).</summary>
+    internal enum CheckLevel
+    {
+        Ok,
+        Warning,
+        Critical
+    }
+
+    /// <summary>점검 판정 규칙. 사용자 항목은 JSON으로 저장한다(CheckLogic.RuleToJson/RuleFromJson).</summary>
+    internal sealed class CheckRule
+    {
+        private CheckRule(CheckRuleKind kind, CheckLevel level, string column, double? warning, double? critical, CheckLevel missing)
+        {
+            Kind = kind;
+            Level = level;
+            Column = column;
+            Warning = warning;
+            Critical = critical;
+            MissingLevel = missing;
+        }
+
+        public CheckRuleKind Kind { get; }
+        public CheckLevel Level { get; }
+        public string Column { get; }
+        public double? Warning { get; }
+        public double? Critical { get; }
+        public CheckLevel MissingLevel { get; }
+
+        /// <summary>행이 있으면 level(주의·위험).</summary>
+        public static CheckRule AnyRow(CheckLevel level)
+        {
+            return new CheckRule(CheckRuleKind.AnyRow, level == CheckLevel.Ok ? CheckLevel.Warning : level, null, null, null, CheckLevel.Ok);
+        }
+
+        /// <summary>열 값(행이 여럿이면 최댓값) ≥ warning이면 주의, ≥ critical이면 위험. 값이 하나도 없으면 missing.</summary>
+        public static CheckRule Threshold(string column, double? warning, double? critical, CheckLevel missing = CheckLevel.Ok)
+        {
+            if (string.IsNullOrWhiteSpace(column))
+                throw new ArgumentException("임계값 규칙에는 열 이름이 있어야 합니다.");
+            if (!warning.HasValue && !critical.HasValue)
+                throw new ArgumentException("임계값 규칙에는 주의나 위험 값이 있어야 합니다.");
+            return new CheckRule(CheckRuleKind.Threshold, CheckLevel.Ok, column.Trim(), warning, critical, missing);
+        }
+
+        /// <summary>판정 열의 'OK'·'WARN'·'CRIT'(대소문자 무시).</summary>
+        public static CheckRule ByLevel(string column)
+        {
+            if (string.IsNullOrWhiteSpace(column))
+                throw new ArgumentException("판정 열 규칙에는 열 이름이 있어야 합니다.");
+            return new CheckRule(CheckRuleKind.ByLevel, CheckLevel.Ok, column.Trim(), null, null, CheckLevel.Ok);
+        }
+
+        public static CheckRule Info()
+        {
+            return new CheckRule(CheckRuleKind.Info, CheckLevel.Ok, null, null, null, CheckLevel.Ok);
+        }
+
+        /// <summary>문턱만 바꾼 사본(점검 항목 관리의 임계값 덮어쓰기). 임계값 규칙이 아니면 그대로.</summary>
+        public CheckRule WithThresholds(double? warning, double? critical)
+        {
+            if (Kind != CheckRuleKind.Threshold || (!warning.HasValue && !critical.HasValue))
+                return this;
+            return new CheckRule(Kind, Level, Column, warning ?? Warning, critical ?? Critical, MissingLevel);
+        }
+    }
+
+    /// <summary>
+    /// 일일 점검 항목 하나. 결과 행 = 발견 사항(별칭이 머리글). 바인드 없음, SELECT 한 문장.
+    /// 권한이 없으면 "건너뜀(권한)", 필요 조건(<see cref="Requirements"/>)이 안 맞으면 "건너뜀(조건)", 그 밖 실패·시간 초과는 "오류".
+    /// </summary>
+    internal sealed class MonitorCheck
+    {
+        public MonitorCheck(string id, string category, string title, string sql, CheckRule rule, string privilege = null, string advice = null,
+            IReadOnlyList<MonitorRequirement> requirements = null)
+        {
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(category) || string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(sql))
+                throw new ArgumentException("점검 항목의 id·분류·제목·SQL이 비었습니다.");
+            Id = id;
+            Category = category;
+            Title = title;
+            Sql = sql;
+            Rule = rule ?? throw new ArgumentNullException(nameof(rule));
+            Privilege = privilege ?? "";
+            Advice = advice ?? "";
+            Requirements = requirements ?? Array.Empty<MonitorRequirement>();
+        }
+
+        /// <summary>바꾸지 않는 키(설정·결과 보관). 기본 묶음은 'ora.*', 사용자 항목은 'user.*'.</summary>
+        public string Id { get; }
+        /// <summary>가용성 · 공간 · 백업 · 로그 · 객체 · 작업·세션 · 보안(<see cref="MonitorCheckSet.Categories"/>) 또는 사용자 분류.</summary>
+        public string Category { get; }
+        public string Title { get; }
+        public string Sql { get; }
+        public CheckRule Rule { get; }
+        public string Privilege { get; }
+        /// <summary>주의·위험일 때 조치 안내 한두 줄.</summary>
+        public string Advice { get; }
+        public IReadOnlyList<MonitorRequirement> Requirements { get; }
+        /// <summary>사용자 항목이면 true(점검 항목 관리에서 고치고 지울 수 있다).</summary>
+        public bool IsUser { get { return Id.StartsWith("user.", StringComparison.Ordinal); } }
+    }
+
+    /// <summary>DBMS의 일일 점검 기본 묶음과 DB 식별 SQL.</summary>
+    internal sealed class MonitorCheckSet
+    {
+        public const string Identity = "IDENTITY";
+        public const string Label = "LABEL";
+
+        /// <summary>기본 분류 순서(결과 창·엑셀이 이 순서로 묶는다. 목록 밖 분류는 뒤에).</summary>
+        public static readonly IReadOnlyList<string> Categories = new[] { "가용성", "공간", "백업", "로그", "객체", "작업·세션", "보안" };
+
+        public MonitorCheckSet(string identitySql, IReadOnlyList<MonitorCheck> items)
+        {
+            if (string.IsNullOrWhiteSpace(identitySql))
+                throw new ArgumentException("DB 식별 SQL이 비었습니다.", nameof(identitySql));
+            IdentitySql = identitySql;
+            Items = items ?? Array.Empty<MonitorCheck>();
+        }
+
+        /// <summary>한 행: IDENTITY(바뀌지 않는 서버 쪽 식별 — 이력을 묶는 키), LABEL(사람이 읽을 이름).</summary>
+        public string IdentitySql { get; }
+        public IReadOnlyList<MonitorCheck> Items { get; }
     }
 
     /// <summary>
@@ -365,5 +508,7 @@ namespace MyPlugin
         public MonitorLockTree LockTree { get { return null; } }
 
         public MonitorOverview Overview { get { return null; } }
+
+        public MonitorCheckSet CheckSet { get { return null; } }
     }
 }

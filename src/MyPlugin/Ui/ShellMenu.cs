@@ -38,6 +38,9 @@ namespace MyPlugin
         /// <summary>도구 > 전체 DB 상태: 저장한 접속마다 상태 타일(가장 심각한 지표와 이유) — 누르면 그 DB의 성능 모니터.</summary>
         void ShowOverview();
 
+        /// <summary>도구 > 일일 점검: 고른 DB들에 점검 묶음(공간·백업·로그·객체·작업·보안)을 돌려 상태·직전 대비를 보이고 엑셀로 저장.</summary>
+        void ShowChecks();
+
         /// <summary>편집 메뉴(잘라내기·복사·되돌리기 등)의 대상. 없으면 null.</summary>
         TextBox ActiveEditor { get; }
         void ToggleComment();
@@ -315,6 +318,9 @@ namespace MyPlugin
             var overview = Item(OverviewLogic.Title + "(_A)…", null, null, _commands.ShowOverview);
             overview.ToolTip = "저장한 접속 전부를 한 화면에 타일로 봅니다 — 잠금 대기·공간(최대 기준)·FRA·백업 가운데 가장 심각한 것과 그 이유. 저장된 비밀번호가 있는 접속만 스스로 붙습니다(지금은 Oracle)";
             top.Items.Add(overview);
+            var checks = Item(CheckLogic.Title + "(_C)…", null, null, _commands.ShowChecks);
+            checks.ToolTip = "고른 DB들에 일일 점검 항목(테이블스페이스·FRA·백업·경고 로그·INVALID 객체·실패 잡·비밀번호 만료 …)을 돌려 정상·주의·위험과 직전 대비를 보고, 엑셀 보고서로 저장합니다(지금은 Oracle)";
+            top.Items.Add(checks);
             // 열 때마다 대상 DB(트리에서 고른 것)를 항목 글에 보인다 — 어느 접속으로 만드는지 바로 알 수 있게
             top.SubmenuOpened += (s, e) =>
             {

@@ -198,6 +198,9 @@ namespace MyPlugin
         /// <summary>전체 DB 화면의 지표는 아직 Oracle만(타일은 "지원 예정").</summary>
         public MonitorOverview Overview { get { return null; } }
 
+        /// <summary>일일 점검은 아직 Oracle만(그 DBMS 접속은 점검 대상에서 빠진다).</summary>
+        public MonitorCheckSet CheckSet { get { return null; } }
+
         /// <summary>
         /// 크기 함수(pg_tablespace_size·pg_database_size)를 불러도 되는 조건: 객체 권한(CREATE·CONNECT) 또는 pg_read_all_stats의 권한.
         /// 서버가 함수 안에서 같은 조건을 검사해 실패하면 42501로 문장 전체가 실패하므로, 조건이 맞을 때만 CASE로 부른다(수퍼유저는 모두 참).

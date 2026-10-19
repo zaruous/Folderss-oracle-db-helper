@@ -33,6 +33,8 @@ namespace MyPlugin
             public Func<string, Task<DbSession>> Connect { get; set; }
             /// <summary>(접속 Id, 섹션 id 또는 null) → 성능 모니터 창.</summary>
             public Action<string, string> OpenMonitor { get; set; }
+            /// <summary>[일일 점검…] — 일일 점검 창. null이면 버튼을 두지 않는다.</summary>
+            public Action OpenChecks { get; set; }
             public Func<string, string> GetSetting { get; set; }
             public Action<string, string> SetSetting { get; set; }
             public string HelpFolder { get; set; }
@@ -197,6 +199,12 @@ namespace MyPlugin
             var refresh = new Button { Content = "새로 고침", Padding = new Thickness(12, 3, 12, 3), Margin = new Thickness(0, 0, 6, 0), ToolTip = "모든 타일을 다시 가져옵니다 (F5)" };
             refresh.Click += (s, e) => RefreshAll();
             buttons.Children.Add(refresh);
+            if (_host.OpenChecks != null)
+            {
+                var checks = new Button { Content = CheckLogic.Title + "…", Padding = new Thickness(12, 3, 12, 3), Margin = new Thickness(0, 0, 6, 0), ToolTip = "고른 DB들에 일일 점검 항목을 돌리고 엑셀 보고서로 저장합니다" };
+                checks.Click += (s, e) => _host.OpenChecks();
+                buttons.Children.Add(checks);
+            }
             var help = new Button { Content = "도움말", Padding = new Thickness(12, 3, 12, 3), Margin = new Thickness(0, 0, 6, 0) };
             help.Click += (s, e) => HelpWindow.Show(_window, _host.HelpFolder, HelpLogic.Monitor);
             buttons.Children.Add(help);

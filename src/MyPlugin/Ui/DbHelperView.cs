@@ -34,6 +34,7 @@ namespace MyPlugin
         // 열려 있는 성능 모니터 창(DB마다 하나). 닫히면 뺀다.
         private readonly Dictionary<string, MonitorWindow> _monitors = new Dictionary<string, MonitorWindow>(StringComparer.Ordinal);
         private OverviewWindow _overview;
+        private CheckWindow _checks;
         // 저장된 목록에서 빠졌지만 아직 연결이 살아 있어 목록에 남겨 둔 접속(끊으면 뺀다)
         private readonly HashSet<string> _orphans = new HashSet<string>(StringComparer.Ordinal);
         private readonly DbTreePanel _tree;
@@ -346,6 +347,71 @@ namespace MyPlugin
             ShowOverview();
         }
 
+        void IShellCommands.ShowChecks()
+        {
+            ShowChecks();
+        }
+
+        /// <summary>
+        /// 일일 점검 창(DB Helper 창마다 하나, 있으면 앞으로). DB마다 점검 전용 세션을 열고(<see cref="OpenMonitorSessionAsync"/> — 비밀번호가 없으면 묻는다) 끝나면 닫는다.
+        /// </summary>
+        public void ShowChecks()
+        {
+            try
+            {
+                if (_closed)
+                    return;
+                if (_checks != null)
+                {
+                    _checks.Activate();
+                    return;
+                }
+                _checks = CheckWindow.Show(OwnerWindow(), new CheckWindow.Host
+                {
+                    Profiles = () => _profiles.ToList(),
+                    HasStoredPassword = HasStoredPassword,
+                    Connect = OpenMonitorSessionAsync,
+                    GetSetting = SafeSetting,
+                    SetSetting = SaveSetting,
+                    DataDirectory = DataDirectory,
+                    PluginDirectory = PluginDirectory,
+                    HelpFolder = HelpFolder
+                });
+                _checks.Closed += (s, e) => _checks = null;
+            }
+            catch (Exception ex)
+            {
+                ReportUnexpected(ex, null);
+            }
+        }
+
+        private bool HasStoredPassword(OracleConnectionProfile profile)
+        {
+            try
+            {
+                return !string.IsNullOrEmpty(ConnectionRepository.StoredPassword(SavedProfile(profile.Id) ?? profile));
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private string PluginDirectory
+        {
+            get
+            {
+                try
+                {
+                    return _manager.PluginDirectory;
+                }
+                catch (Exception)
+                {
+                    return null;
+                }
+            }
+        }
+
         /// <summary>
         /// 전체 DB 상태 창(DB Helper 창마다 하나, 있으면 앞으로). 창은 타일마다 전용 세션을 연다 — 저장된 비밀번호가 있는 접속만 스스로,
         /// 없는 접속은 타일을 누를 때 모니터와 같은 경로(<see cref="OpenMonitorSessionAsync"/>)로 묻는다.
@@ -364,19 +430,10 @@ namespace MyPlugin
                 _overview = OverviewWindow.Show(OwnerWindow(), new OverviewWindow.Host
                 {
                     Profiles = () => _profiles.ToList(),
-                    HasStoredPassword = profile =>
-                    {
-                        try
-                        {
-                            return !string.IsNullOrEmpty(ConnectionRepository.StoredPassword(SavedProfile(profile.Id) ?? profile));
-                        }
-                        catch (Exception)
-                        {
-                            return false;
-                        }
-                    },
+                    HasStoredPassword = HasStoredPassword,
                     Connect = OpenMonitorSessionAsync,
                     OpenMonitor = ShowMonitor,
+                    OpenChecks = ShowChecks,
                     GetSetting = SafeSetting,
                     SetSetting = SaveSetting,
                     HelpFolder = HelpFolder
@@ -1730,6 +1787,9 @@ namespace MyPlugin
                 if (_overview != null)
                     _overview.Close();
                 _overview = null;
+                if (_checks != null)
+                    _checks.Close();
+                _checks = null;
             }
             catch (Exception)
             {

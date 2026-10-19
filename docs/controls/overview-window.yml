@@ -41,6 +41,8 @@ features:
       타일 누름(Enter): 그 DB의 성능 모니터(비밀번호 필요면 묻고 붙음). 메뉴: 성능 모니터 열기 · 잠금 트리 열기([잠금] 섹션으로 연다) ·
       지금 새로 고침 · 맨 앞에 고정/고정 풀기 · 이 화면에서 빼기. 고정·숨김은 플러그인 설정(monitor.overview.pinned · monitor.overview.hidden)에
       남고, 숨긴 것이 있으면 머리에 [숨긴 DB 다시 보이기].
+  - name: 일일 점검
+    description: 머리의 [일일 점검…]으로 일일 점검 창을 연다(DB Helper 창마다 하나 — 열려 있으면 앞으로).
 keyboard:
   - keys: F5
     action: 모든 타일 새로 고침.
@@ -71,4 +73,4 @@ verification: >-
 tests:
   - tests/MyPlugin.Tests/OverviewLogicTests.cs
   - tests/MyPlugin.Tests/MonitorTests.cs
-related: [monitor-window, shell-menu, db-helper-view, dialogs]
+related: [monitor-window, shell-menu, db-helper-view, dialogs, check-window]

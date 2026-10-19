@@ -42,7 +42,10 @@ controls:
   - {id: code-spec-dialog, name: CodeSpecDialog, kind: dialog, title: GCM 정의서 만들기}
   - {id: monitor-window, name: MonitorWindow, kind: window, title: 성능 모니터 창}
   - {id: overview-window, name: OverviewWindow, kind: window, title: 전체 DB 상태 창}
+  - {id: check-window, name: CheckWindow, kind: window, title: 일일 점검 창}
+  - {id: check-items-dialog, name: CheckItemsDialog, kind: dialog, title: 점검 항목 관리}
   - {id: connection-manager, name: ConnectionManager, kind: dialog, title: 접속 관리}
   - {id: connection-settings-page, name: ConnectionSettingsPage, kind: settings-page, title: 설정 창 DB 접속 탭}
+  - {id: monitor-settings-page, name: MonitorSettingsPage, kind: settings-page, title: 설정 창 성능 모니터 탭}
   - {id: help-window, name: HelpWindow, kind: window, title: 도움말 창}
   - {id: theme, name: Theme, kind: helper, title: 테마 연결·공용 화면 조각}

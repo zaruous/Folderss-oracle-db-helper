@@ -449,6 +449,22 @@ CREATE TABLE check_result (
   - [시험 실행]은 고른 DB에 대고 SQL을 한 번 돌려 판정 결과를 미리 보인다.
   - 규칙 편집기는 결과 열 이름을 고르는 콤보로, 열 이름을 손으로 치지 않게 한다.
 
+### 구현·실측 (Oracle, 2026-10-20)
+
+- **계약**: `IMonitorProvider.CheckSet`(`MonitorCheckSet` — 서버 식별 SQL `IDENTITY`·`LABEL` + `MonitorCheck` 목록). 위 스케치의 `Value`·`Level` 계약 열 대신
+  규칙이 **열 이름**을 가리킨다(`Threshold("사용률(%)", 85, 95)`·`ByLevel("판정")`) — 결과 열 별칭이 곧 화면·엑셀 머리글이라 별칭 하나로 둘 다 된다.
+  `CheckRule.Threshold`에 **값이 없을 때 단계**(`missing`)를 더했다 — 마지막 백업은 기록이 없으면 `MAX`가 NULL 한 행이라 "값 없음 → 주의".
+- **실행**: `CheckRunner`(DBMS 중립, `Ui/CheckLogic.cs`) — 필요 조건 → 조회(항목마다 60초, 1,000행까지 세고 100행 보관) → 판정. 권한 오류는 공급자 `IsPermissionDenied`로
+  "건너뜀(privilege)", 조건 불충족은 "건너뜀(requirement)", 시간 초과는 "오류(timeout)". 창은 DB마다 점검 전용 세션(동시 4개, 비밀번호 질문은 하나씩).
+- **저장소**: `MonitorStore`(`Db/MonitorStore.cs`) — 위 스키마 그대로 + `db`(db_key·kind·label·처음/마지막 본 시각). WAL·busy_timeout 5초·풀링 끔(작업마다 열고 닫음),
+  `auto_vacuum=INCREMENTAL` + 보관 기간 정리 뒤 `incremental_vacuum`. 더 새 스키마면 읽기만, 열 수 없으면 창이 기록을 끄고 기본 항목만 돈다.
+  **PoC(8-3a ①)**: Folderss와 같은 `AssemblyDependencyResolver` 로드 컨텍스트에서 `e_sqlite3.dll`(publish 폴더 바로 아래)이 `LoadUnmanagedDll`로 불러짐 — JSON 대체는 필요 없다.
+- **엑셀**: `CheckReportModel`·`CheckReportTemplate` — 요약 시트(DB별 상태 수, 가장 나쁜 상태 줄 색, 주의 이상 항목) + `#sheet($db in $dbs)`(항목 표 상태별 줄 색을
+  `#if($check.status == "crit") … #elseif …`로 고른다 — 조건부 서식은 줄 이동을 따라가지 않음, 발견 사항은 열 8칸 `c1~c8`·`v1~v8`). 표지는 요약 시트에 합쳤다.
+- **실측(XE 11.2, SELECT_CATALOG_ROLE 계정, 헤드리스 화면 시험)**: 17개 중 주의 2(NOARCHIVELOG · RMAN 기록 없음), 건너뜀 1(경고 로그 ORA-00942 — 필요 권한 안내), 정상 14,
+  0.7초. 닫힌 포트 DB는 "점검 못 함 ORA-12541"로 다른 DB와 따로. 두 번째 실행에 직전 시각·"같음", 끈 항목은 "건너뜀 — 꺼 둔 항목", 덮어쓴 문턱이 판정에 쓰임.
+- **아직**: Data Guard 지연(스탠바이 환경), DB별 덮어쓰기 화면, 예약 실행, 19c 실측, PostgreSQL·SQL Server 묶음(8-5).
+
 ## 7. 결정 사항
 
 | # | 질문 | 결정(2026-10-19) |
@@ -475,8 +491,8 @@ CREATE TABLE check_result (
 | 8-0 | 2장 공통 기반: `IMonitorProvider` 확장, 세션 키, 대기 분류, 지표 목록, 상태·임계값 | 중립 로직 단위 테스트, PG·SQL Server·Generic은 null·빈 목록으로 기존 테스트 통과 |
 | 8-1 ✔ | 3장 잠금 트리 (Oracle — 2026-10-19 완료, 3장 "구현·실측") | `LockTreeLogic` 테스트(근원·자손 수·유발 대기·순환·여러 블로커·최소 대기). XE 11g·19c에서 2단 연쇄(A→B→C)와 쉬는 근원을 만들어 실측(`FINAL_BLOCKING_SESSION`과 근원 일치), 근원 종료 뒤 B·C 진행 |
 | 8-2 ✔ | 5장 전체 DB (Oracle — 2026-10-19 완료, 5장 "구현·실측") | `OverviewLogic` 경계값 테스트, 접속 실패·비밀번호 없음·시간 초과 타일, 동시 4개 제한 테스트. 실측: 3개 이상 DB를 동시에 |
-| 8-3a | SQLite 저장소(이력 설계 5-3의 파일·스키마 버전·손상 처리) + 점검 테이블 | ① Windows Folderss 안에서 `history.db` 열고 쓰고 읽기 PoC(실패하면 JSON 대체로 전환) ② 스키마 생성·버전 올림·새 버전 파일은 읽기만 ③ 두 연결 동시 쓰기(busy_timeout) ④ 손상 파일이면 기록만 끄고 예외 없음 |
-| 8-3b | 6장 일일 점검 실행·판정·엑셀 | `CheckRunner` 테스트(시간 제한·권한·필요 조건·하나 실패해도 계속), 직전 대비 비교 테스트, 결과에 발견 행이 저장되지 않음 테스트, 기본 양식 렌더 테스트. 실측: SELECT_CATALOG_ROLE 계정으로 전체 묶음, 11g의 경고 로그 건너뜀 안내 |
-| 8-3c | 사용자 점검 항목 관리 | SELECT 한 문장 검사·규칙 JSON 검사·id 충돌 테스트, 내보내기→가져오기 왕복 테스트, [시험 실행] 실측 |
+| 8-3a ✔ | SQLite 저장소(이력 설계 5-3의 파일·스키마 버전·손상 처리) + 점검 테이블 | ① Windows Folderss 안에서 `history.db` 열고 쓰고 읽기 PoC(실패하면 JSON 대체로 전환) ② 스키마 생성·버전 올림·새 버전 파일은 읽기만 ③ 두 연결 동시 쓰기(busy_timeout) ④ 손상 파일이면 기록만 끄고 예외 없음 |
+| 8-3b ✔ | 6장 일일 점검 실행·판정·엑셀 | `CheckRunner` 테스트(시간 제한·권한·필요 조건·하나 실패해도 계속), 직전 대비 비교 테스트, 결과에 발견 행이 저장되지 않음 테스트, 기본 양식 렌더 테스트. 실측: SELECT_CATALOG_ROLE 계정으로 전체 묶음, 11g의 경고 로그 건너뜀 안내 |
+| 8-3c ✔ | 사용자 점검 항목 관리 | SELECT 한 문장 검사·규칙 JSON 검사·id 충돌 테스트, 내보내기→가져오기 왕복 테스트, [시험 실행] 실측 |
 | 8-4 | 4장 활성 세션 이력 | `SampleBuffer`·`SampleLogic` 테스트(구간 집계·분류 몫·Top N·메모리 상한·STATE 판정). 실측: 표본 1회 소요(세션 100개), 수집 부하 표시, 일부러 만든 부하(CPU·잠금·I/O)가 차트 분류로 나뉘는지 |
 | 8-5 | PostgreSQL·SQL Server | 2.3 대응표 확정 후 공급자별로 같은 화면이 동작 — 각 기능의 실측을 같은 방식으로 |

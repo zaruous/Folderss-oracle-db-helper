@@ -1,0 +1,31 @@
+id: monitor-settings-page
+name: MonitorSettingsPage
+title: 설정 창 성능 모니터 탭
+kind: settings-page
+source:
+  - src/MyPlugin/MonitorSettingsPage.cs
+  - src/MyPlugin/Ui/CheckLogic.cs
+  - src/MyPlugin/Db/MonitorStore.cs
+base: Folderss.PluginContract.IPluginSettingsPage
+summary: >-
+  Folderss 설정 창의 "성능 모니터" 탭. 일일 점검 결과 기록 켬·끔, 보관 기간, 이력 파일 위치와 [이력 지우기…].
+features:
+  - name: 기록
+    description: >-
+      "점검할 때마다 결과(상태·값·행 수)를 기록" — 켜 두면 다음 점검에서 직전 대비를 보인다(기본 켬, monitor.check.record). 발견 행은 기록하지 않는다.
+  - name: 보관 기간
+    description: >-
+      7~3650일(기본 90, monitor.history.retentionDays). 점검할 때 지난 실행을 지운다. 범위 밖이면 설정 창 [저장]이 실패로 알린다.
+  - name: 이력 파일과 지우기
+    description: >-
+      history.db 경로와 점검 기록 수(더 새 버전 파일이면 "읽기만"). [이력 지우기…]는 위험 확인(체크해야 눌림) 뒤 바로 모든 점검 기록을 지운다 —
+      사용자 항목과 켬·끔·문턱은 남는다.
+theme:
+  - part: 글자·확인 창
+    keys: [PrimaryText, SecondaryText, Theme.Danger]
+verification: >-
+  2026-10-20 헤드리스 시험 — 보관 기간 3은 저장 실패(7~3650 안내), 기록 끄기·30일 저장, 이력 지우기 확인 창(체크 전 꺼짐) → 지운 건수 안내 → 실행 0건.
+tests:
+  - tests/MyPlugin.Tests/CheckLogicTests.cs
+  - tests/MyPlugin.UiTests/CheckHeadlessTests.cs
+related: [check-window, dialogs, connection-settings-page]

@@ -192,5 +192,8 @@ namespace MyPlugin
 
         /// <summary>전체 DB 화면의 지표는 아직 Oracle만(타일은 "지원 예정").</summary>
         public MonitorOverview Overview { get { return null; } }
+
+        /// <summary>일일 점검은 아직 Oracle만(그 DBMS 접속은 점검 대상에서 빠진다).</summary>
+        public MonitorCheckSet CheckSet { get { return null; } }
     }
 }

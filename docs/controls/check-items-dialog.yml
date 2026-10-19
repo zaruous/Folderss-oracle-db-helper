@@ -1,0 +1,54 @@
+id: check-items-dialog
+name: CheckItemsDialog
+title: 점검 항목 관리
+kind: dialog
+source:
+  - src/MyPlugin/Ui/CheckItemsDialog.cs
+  - src/MyPlugin/Ui/CheckLogic.cs
+  - src/MyPlugin/Db/MonitorStore.cs
+base: Window
+used_by: [check-window]
+summary: >-
+  일일 점검 창의 [항목 관리…](모달). 기본 항목의 켬·끔과 임계값 문턱, 사용자 점검 항목(SELECT 한 문장 + 판정 규칙)의 추가·고치기·지우기·내보내기·가져오기.
+  바꾼 것은 그때그때 history.db에 저장한다.
+features:
+  - name: 기본 항목
+    description: >-
+      점검을 지원하는 DBMS마다 분류별 항목 — 켬·끔 체크(끄면 점검 결과에 "건너뜀 — 꺼 둔 항목"), 임계값 규칙이면 주의·위험 문턱 칸
+      (덮어쓰기가 없으면 기본값을 흐리게, Enter·포커스를 떠날 때 저장, 비우거나 기본값과 같으면 덮어쓰기를 지운다). 모든 DB에 적용(전체 '').
+  - name: 사용자 항목
+    description: >-
+      목록(켬·끔 · 제목 · DBMS · 분류 · 규칙 설명) + [추가…] · [고치기…](두 번 누름) · [지우기](확인, 켬끔·문턱도 함께) · [내보내기…] · [가져오기…].
+      id는 "user." + 12자리라 기본 항목('ora.*')과 겹치지 않는다.
+  - name: 항목 편집 창
+    description: >-
+      제목 · DBMS · 분류(고르기) · SQL · 판정(행이 있으면 주의 · 행이 있으면 위험 · 수 열의 최댓값으로 · 판정 열의 OK·WARN·CRIT · 정보) ·
+      판정 열(손으로 치지 않고 [시험 실행]이 받은 결과 열에서 고른다) · 문턱(주의·위험·값이 없으면) · 조치 안내.
+      [시험 실행]은 고른 DB(같은 DBMS의 접속)에 대고 한 번 돌려 판정 결과와 결과 행을 보인다. 저장 전 검사 — 제목, SQL은 자료를 바꾸지 않는
+      SELECT(WITH) 한 문장(FOR UPDATE 안 됨), 규칙(열·문턱).
+  - name: 내보내기와 가져오기
+    description: >-
+      JSON 파일 하나({"format":"folderss-db-helper-checks","version":1,"items":[…]})로 팀에 나눈다. 가져올 때 항목마다 검사해 잘못된 것이 있으면
+      몇 번째 항목인지와 이유를 보이고 아무것도 넣지 않는다. 같은 id가 있으면 덮어쓸지 묻는다. 'user.'로 시작하지 않는 id는 새로 붙인다.
+keyboard:
+  - keys: Esc
+    action: 닫기.
+  - keys: Enter
+    action: 문턱 칸에서 저장.
+theme:
+  - part: 창·목록·편집 칸
+    keys: [WindowBackground, PanelBackground, PrimaryText, SecondaryText, BorderBrush, AccentBrush]
+  - part: 오류·시험 결과
+    keys: [Theme.Danger, Theme.Warning, Theme.Success]
+limits:
+  - 켬·끔과 문턱은 전체('')에만 — DB별 덮어쓰기 화면은 아직 없다.
+  - 사용자 항목은 지금 점검 묶음이 있는 DBMS(Oracle)만 고를 수 있다. 다른 DBMS 항목을 가져오면 저장은 되지만 돌지 않는다(안내).
+verification: >-
+  2026-10-20 헤드리스 시험(XE 11.2) — 로그 모드 끄기·테이블스페이스 주의 70 저장(check_override), 사용자 항목 "FMON 계정"(DBA_USERS) 추가 →
+  [시험 실행] "주의 — 2건"과 결과 열 목록, 임계값 규칙의 판정 열 미선택·DELETE 문 저장 거부, 저장 → JSON 내보내기, 다시 점검하면 끈 항목은 건너뜀·
+  사용자 항목은 주의·상세에 "≥ 70 주의", 원래대로 되돌리고 지우기 확인.
+tests:
+  - tests/MyPlugin.Tests/CheckLogicTests.cs
+  - tests/MyPlugin.Tests/MonitorStoreTests.cs
+  - tests/MyPlugin.UiTests/CheckHeadlessTests.cs
+related: [check-window, dialogs, result-grid]

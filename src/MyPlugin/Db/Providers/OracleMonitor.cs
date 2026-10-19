@@ -204,6 +204,118 @@ namespace MyPlugin
 
         public MonitorOverview Overview { get { return OverviewQuery; } }
 
+        public MonitorCheckSet CheckSet { get { return Checks; } }
+
+        /// <summary>
+        /// 내장 스키마가 아닌 소유자 조건(11g에는 ORACLE_MAINTAINED가 없어 알려진 목록 + APEX_·FLOWS_ 패턴 — XE 11g의 APEX_040000 등).
+        /// </summary>
+        private static string NotSystemOwner(string column)
+        {
+            return column + " NOT IN (" + string.Join(", ", OracleMetadata.KnownSystemSchemas.Select(s => "'" + s + "'")) + ")"
+                + " AND " + column + " NOT LIKE 'APEX\\_%' ESCAPE '\\' AND " + column + " NOT LIKE 'FLOWS\\_%' ESCAPE '\\'";
+        }
+
+        private const string CatalogPrivilege = "SELECT_CATALOG_ROLE";
+
+        /// <summary>
+        /// 일일 점검 기본 묶음(11.2 XE SELECT_CATALOG_ROLE 계정으로 모든 SQL 실측, 2026-10-20).
+        /// - 경고 로그(V$DIAG_ALERT_EXT)는 11g~12.1에서 SELECT_CATALOG_ROLE로 안 보인다(ORA-00942 → "건너뜀(권한)").
+        /// - 오래된 통계는 휴지통 객체(BIN$)에서 DBMS_STATS가 ORA-20001을 내므로 NO_MERGE 인라인 뷰로 먼저 거른다.
+        /// - 공간은 최대 크기 기준 영구 테이블스페이스만(UNDO·TEMP는 성능 모니터 섹션에서), FRA는 회수 가능 공간을 뺀다.
+        /// - Data Guard 지연은 스탠바이 실측 환경이 없어 아직 넣지 않았다.
+        /// </summary>
+        private static readonly MonitorCheckSet Checks = new MonitorCheckSet(
+            "SELECT 'oracle:' || d.DBID || ':' || d.NAME AS IDENTITY, d.NAME || ' (DBID ' || d.DBID || ')' AS LABEL FROM V$DATABASE d",
+            new[]
+            {
+                new MonitorCheck("ora.instance", "가용성", "인스턴스 상태·가동 시간",
+                    "SELECT i.INST_ID AS \"인스턴스\", i.INSTANCE_NAME AS \"이름\", i.STATUS AS \"상태\", d.OPEN_MODE AS \"열림\","
+                    + " TO_CHAR(i.STARTUP_TIME, 'YYYY-MM-DD HH24:MI') AS \"시작 시각\", ROUND((SYSDATE - i.STARTUP_TIME) * 24, 1) AS \"가동(시간)\","
+                    + " CASE WHEN i.STATUS = 'OPEN' AND d.OPEN_MODE LIKE 'READ WRITE%' THEN 'OK' WHEN i.STATUS = 'OPEN' THEN 'WARN' ELSE 'CRIT' END AS \"판정\""
+                    + " FROM GV$INSTANCE i CROSS JOIN V$DATABASE d ORDER BY i.INST_ID",
+                    CheckRule.ByLevel("판정"), CatalogPrivilege, "열리지 않은 인스턴스는 alert log와 리스너를 확인합니다. 읽기 전용(스탠바이 등)이면 의도한 것인지 확인합니다."),
+                new MonitorCheck("ora.log_mode", "가용성", "아카이브 로그 모드",
+                    "SELECT d.NAME AS \"DB\", d.LOG_MODE AS \"로그 모드\", d.FORCE_LOGGING AS \"강제 로깅\","
+                    + " CASE WHEN d.LOG_MODE = 'ARCHIVELOG' THEN 'OK' ELSE 'WARN' END AS \"판정\" FROM V$DATABASE d",
+                    CheckRule.ByLevel("판정"), CatalogPrivilege, "NOARCHIVELOG면 시점 복구가 안 됩니다. 운영 DB는 ARCHIVELOG로 바꿉니다(개발 DB면 이 항목을 꺼 둡니다)."),
+                new MonitorCheck("ora.archive_dest", "가용성", "아카이브 대상 오류",
+                    "SELECT DEST_ID AS \"대상\", DEST_NAME AS \"이름\", STATUS AS \"상태\", ERROR AS \"오류\" FROM V$ARCHIVE_DEST_STATUS"
+                    + " WHERE STATUS IN ('ERROR', 'DISABLED', 'BAD PARAM', 'FULL') ORDER BY DEST_ID",
+                    CheckRule.AnyRow(CheckLevel.Critical), CatalogPrivilege, "아카이브가 멈추면 곧 DB 전체가 멈춥니다. 대상 경로의 공간·권한과 오류 문구를 확인합니다."),
+                new MonitorCheck("ora.tablespace", "공간", "테이블스페이스 사용률(최대 기준)",
+                    "SELECT m.TABLESPACE_NAME AS \"테이블스페이스\", ROUND(m.USED_SPACE * t.BLOCK_SIZE / 1048576) AS \"사용(MB)\","
+                    + " ROUND(m.TABLESPACE_SIZE * t.BLOCK_SIZE / 1048576) AS \"최대(MB)\", ROUND(m.USED_PERCENT, 1) AS \"사용률(%)\""
+                    + " FROM DBA_TABLESPACE_USAGE_METRICS m JOIN DBA_TABLESPACES t ON t.TABLESPACE_NAME = m.TABLESPACE_NAME"
+                    + " WHERE t.CONTENTS = 'PERMANENT' ORDER BY m.USED_PERCENT DESC",
+                    CheckRule.Threshold("사용률(%)", 85, 95), CatalogPrivilege, "자동 확장 최대 크기 기준입니다. 데이터 파일을 더하거나 최대 크기를 늘리고, OS·ASM 디스크 여유도 확인합니다."),
+                new MonitorCheck("ora.fra", "공간", "FRA 사용률",
+                    "SELECT NAME AS \"위치\", ROUND(SPACE_LIMIT / 1048576) AS \"한도(MB)\", ROUND(SPACE_USED / 1048576) AS \"사용(MB)\","
+                    + " ROUND(SPACE_RECLAIMABLE / 1048576) AS \"회수 가능(MB)\", ROUND((SPACE_USED - SPACE_RECLAIMABLE) * 100 / SPACE_LIMIT, 1) AS \"사용률(%)\""
+                    + " FROM V$RECOVERY_FILE_DEST WHERE SPACE_LIMIT > 0",
+                    CheckRule.Threshold("사용률(%)", 80, 90), CatalogPrivilege, "가득 차면 아카이브가 멈춥니다. 백업된 아카이브를 지우거나(RMAN DELETE) DB_RECOVERY_FILE_DEST_SIZE를 늘립니다.",
+                    new[] { new MonitorRequirement("SELECT COUNT(*) FROM V$RECOVERY_FILE_DEST WHERE SPACE_LIMIT > 0", "FRA(복구 영역)를 쓰지 않습니다.") }),
+                new MonitorCheck("ora.last_backup", "백업", "마지막 성공 백업 경과",
+                    "SELECT TO_CHAR(MAX(END_TIME), 'YYYY-MM-DD HH24:MI') AS \"마지막 성공\", ROUND((SYSDATE - MAX(END_TIME)) * 24, 1) AS \"경과(시간)\""
+                    + " FROM V$RMAN_BACKUP_JOB_DETAILS WHERE STATUS LIKE 'COMPLETED%'",
+                    CheckRule.Threshold("경과(시간)", 26, 50, CheckLevel.Warning), CatalogPrivilege,
+                    "RMAN 백업이 하루 넘게 없거나 기록이 없습니다. 백업 작업과 스케줄을 확인합니다(RMAN 밖 백업이면 이 항목을 꺼 둡니다)."),
+                new MonitorCheck("ora.backup_failures", "백업", "실패·경고 백업(24시간)",
+                    "SELECT TO_CHAR(START_TIME, 'YYYY-MM-DD HH24:MI') AS \"시작\", INPUT_TYPE AS \"종류\", STATUS AS \"상태\", ROUND(ELAPSED_SECONDS / 60, 1) AS \"소요(분)\","
+                    + " CASE WHEN STATUS IN ('FAILED', 'COMPLETED WITH ERRORS', 'RUNNING WITH ERRORS') THEN 'CRIT' ELSE 'WARN' END AS \"판정\""
+                    + " FROM V$RMAN_BACKUP_JOB_DETAILS WHERE START_TIME > SYSDATE - 1 AND STATUS NOT IN ('COMPLETED', 'RUNNING') ORDER BY START_TIME DESC",
+                    CheckRule.ByLevel("판정"), CatalogPrivilege, "RMAN 로그(V$RMAN_OUTPUT)에서 실패 원인을 보고 다시 백업합니다."),
+                new MonitorCheck("ora.alert_log", "로그", "경고 로그 ORA- 오류(24시간)",
+                    "SELECT * FROM (SELECT TO_CHAR(ORIGINATING_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS') AS \"시각\", SUBSTR(MESSAGE_TEXT, 1, 300) AS \"메시지\","
+                    + " CASE WHEN MESSAGE_TEXT LIKE '%ORA-00600%' OR MESSAGE_TEXT LIKE '%ORA-07445%' OR MESSAGE_TEXT LIKE '%ORA-04031%' THEN 'CRIT' ELSE 'WARN' END AS \"판정\""
+                    + " FROM V$DIAG_ALERT_EXT WHERE ORIGINATING_TIMESTAMP > SYSTIMESTAMP - INTERVAL '1' DAY AND MESSAGE_TEXT LIKE '%ORA-%'"
+                    + " ORDER BY ORIGINATING_TIMESTAMP DESC) WHERE ROWNUM <= 200",
+                    CheckRule.ByLevel("판정"), "V$DIAG_ALERT_EXT SELECT(11g~12.1은 SELECT_CATALOG_ROLE로 안 보임 — SYS가 따로 허용)",
+                    "ORA-00600·07445·04031은 내부 오류·메모리 부족입니다. trace 파일과 함께 확인합니다."),
+                new MonitorCheck("ora.log_switch", "로그", "시간당 로그 스위치(24시간)",
+                    "SELECT TO_CHAR(TRUNC(FIRST_TIME, 'HH24'), 'MM-DD HH24') || '시' AS \"시간\", COUNT(*) AS \"스위치(회)\""
+                    + " FROM V$LOG_HISTORY WHERE FIRST_TIME > SYSDATE - 1 GROUP BY TRUNC(FIRST_TIME, 'HH24') ORDER BY COUNT(*) DESC",
+                    CheckRule.Threshold("스위치(회)", 12, 30), CatalogPrivilege, "스위치가 잦으면 리두 로그가 작은 것입니다. 로그 크기를 키워 시간당 4~6회 정도로 맞춥니다."),
+                new MonitorCheck("ora.invalid_objects", "객체", "INVALID 객체",
+                    "SELECT o.OWNER AS \"소유자\", o.OBJECT_TYPE AS \"종류\", o.OBJECT_NAME AS \"객체\", TO_CHAR(o.LAST_DDL_TIME, 'YYYY-MM-DD HH24:MI') AS \"마지막 DDL\""
+                    + " FROM DBA_OBJECTS o WHERE o.STATUS = 'INVALID' AND " + NotSystemOwner("o.OWNER") + " ORDER BY 1, 2, 3",
+                    CheckRule.AnyRow(CheckLevel.Warning), CatalogPrivilege, "다시 컴파일합니다(UTL_RECOMP 또는 ALTER … COMPILE). 계속 INVALID면 참조 객체를 확인합니다."),
+                new MonitorCheck("ora.unusable_indexes", "객체", "UNUSABLE 인덱스·파티션",
+                    "SELECT OWNER AS \"소유자\", INDEX_NAME AS \"인덱스\", CAST(NULL AS VARCHAR2(128)) AS \"파티션\", STATUS AS \"상태\" FROM DBA_INDEXES WHERE STATUS = 'UNUSABLE'"
+                    + " UNION ALL SELECT INDEX_OWNER, INDEX_NAME, PARTITION_NAME, STATUS FROM DBA_IND_PARTITIONS WHERE STATUS = 'UNUSABLE'"
+                    + " UNION ALL SELECT INDEX_OWNER, INDEX_NAME, SUBPARTITION_NAME, STATUS FROM DBA_IND_SUBPARTITIONS WHERE STATUS = 'UNUSABLE' ORDER BY 1, 2, 3",
+                    CheckRule.AnyRow(CheckLevel.Critical), CatalogPrivilege, "UNUSABLE 인덱스는 DML·조회를 실패하게 하거나 느리게 합니다. ALTER INDEX … REBUILD [PARTITION …]."),
+                new MonitorCheck("ora.stale_stats", "객체", "오래된 통계",
+                    "SELECT OWNER AS \"소유자\", TABLE_NAME AS \"테이블\", PARTITION_NAME AS \"파티션\", TO_CHAR(LAST_ANALYZED, 'YYYY-MM-DD') AS \"마지막 분석\""
+                    + " FROM (SELECT /*+ NO_MERGE */ OWNER, TABLE_NAME, PARTITION_NAME, LAST_ANALYZED, STALE_STATS FROM DBA_TAB_STATISTICS"
+                    + " WHERE TABLE_NAME NOT LIKE 'BIN$%' AND " + NotSystemOwner("OWNER") + ") WHERE STALE_STATS = 'YES' ORDER BY 1, 2, 3",
+                    CheckRule.AnyRow(CheckLevel.Warning), CatalogPrivilege, "자동 통계 수집 작업이 도는지 확인하고, 필요한 테이블은 DBMS_STATS.GATHER_TABLE_STATS로 모읍니다."),
+                new MonitorCheck("ora.failed_jobs", "작업·세션", "실패한 스케줄러 작업(24시간)",
+                    "SELECT OWNER AS \"소유자\", JOB_NAME AS \"작업\", TO_CHAR(LOG_DATE, 'YYYY-MM-DD HH24:MI') AS \"시각\", STATUS AS \"상태\", ERROR# AS \"오류 번호\","
+                    + " SUBSTR(ADDITIONAL_INFO, 1, 200) AS \"내용\" FROM DBA_SCHEDULER_JOB_RUN_DETAILS"
+                    + " WHERE STATUS <> 'SUCCEEDED' AND LOG_DATE > SYSTIMESTAMP - INTERVAL '1' DAY ORDER BY LOG_DATE DESC",
+                    CheckRule.AnyRow(CheckLevel.Warning), CatalogPrivilege, "오류 번호와 내용으로 원인을 보고 작업을 다시 실행합니다."),
+                new MonitorCheck("ora.broken_jobs", "작업·세션", "중단·실패한 DBMS_JOB",
+                    "SELECT SCHEMA_USER AS \"소유자\", JOB AS \"번호\", SUBSTR(WHAT, 1, 120) AS \"작업\", BROKEN AS \"중단\", FAILURES AS \"실패 수\","
+                    + " TO_CHAR(LAST_DATE, 'YYYY-MM-DD HH24:MI') AS \"마지막 실행\" FROM DBA_JOBS WHERE BROKEN = 'Y' OR FAILURES > 0 ORDER BY 1, 2",
+                    CheckRule.AnyRow(CheckLevel.Warning), CatalogPrivilege, "DBMS_JOB.BROKEN으로 다시 살리고 실패 원인(alert log·trace)을 확인합니다."),
+                new MonitorCheck("ora.long_running", "작업·세션", "30분 넘게 실행 중인 세션",
+                    "SELECT s.INST_ID AS \"인스턴스\", s.SID AS \"SID\", s.SERIAL# AS \"SERIAL#\", s.USERNAME AS \"사용자\", s.PROGRAM AS \"프로그램\", s.SQL_ID AS \"SQL_ID\","
+                    + " ROUND(s.LAST_CALL_ET / 60) AS \"실행(분)\" FROM GV$SESSION s WHERE s.TYPE = 'USER' AND s.STATUS = 'ACTIVE' AND s.LAST_CALL_ET >= 1800"
+                    + " AND (s.STATE <> 'WAITING' OR s.WAIT_CLASS <> 'Idle') ORDER BY s.LAST_CALL_ET DESC",
+                    CheckRule.AnyRow(CheckLevel.Warning), CatalogPrivilege, "성능 모니터 [세션]에서 SQL 전문·실행 계획을 보고 의도한 배치인지 확인합니다."),
+                new MonitorCheck("ora.blocking", "작업·세션", "잠금 대기(지금)",
+                    "SELECT s.INST_ID AS \"인스턴스\", s.SID AS \"SID\", s.USERNAME AS \"사용자\", s.BLOCKING_INSTANCE || ',' || s.BLOCKING_SESSION AS \"막는 세션\","
+                    + " s.EVENT AS \"대기 이벤트\", ROUND(s.WAIT_TIME_MICRO / 1000000) AS \"대기(초)\" FROM GV$SESSION s"
+                    + " WHERE s.BLOCKING_SESSION_STATUS = 'VALID' AND s.STATE = 'WAITING' AND s.WAIT_TIME_MICRO >= 3000000 ORDER BY s.WAIT_TIME_MICRO DESC",
+                    CheckRule.Threshold("대기(초)", 60, 300), CatalogPrivilege, "성능 모니터 [잠금] 트리에서 근원 세션을 찾아 커밋·롤백하게 하거나 끊습니다."),
+                new MonitorCheck("ora.password_expiry", "보안", "14일 안에 만료되는 비밀번호",
+                    "SELECT USERNAME AS \"사용자\", ACCOUNT_STATUS AS \"상태\", TO_CHAR(EXPIRY_DATE, 'YYYY-MM-DD') AS \"만료일\", PROFILE AS \"프로필\","
+                    + " CASE WHEN ACCOUNT_STATUS = 'EXPIRED' THEN 'CRIT' ELSE 'WARN' END AS \"판정\" FROM DBA_USERS"
+                    + " WHERE EXPIRY_DATE < SYSDATE + 14 AND ACCOUNT_STATUS IN ('OPEN', 'EXPIRED(GRACE)', 'EXPIRED') AND " + NotSystemOwner("USERNAME")
+                    + " ORDER BY EXPIRY_DATE",
+                    CheckRule.ByLevel("판정"), CatalogPrivilege, "응용 계정이 만료되면 접속이 끊깁니다. 비밀번호를 바꾸거나 프로필의 PASSWORD_LIFE_TIME을 확인합니다.")
+            });
+
         /// <summary>
         /// 전체 DB 타일 지표(긴 형식 한 장, 한 번 왕복 — 11.2 XE SELECT_CATALOG_ROLE 계정으로 0.1초).
         /// - 첫 가지의 METRIC·ITEM·TEXT는 VARCHAR2로 CAST(리터럴이 CHAR면 짧은 이름이 공백으로 채워진다).

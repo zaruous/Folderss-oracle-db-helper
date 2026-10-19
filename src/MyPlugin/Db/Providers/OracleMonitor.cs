@@ -202,6 +202,38 @@ namespace MyPlugin
 
         public MonitorLockTree LockTree { get { return Tree; } }
 
+        public MonitorOverview Overview { get { return OverviewQuery; } }
+
+        /// <summary>
+        /// 전체 DB 타일 지표(긴 형식 한 장, 한 번 왕복 — 11.2 XE SELECT_CATALOG_ROLE 계정으로 0.1초).
+        /// - 첫 가지의 METRIC·ITEM·TEXT는 VARCHAR2로 CAST(리터럴이 CHAR면 짧은 이름이 공백으로 채워진다).
+        /// - 테이블스페이스는 영구만, DBA_TABLESPACE_USAGE_METRICS(자동 확장 최대 크기 기준) 높은 3개 — UNDO는 만료된 익스텐트까지, TEMP는 고수위를 사용으로 세어 오경보가 난다.
+        /// - FRA는 회수 가능 공간을 뺀다(예전 FRA 파일까지 SPACE_USED에 들어감). 쓰지 않으면(한도 0) 행 없음.
+        /// - 잠금 대기는 3초 이상만(잠금 트리의 기본 최소 대기). 아카이브 대상은 ERROR·DISABLED(오류 뒤 꺼짐)·BAD PARAM·FULL만 오류.
+        /// - 백업은 COMPLETED%(WITH WARNINGS 포함)의 마지막 끝 시각 — 기록이 없으면 VALUE NULL.
+        /// </summary>
+        private static readonly MonitorOverview OverviewQuery = new MonitorOverview(Privilege,
+            "SELECT CAST('" + MonitorMetrics.ActiveSessions + "' AS VARCHAR2(30)) AS METRIC, CAST(NULL AS VARCHAR2(128)) AS ITEM, COUNT(*) AS VALUE, CAST(NULL AS VARCHAR2(64)) AS TEXT"
+            + " FROM GV$SESSION WHERE TYPE = 'USER' AND STATUS = 'ACTIVE' AND (STATE <> 'WAITING' OR WAIT_CLASS <> 'Idle')"
+            + " UNION ALL SELECT '" + MonitorMetrics.AverageActiveSessions + "', NULL, ROUND(SUM(VALUE), 2), NULL FROM GV$SYSMETRIC WHERE METRIC_NAME = 'Average Active Sessions' AND GROUP_ID = 2"
+            + " UNION ALL SELECT '" + MonitorMetrics.CpuCount + "', NULL, SUM(VALUE), NULL FROM GV$OSSTAT WHERE STAT_NAME = 'NUM_CPUS'"
+            + " UNION ALL SELECT '" + MonitorMetrics.BlockedSessions + "', NULL, COUNT(*), NULL FROM GV$SESSION"
+            + " WHERE BLOCKING_SESSION_STATUS = 'VALID' AND STATE = 'WAITING' AND WAIT_TIME_MICRO >= 3000000"
+            + " UNION ALL SELECT '" + MonitorMetrics.LongestBlockSeconds + "', NULL, MAX(ROUND(WAIT_TIME_MICRO / 1000000)), NULL FROM GV$SESSION"
+            + " WHERE BLOCKING_SESSION_STATUS = 'VALID' AND STATE = 'WAITING'"
+            + " UNION ALL SELECT * FROM (SELECT '" + MonitorMetrics.TablespaceUsedPercent + "', m.TABLESPACE_NAME, ROUND(m.USED_PERCENT, 1), NULL"
+            + " FROM DBA_TABLESPACE_USAGE_METRICS m JOIN DBA_TABLESPACES t ON t.TABLESPACE_NAME = m.TABLESPACE_NAME"
+            + " WHERE t.CONTENTS = 'PERMANENT' ORDER BY m.USED_PERCENT DESC) WHERE ROWNUM <= 3"
+            + " UNION ALL SELECT '" + MonitorMetrics.RecoveryAreaUsedPercent + "', NULL, ROUND((SPACE_USED - SPACE_RECLAIMABLE) * 100 / SPACE_LIMIT, 1), NULL"
+            + " FROM V$RECOVERY_FILE_DEST WHERE SPACE_LIMIT > 0"
+            + " UNION ALL SELECT '" + MonitorMetrics.ArchiveDestErrors + "', NULL, COUNT(*), NULL FROM V$ARCHIVE_DEST_STATUS WHERE STATUS IN ('ERROR', 'DISABLED', 'BAD PARAM', 'FULL')"
+            + " UNION ALL SELECT '" + MonitorMetrics.LastBackupHours + "', NULL, ROUND((SYSDATE - MAX(END_TIME)) * 24, 1), NULL FROM V$RMAN_BACKUP_JOB_DETAILS WHERE STATUS LIKE 'COMPLETED%'"
+            + " UNION ALL SELECT '" + MonitorMetrics.FailedJobs24h + "', NULL, COUNT(*), NULL FROM DBA_SCHEDULER_JOB_RUN_DETAILS"
+            + " WHERE STATUS <> 'SUCCEEDED' AND LOG_DATE > SYSTIMESTAMP - INTERVAL '1' DAY"
+            + " UNION ALL SELECT '" + MonitorMetrics.UptimeHours + "', NULL, ROUND((SYSDATE - MIN(STARTUP_TIME)) * 24, 1), NULL FROM GV$INSTANCE"
+            + " UNION ALL SELECT '" + MonitorMetrics.LogMode + "', NULL, NULL, LOG_MODE FROM V$DATABASE"
+            + " UNION ALL SELECT '" + MonitorMetrics.DbRole + "', NULL, NULL, DATABASE_ROLE FROM V$DATABASE");
+
         /// <summary>트리 상세의 키("INST_ID,SID")를 GV$ 조건으로 푼다. 바인드 :name을 여러 번 쓴다(ODP.NET BindByName).</summary>
         private static string KeyMatch(string alias)
         {

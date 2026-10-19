@@ -50,6 +50,8 @@ namespace MyPlugin
         private readonly DispatcherTimer _timer = new DispatcherTimer();
         private int _current = -1;
         private bool _closed;
+        // 처음 열 때 고를 섹션 id(없으면 첫 섹션)
+        private string _initialSection;
 
         private MonitorWindow(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<Task<DbSession>> connect, string helpFolder, Action<string> log)
         {
@@ -83,7 +85,7 @@ namespace MyPlugin
                     Load(_current, true);
                 }
             };
-            _window.Loaded += (s, e) => Select(0);
+            _window.Loaded += (s, e) => Select(Math.Max(0, IndexOfSection(_initialSection)));
             _window.Closed += (s, e) =>
             {
                 _closed = true;
@@ -101,15 +103,32 @@ namespace MyPlugin
         /// 창을 만들어 보인다. 공급자에 섹션이 없으면 InvalidOperationException(부르는 쪽이 먼저 확인한다).
         /// log: 메시지 탭에 남길 글(로컬호스트 접속에서 설치 절차 안내). null이면 남기지 않는다.
         /// </summary>
-        public static MonitorWindow Show(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<Task<DbSession>> connect, string helpFolder, Action<string> log = null)
+        public static MonitorWindow Show(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<Task<DbSession>> connect, string helpFolder,
+            Action<string> log = null, string initialSection = null)
         {
             if (provider == null)
                 throw new ArgumentNullException(nameof(provider));
             if (provider.Monitor.Sections.Count == 0)
                 throw new InvalidOperationException(MonitorLogic.NotSupportedMessage(provider.DisplayName));
             var monitor = new MonitorWindow(owner, profile, provider, connect, helpFolder, log);
+            monitor._initialSection = initialSection;
             monitor._window.Show();
             return monitor;
+        }
+
+        /// <summary>섹션 id(<see cref="MonitorSections"/>)로 그 섹션을 고른다(전체 DB 화면의 [잠금 트리 열기]). 없는 id면 그대로 둔다.</summary>
+        public void SelectSection(string id)
+        {
+            var index = IndexOfSection(id);
+            if (!_closed && index >= 0)
+                Select(index);
+        }
+
+        private int IndexOfSection(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+                return -1;
+            return _sections.FindIndex(v => string.Equals(v.Section.Id, id, StringComparison.Ordinal));
         }
 
         /// <summary>창이 닫혔을 때(DbHelperView가 DB별 창 목록에서 뺀다).</summary>

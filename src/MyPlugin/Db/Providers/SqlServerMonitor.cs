@@ -189,5 +189,8 @@ namespace MyPlugin
 
         /// <summary>잠금 연쇄 트리는 아직 Oracle만(설계 docs/monitor-dba-design.md 3장의 대응표대로 나중에 채운다).</summary>
         public MonitorLockTree LockTree { get { return null; } }
+
+        /// <summary>전체 DB 화면의 지표는 아직 Oracle만(타일은 "지원 예정").</summary>
+        public MonitorOverview Overview { get { return null; } }
     }
 }

@@ -78,6 +78,8 @@
       PostgreSQL `<insufficient privilege>` 값을 권한 안내로 바꾸기.
 - [ ] 8. 전체 DB 한 화면 — 등록한 DB마다 타일(가장 심각한 상태 색과 그 이유 한 줄, 활성 세션·미니 추이, 공간(최대 기준)·FRA·마지막 백업), 심각도 정렬·고정,
       누르면 그 DB의 성능 모니터. Oracle 먼저, 지표는 긴 형식(METRIC·ITEM·VALUE)으로 이력 설계와 같은 이름. 설계: [`docs/monitor-dba-design.md`](../monitor-dba-design.md) 5장.
+      → Oracle 구현(8-2): 도구 > 전체 DB 상태…, 타일 상태 9가지, 고정·빼기, [잠금 트리 열기]. Folderss 안에서 7개 접속으로 실측. PR: #21.
+      남은 것: 임계값 접속별 덮어쓰기(8-3a SQLite와 함께), PostgreSQL·SQL Server 지표(8-5).
 - [ ] 9. 일일 점검 리포트 — 점검 항목(가용성·공간·백업·로그·객체·작업·보안)을 여러 DB에 한 번에 돌려 정상·주의·위험·건너뜀으로 판정하고 엑셀로(정의서 양식 엔진 재사용).
       Oracle 기본 묶음 먼저. 11g 경고 로그 권한·오래된 통계의 휴지통 ORA-20001 같은 함정은 설계 6장. 설계: [`docs/monitor-dba-design.md`](../monitor-dba-design.md) 6장.
       사용자 점검 항목·덮어쓰기·실행 결과(상태·값만, 발견 행 제외)는 SQLite history.db에 — 저장소 계층(이력 5-3)이 아직 없으므로 이 단계에서 먼저 만든다(8-3a).

@@ -33,6 +33,7 @@ namespace MyPlugin
         private readonly Dictionary<string, DbState> _dbs = new Dictionary<string, DbState>(StringComparer.Ordinal);
         // 열려 있는 성능 모니터 창(DB마다 하나). 닫히면 뺀다.
         private readonly Dictionary<string, MonitorWindow> _monitors = new Dictionary<string, MonitorWindow>(StringComparer.Ordinal);
+        private OverviewWindow _overview;
         // 저장된 목록에서 빠졌지만 아직 연결이 살아 있어 목록에 남겨 둔 접속(끊으면 뺀다)
         private readonly HashSet<string> _orphans = new HashSet<string>(StringComparer.Ordinal);
         private readonly DbTreePanel _tree;
@@ -338,6 +339,54 @@ namespace MyPlugin
                 Dialogs.Show(OwnerWindow(), MonitorLogic.Title, MonitorLogic.PickDbMessage, false);
             else
                 ShowMonitor(dbId);
+        }
+
+        void IShellCommands.ShowOverview()
+        {
+            ShowOverview();
+        }
+
+        /// <summary>
+        /// 전체 DB 상태 창(DB Helper 창마다 하나, 있으면 앞으로). 창은 타일마다 전용 세션을 연다 — 저장된 비밀번호가 있는 접속만 스스로,
+        /// 없는 접속은 타일을 누를 때 모니터와 같은 경로(<see cref="OpenMonitorSessionAsync"/>)로 묻는다.
+        /// </summary>
+        public void ShowOverview()
+        {
+            try
+            {
+                if (_closed)
+                    return;
+                if (_overview != null)
+                {
+                    _overview.Activate();
+                    return;
+                }
+                _overview = OverviewWindow.Show(OwnerWindow(), new OverviewWindow.Host
+                {
+                    Profiles = () => _profiles.ToList(),
+                    HasStoredPassword = profile =>
+                    {
+                        try
+                        {
+                            return !string.IsNullOrEmpty(ConnectionRepository.StoredPassword(SavedProfile(profile.Id) ?? profile));
+                        }
+                        catch (Exception)
+                        {
+                            return false;
+                        }
+                    },
+                    Connect = OpenMonitorSessionAsync,
+                    OpenMonitor = ShowMonitor,
+                    GetSetting = SafeSetting,
+                    SetSetting = SaveSetting,
+                    HelpFolder = HelpFolder
+                });
+                _overview.Closed += (s, e) => _overview = null;
+            }
+            catch (Exception ex)
+            {
+                ReportUnexpected(ex, null);
+            }
         }
 
         public void ShowShortcuts()
@@ -709,6 +758,12 @@ namespace MyPlugin
         /// </summary>
         public void ShowMonitor(string dbId)
         {
+            ShowMonitor(dbId, null);
+        }
+
+        /// <summary>성능 모니터 창을 열고 섹션(<see cref="MonitorSections"/> id, null이면 처음 것·지금 것)을 고른다 — 전체 DB 상태의 [잠금 트리 열기].</summary>
+        public void ShowMonitor(string dbId, string sectionId)
+        {
             try
             {
                 if (string.IsNullOrEmpty(dbId) || _closed)
@@ -726,10 +781,11 @@ namespace MyPlugin
                 if (_monitors.TryGetValue(dbId, out existing))
                 {
                     existing.Activate();
+                    existing.SelectSection(sectionId);
                     return;
                 }
                 var window = MonitorWindow.Show(OwnerWindow(), SavedProfile(dbId) ?? profile, provider, () => OpenMonitorSessionAsync(dbId), HelpFolder,
-                    text => AddMessage(dbId, text, MessageKind.Info));
+                    text => AddMessage(dbId, text, MessageKind.Info), sectionId);
                 _monitors[dbId] = window;
                 window.Closed += (s, e) => _monitors.Remove(dbId);
             }
@@ -1670,6 +1726,10 @@ namespace MyPlugin
                 foreach (var monitor in _monitors.Values.ToList())
                     monitor.Close();
                 _monitors.Clear();
+                // 전체 DB 상태 창도 타일마다 전용 세션을 갖는다
+                if (_overview != null)
+                    _overview.Close();
+                _overview = null;
             }
             catch (Exception)
             {

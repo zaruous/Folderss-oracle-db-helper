@@ -9,7 +9,7 @@ source:
   - src/MyPlugin/Db/Providers/OracleMonitor.cs
   - src/MyPlugin/Db/Providers/PostgresMonitor.cs
   - src/MyPlugin/Db/Providers/SqlServerMonitor.cs
-used_by: [db-helper-view, db-tree-panel, shell-menu]
+used_by: [db-helper-view, db-tree-panel, shell-menu, overview-window]
 summary: >-
   도구 > 성능 모니터…(또는 트리의 DB 행 오른쪽 메뉴)로 여는 창(모달 아님, DB마다 하나).
   공급자(IMonitorProvider)가 주는 섹션 — 기본 정보 · 저장 공간 · 로그 · 잠금 · 세션(PostgreSQL은 데이터베이스까지) — 을 표로 보인다.
@@ -56,6 +56,10 @@ features:
       SQL Server sys.dm_exec_text_query_plan XML, PostgreSQL은 없음)·[세션 정보/통계]. AsText 상세는 표 대신 고정폭 읽기 전용 글 상자(자르지 않음).
       표의 오른쪽 메뉴 [세션 종료…]는 행 값으로 문장(ALTER SYSTEM KILL SESSION … IMMEDIATE · SELECT pg_terminate_backend(n) · KILL n)을 만들어
       위험한 문장 확인 대화상자(문장·경고·확인 체크, dialogs) 뒤 실행하고 섹션을 다시 가져온다. 값이 수가 아니면 만들지 않고, 읽기 전용 접속은 막는다.
+  - name: 처음 섹션
+    description: >-
+      MonitorWindow.Show(…, initialSection)·SelectSection(id)로 처음 고를 섹션을 정한다(전체 DB 상태의 [잠금 트리 열기]는 [잠금]으로).
+      이미 열린 창이면 앞으로 가져오며 그 섹션을 고른다.
   - name: 가져오기
     description: >-
       섹션은 처음 고를 때 가져오고, [새로 고침] · 자동 새로 고침은 보고 있는 섹션만 다시 가져온다.

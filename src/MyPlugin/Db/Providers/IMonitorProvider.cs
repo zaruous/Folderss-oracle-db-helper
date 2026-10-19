@@ -23,6 +23,78 @@ namespace MyPlugin
         /// 지원하지 않으면 null(그 DBMS에서는 [잠금] 섹션 표만). 설계: docs/monitor-dba-design.md 3장.
         /// </summary>
         MonitorLockTree LockTree { get; }
+
+        /// <summary>
+        /// 전체 DB 한 화면의 타일 지표(가벼운 뷰만, 한 번 왕복). 지원하지 않으면 null(그 DBMS 접속의 타일은 "지원 예정").
+        /// 설계: docs/monitor-dba-design.md 5장.
+        /// </summary>
+        MonitorOverview Overview { get; }
+    }
+
+    /// <summary>
+    /// 전체 DB 화면의 지표 조회. 결과는 긴 형식 한 장 — 행 하나 = 지표 하나: <see cref="Metric"/>(<see cref="MonitorMetrics"/>의 이름) ·
+    /// <see cref="Item"/>(테이블스페이스 이름 등, 없으면 NULL) · <see cref="Value"/>(수, 없으면 NULL) · <see cref="Text"/>(글 값, 선택).
+    /// DBMS가 줄 수 없는 지표는 행을 주지 않으면 된다. 목록 밖 이름은 화면이 무시한다. 판정은 <c>OverviewLogic</c>이 한다.
+    /// </summary>
+    internal sealed class MonitorOverview
+    {
+        public const string Metric = "METRIC";
+        public const string Item = "ITEM";
+        public const string Value = "VALUE";
+        public const string Text = "TEXT";
+
+        public MonitorOverview(string privilege, string sql)
+        {
+            if (string.IsNullOrWhiteSpace(sql))
+                throw new ArgumentException("sql이 비었습니다.", nameof(sql));
+            Privilege = privilege ?? "";
+            Sql = sql;
+        }
+
+        /// <summary>필요한 권한(권한 오류 타일에 보임).</summary>
+        public string Privilege { get; }
+
+        /// <summary>조회 SQL(바인드 없음, SELECT만).</summary>
+        public string Sql { get; }
+    }
+
+    /// <summary>
+    /// 전체 DB 화면·이력이 함께 쓰는 지표 이름(닫힌 목록). 이력 설계(monitor-history-design.md 5절)의 metric.name과 같은 이름을 쓴다.
+    /// </summary>
+    internal static class MonitorMetrics
+    {
+        /// <summary>지금 활성인 사용자 세션 수(Idle 대기 제외).</summary>
+        public const string ActiveSessions = "active_sessions";
+        /// <summary>평균 활성 세션(최근 60초, Oracle V$SYSMETRIC 'Average Active Sessions').</summary>
+        public const string AverageActiveSessions = "aas";
+        /// <summary>CPU 수(평균 활성 세션 판정 기준).</summary>
+        public const string CpuCount = "cpu_count";
+        /// <summary>다른 세션에 막혀 3초 이상 기다리는 세션 수(잠금 트리의 기본 최소 대기와 같음).</summary>
+        public const string BlockedSessions = "blocked_sessions";
+        /// <summary>막혀 기다리는 세션의 가장 긴 대기(초).</summary>
+        public const string LongestBlockSeconds = "longest_block_s";
+        /// <summary>영구 테이블스페이스 사용률(자동 확장 최대 크기 기준, %). ITEM = 이름. 높은 것부터 몇 개.</summary>
+        public const string TablespaceUsedPercent = "ts_used_pct";
+        /// <summary>복구 영역(FRA) 사용률(회수 가능 공간을 뺀 값, %). 쓰지 않으면 행 없음.</summary>
+        public const string RecoveryAreaUsedPercent = "fra_used_pct";
+        /// <summary>오류 상태인 아카이브 대상 수.</summary>
+        public const string ArchiveDestErrors = "archive_dest_errors";
+        /// <summary>마지막으로 성공한 백업에서 지난 시간(시간). 백업 기록이 없으면 VALUE NULL.</summary>
+        public const string LastBackupHours = "last_backup_h";
+        /// <summary>최근 24시간에 실패한 예약 작업 수.</summary>
+        public const string FailedJobs24h = "failed_jobs_24h";
+        /// <summary>인스턴스 가동 시간(시간).</summary>
+        public const string UptimeHours = "uptime_h";
+        /// <summary>로그 모드(TEXT: ARCHIVELOG · NOARCHIVELOG) — 판정 없이 보이기만.</summary>
+        public const string LogMode = "log_mode";
+        /// <summary>DB 역할(TEXT: PRIMARY · PHYSICAL STANDBY …) — 판정 없이 보이기만.</summary>
+        public const string DbRole = "db_role";
+
+        public static readonly IReadOnlyList<string> All = new[]
+        {
+            ActiveSessions, AverageActiveSessions, CpuCount, BlockedSessions, LongestBlockSeconds, TablespaceUsedPercent,
+            RecoveryAreaUsedPercent, ArchiveDestErrors, LastBackupHours, FailedJobs24h, UptimeHours, LogMode, DbRole
+        };
     }
 
     /// <summary>
@@ -291,5 +363,7 @@ namespace MyPlugin
         public IReadOnlyList<MonitorSection> Sections { get { return Array.Empty<MonitorSection>(); } }
 
         public MonitorLockTree LockTree { get { return null; } }
+
+        public MonitorOverview Overview { get { return null; } }
     }
 }

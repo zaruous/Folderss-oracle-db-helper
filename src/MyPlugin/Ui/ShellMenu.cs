@@ -35,6 +35,9 @@ namespace MyPlugin
         /// <summary>도구 > 성능 모니터: 트리에서 고른 DB의 기본 정보·저장 공간·로그·잠금·세션 창(필요하면 연결한다).</summary>
         void ShowMonitor();
 
+        /// <summary>도구 > 전체 DB 상태: 저장한 접속마다 상태 타일(가장 심각한 지표와 이유) — 누르면 그 DB의 성능 모니터.</summary>
+        void ShowOverview();
+
         /// <summary>편집 메뉴(잘라내기·복사·되돌리기 등)의 대상. 없으면 null.</summary>
         TextBox ActiveEditor { get; }
         void ToggleComment();
@@ -309,6 +312,9 @@ namespace MyPlugin
             var monitor = Item(MonitorLogic.Title + "(_P)…", null, null, _commands.ShowMonitor);
             monitor.ToolTip = "트리에서 고른 DB의 기본 정보 · 테이블스페이스(남은 용량) · 로그 · 잠금 · 세션을 봅니다. 계정에 V$·DBA_ 뷰(Oracle) 같은 조회 권한이 있어야 합니다";
             top.Items.Add(monitor);
+            var overview = Item(OverviewLogic.Title + "(_A)…", null, null, _commands.ShowOverview);
+            overview.ToolTip = "저장한 접속 전부를 한 화면에 타일로 봅니다 — 잠금 대기·공간(최대 기준)·FRA·백업 가운데 가장 심각한 것과 그 이유. 저장된 비밀번호가 있는 접속만 스스로 붙습니다(지금은 Oracle)";
+            top.Items.Add(overview);
             // 열 때마다 대상 DB(트리에서 고른 것)를 항목 글에 보인다 — 어느 접속으로 만드는지 바로 알 수 있게
             top.SubmenuOpened += (s, e) =>
             {

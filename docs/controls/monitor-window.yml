@@ -1,0 +1,99 @@
+id: monitor-window
+name: MonitorWindow
+title: 성능 모니터 창
+kind: window
+source:
+  - src/MyPlugin/Ui/MonitorWindow.cs
+  - src/MyPlugin/Ui/MonitorLogic.cs
+  - src/MyPlugin/Db/Providers/IMonitorProvider.cs
+  - src/MyPlugin/Db/Providers/OracleMonitor.cs
+  - src/MyPlugin/Db/Providers/PostgresMonitor.cs
+  - src/MyPlugin/Db/Providers/SqlServerMonitor.cs
+used_by: [db-helper-view, db-tree-panel, shell-menu]
+summary: >-
+  도구 > 성능 모니터…(또는 트리의 DB 행 오른쪽 메뉴)로 여는 창(모달 아님, DB마다 하나).
+  공급자(IMonitorProvider)가 주는 섹션 — 기본 정보 · 저장 공간 · 로그 · 잠금 · 세션(PostgreSQL은 데이터베이스까지) — 을 표로 보인다.
+features:
+  - name: 섹션 계약
+    description: >-
+      IDbProvider.Monitor.Sections. 섹션 하나 = 조회 SQL 하나(바인드 없음, SELECT만). 결과 열 별칭이 화면 머리글이라
+      화면은 DBMS 고유 뷰(V$ · pg_catalog · sys.dm_*)를 모른다. 공통 id(info · storage · log · locks · sessions)는 세 DBMS가
+      같은 순서로 갖고 DBMS에만 있는 섹션은 뒤에 더한다. 섹션이 없는 공급자(Generic)는 열지 않는다.
+  - name: 머리
+    description: DB 배지 · DBMS와 주소, 자동 새로 고침 콤보(끔 · 5초 · 15초 · 60초), [새로 고침] · [도움말] · [닫기].
+  - name: 섹션 표
+    description: >-
+      고르는 버튼 줄 아래 설명(무엇을 어디서 읽는지) · 상태(갱신 시각 · 행 수, 오류는 위험색) · 결과 그리드(정렬 · 복사).
+      숫자 열은 값으로 판단한다(MonitorLogic.Columns — 글자만 받으므로). 섹션 하나는 최대 2,000행.
+  - name: 사용률 대시보드
+    description: >-
+      섹션에 MonitorUsageChart(이름·사용·전체 열)가 있으면 표 위에 행마다 사용률 도넛(가운데 %, 아래 이름과 "사용 / 전체").
+      80% 이상 경고색, 90% 이상 위험색, 최대 12개(나머지는 "외 N개는 표에서"). Oracle 테이블스페이스 · SQL Server 데이터 파일에 있고,
+      한도가 없는 PostgreSQL 테이블스페이스에는 없다. WPF Path로 그려 차트 라이브러리가 없다.
+  - name: 행 상세 목록
+    description: >-
+      섹션에 KeyColumn·Details가 있으면(저장 공간) 표 아래 분할선 밑에 상세 영역. 표의 행이나 도넛을 누르면 그 행의 키를 바인드(name)한
+      상세 조회를 실행해 보인다(이전 상세 조회는 취소). 상세가 여럿이면 고르는 버튼(Oracle 데이터 파일 · 세그먼트). PostgreSQL은 객체(pg_class),
+      SQL Server는 파일 그룹의 객체(sys.allocation_units). 행 수는 SQL 안에서 200개로 제한.
+  - name: 느린 SQL·대기 이벤트
+    description: >-
+      [느린 SQL] 누적 소요 상위 50(Oracle V$SQLAREA · PostgreSQL pg_stat_statements(확장, 13+) · SQL Server sys.dm_exec_query_stats). 행을 누르면
+      SQL 전문·실행 계획(Oracle DISPLAY_CURSOR 전 자식, SQL Server 캐시 계획 XML; PostgreSQL은 전문만)·Oracle 자식 커서.
+      [대기 이벤트] Oracle V$SYSTEM_EVENT(Idle 제외)·SQL Server sys.dm_os_wait_stats(유휴·내부 대기 제외)의 누적 상위 50과 지금 대기 수,
+      PostgreSQL은 이 순간 활성 세션의 wait_event 집계(누적 통계 없음).
+  - name: 세션 상세·세션 종료
+    description: >-
+      잠금·세션 섹션은 키가 세션 번호(Oracle SID · PostgreSQL PID · SQL Server 세션). 행을 누르면 [SQL 전문]·[실행 계획](Oracle DBMS_XPLAN.DISPLAY_CURSOR,
+      SQL Server sys.dm_exec_text_query_plan XML, PostgreSQL은 없음)·[세션 정보/통계]. AsText 상세는 표 대신 고정폭 읽기 전용 글 상자(자르지 않음).
+      표의 오른쪽 메뉴 [세션 종료…]는 행 값으로 문장(ALTER SYSTEM KILL SESSION … IMMEDIATE · SELECT pg_terminate_backend(n) · KILL n)을 만들어
+      위험한 문장 확인 대화상자(문장·경고·확인 체크, dialogs) 뒤 실행하고 섹션을 다시 가져온다. 값이 수가 아니면 만들지 않고, 읽기 전용 접속은 막는다.
+  - name: 가져오기
+    description: >-
+      섹션은 처음 고를 때 가져오고, [새로 고침] · 자동 새로 고침은 보고 있는 섹션만 다시 가져온다.
+      창마다 모니터 전용 세션을 따로 연다(SQL 탭의 세션·트랜잭션과 무관 — 자동 새로 고침과 사용자 실행이 서로 기다리지 않고, 트리에서 연결하지 않아도 된다).
+      처음 가져올 때 열고(저장된 비밀번호가 없으면 묻는다), 끊겼으면 다음 가져오기 때 다시 연다. 창을 닫거나 DB Helper 창을 닫으면 정리한다.
+      상태 글에 조회 소요 시간을 붙이고, 행 상세는 (상세, 키)별로 캐시한다(섹션을 새로 가져오면 비움 — 캐시에서 보이면 "· 캐시").
+  - name: 필요 조건 점검(설치·버전)
+    description: >-
+      섹션에 MonitorRequirement(점검 SQL·안내문)가 있으면 가져오기 전에 순서대로 점검한다. 행이 없거나 첫 값이 0·false면 조회하지 않고
+      "설치·설정 필요 — …"를 경고색(Theme.Warning)으로 보인다(권한 오류의 위험색과 구분). 지금은 PostgreSQL 느린 SQL: 서버 13 이상 → pg_stat_statements 확장.
+      접속 호스트가 이 PC(localhost · 127.x · ::1 · 컴퓨터 이름)면 사용자가 직접 설치할 수 있으므로 설치 절차·링크(InstallGuide)를
+      메시지 탭(result-message-list)에 한 번 남기고 상태 글에 "(설치 절차는 메시지 탭에)"를 붙인다. 원격 서버면 남기지 않는다.
+  - name: 권한 오류
+    description: >-
+      IDbProvider.IsPermissionDenied(Oracle ORA-00942 · 01031, PostgreSQL 42501, SQL Server 229 · 230 · 297 · 300 · 916)면
+      섹션의 필요 권한과 함께 "권한이 없어 가져오지 못했습니다"로 보인다. 섹션마다 따로 실패한다.
+      PostgreSQL 크기 함수(pg_tablespace_size · pg_database_size)는 서버의 허용 조건(CREATE · CONNECT 권한, pg_read_all_stats, 현재 DB의 기본 테이블스페이스)일 때만
+      불러, 볼 수 없는 행은 크기만 "(권한 필요)"로 비우고 섹션은 실패하지 않는다(일반 계정이 pg_global 때문에 테이블스페이스 섹션 전체를 못 보던 문제).
+keyboard:
+  - keys: F5
+    action: 보고 있는 섹션 새로 고침.
+  - keys: Esc
+    action: 닫기.
+theme:
+  - part: 창·표
+    keys: [WindowBackground, PanelBackground, PrimaryText, SecondaryText, BorderBrush, AccentBrush]
+  - part: 오류 상태 · 설치 필요 상태
+    keys: [Theme.Danger, Theme.Warning]
+  - part: 사용률 도넛
+    keys: [BorderBrush, AccentBrush, Theme.Warning, Theme.Danger]
+states:
+  - 비밀번호 입력을 취소함 → "모니터 세션을 열지 못했습니다 …"(위험색). [새로 고침]으로 다시 연다. 연결 오류는 그 섹션 상태에 오류 글.
+  - 가져오는 중 → "가져오는 중…". 끝나면 "갱신 HH:mm:ss · N행 · 0.8초"(2,000행이면 "앞 2,000행 · 더 있을 수 있음").
+limits:
+  - 모니터 전용 세션은 DB 쪽에서 세션 하나를 더 쓴다(세션 목록에 이 창의 세션도 보인다). 저장된 비밀번호가 없으면 SQL 탭 연결과 별도로 한 번 더 묻는다.
+  - 단위 테스트는 섹션 SQL의 모양만 본다(V$ · pg_catalog · sys.dm_*는 SQLite로 흉내 낼 수 없다). 2026-10-19에 Folderss 1.8.8 안에서 Oracle 11.2 XE · 19.9,
+    PostgreSQL 16, SQL Server 2022에 대고 모든 섹션 · 상세 · 실제 잠금 · 세션 종료를 실측했다. SQL Server 2008 R2 이하는 로그 · 잠금 · 세션 · 느린 SQL이
+    실패한다(2012부터 있는 DMV · 열).
+  - SQL Server 세션의 SQL 전문은 한 문장만 보인다. MARS 연결은 sys.dm_exec_connections에 행이 여럿이라(물리 1 + 논리) 요청 → 최근에 읽은 연결 순으로 하나를 고른다.
+  - Oracle 잠금의 객체는 TM이면 그 테이블, 행 잠금을 기다리는 TX면 V$SESSION.ROW_WAIT_OBJ#의 테이블이다. 막는 쪽 TX는 빈 칸(어느 행을 잡았는지 V$로 알 수 없다).
+  - PostgreSQL 테이블스페이스는 남은 용량을 알 수 없다(파일 시스템이 한도). SQL Server 저장 공간은 현재 DB의 파일만.
+  - 사용률 도넛 말고 이력 그래프 · 임계값 알림은 없다. 도넛의 문턱(80 · 90%)은 고정이다.
+  - SQL Server 상세는 파일이 아니라 파일 그룹 단위다(한 파일 그룹에 파일이 여럿이면 같은 객체 목록). PostgreSQL 상세는 현재 DB의 객체만.
+  - 기본 정보 · 로그 · 대기 이벤트 · 데이터베이스 섹션에는 행 상세가 없다. 느린 SQL은 누적값이라 "지금 느린 것"이 아니라 "시작 뒤 많이 쓴 것"이다(기간 비교는 TODO 5). PostgreSQL은 다른 세션의 실행 계획을 주지 않고, SQL 전문도 서버가 track_activity_query_size(기본 1,024자)까지만 보관한다.
+  - 세션 종료는 바인드가 안 되는 문장이라 값이 숫자일 때만 문장에 넣는다(IsDigits). 잠금 연쇄를 트리로 보이지는 않는다.
+  - Oracle 임시 테이블스페이스 사용은 V$SORT_SEGMENT(지금 쓰는 정렬 세그먼트), UNDO는 ACTIVE·UNEXPIRED 익스텐트만 — DBA_FREE_SPACE 기준과 다르다.
+  - Oracle 11g 식별자 한도(30바이트) 때문에 한국어 별칭은 10자 이내.
+tests:
+  - tests/MyPlugin.Tests/MonitorTests.cs
+related: [result-grid, table-info-window, code-spec-dialog, dialogs, result-message-list]

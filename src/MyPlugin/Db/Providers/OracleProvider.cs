@@ -16,6 +16,7 @@ namespace MyPlugin
         public const string KindName = "oracle";
 
         private readonly IMetadataProvider _metadata = new OracleMetadataProvider();
+        private readonly IMonitorProvider _monitor = new OracleMonitor();
 
         public string Kind { get { return KindName; } }
         public string DisplayName { get { return "Oracle"; } }
@@ -23,6 +24,7 @@ namespace MyPlugin
         public string ServiceLabel { get { return "서비스명"; } }
         public ISqlDialect Dialect { get { return SqlDialects.Oracle; } }
         public IMetadataProvider Metadata { get { return _metadata; } }
+        public IMonitorProvider Monitor { get { return _monitor; } }
 
         public List<string> Validate(OracleConnectionProfile profile, string label)
         {
@@ -75,6 +77,13 @@ namespace MyPlugin
         public bool IsBroken(Exception ex)
         {
             return false;
+        }
+
+        /// <summary>ORA-00942(테이블·뷰가 없음 — 권한이 없는 V$·DBA_ 뷰도 이 오류), ORA-01031(권한 부족).</summary>
+        public bool IsPermissionDenied(Exception ex)
+        {
+            var oracle = ex as OracleException;
+            return oracle != null && (oracle.Number == 942 || oracle.Number == 1031);
         }
 
         /// <summary>기존 정적 OracleMetadata에 위임.</summary>
@@ -143,6 +152,7 @@ namespace MyPlugin
         public string ServiceLabel { get { return "데이터베이스"; } }
         public ISqlDialect Dialect { get { return SqlDialects.Generic; } }
         public IMetadataProvider Metadata { get { throw new NotSupportedException("이 연결에는 데이터 사전 조회가 없습니다."); } }
+        public IMonitorProvider Monitor { get { return NoMonitor.Instance; } }
         public List<string> Validate(OracleConnectionProfile profile, string label) { return new List<string>(); }
         public string BuildConnectionString(OracleConnectionProfile profile, string password, int timeoutSeconds) { throw new NotSupportedException(); }
         public DbConnection CreateConnection(string connectionString) { throw new NotSupportedException(); }
@@ -152,5 +162,6 @@ namespace MyPlugin
         public bool SupportsMultipleOpenReaders { get { return true; } }
         public bool IsCancellation(Exception ex) { return false; }
         public bool IsBroken(Exception ex) { return false; }
+        public bool IsPermissionDenied(Exception ex) { return false; }
     }
 }

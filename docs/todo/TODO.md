@@ -40,3 +40,32 @@
 - [ ] 3. `SqlEditor` 전용 컨트롤로 교체 — TextBox 1:1 흉내가 아닌 의도 단위 API, 직접 그린 줄 번호 삭제, 컨트롤 기술서 갱신.
 - [ ] 4. 강조 색칠 연결 — 테마별 색, 실측 재측정.
 - [ ] (별도) 테이블 이름 강조 — 메타데이터 대조 방식, 1~4 이후 검토.
+
+## 성능 모니터 (DBA가 실제로 쓰려면)
+
+검토(2026-10-19): 지금은 "가끔 들여다보는 조회 창"이다. 아래 순서로 채운다. 1·2는 진행하기로 함.
+
+- [ ] 1. 세 DBMS 실 검증 — 모든 섹션·상세·조치 SQL을 Oracle 11g/19c · PostgreSQL 10+ · SQL Server 2012+에 실제로 붙여 돌려 본다
+      (이 세션의 리눅스 환경에서는 못 함). 문법 오류 한 건이 도구 전체 신뢰를 깎는다.
+      → 임시(V$SORT_SEGMENT)·UNDO(DBA_UNDO_EXTENTS ACTIVE·UNEXPIRED) 사용률 수정은 함. PR: #20 · 버전: 1.9.0
+- [x] 2. 세션 상세와 세션 종료 — 잠금·세션 행을 누르면 SQL 전문·실행 계획(Oracle DBMS_XPLAN, SQL Server XML)·세션 정보/통계,
+      오른쪽 메뉴 [세션 종료…](ALTER SYSTEM KILL SESSION · pg_terminate_backend · KILL)는 위험한 문장 확인 대화상자 + 읽기 전용 접속 차단.
+      → 잠금 연쇄(누가 누구를 막는지)를 트리로 보이는 것은 아직 아님. PR: #20 · 버전: 1.9.0
+- [x] 3. 느린 SQL — Top SQL 섹션(Oracle V$SQLAREA, PostgreSQL pg_stat_statements(확장 유무 확인), SQL Server sys.dm_exec_query_stats)과
+      대기 이벤트 요약(V$SESSION_WAIT 집계 · pg_stat_activity wait_event 집계 · sys.dm_os_wait_stats).
+      → [느린 SQL] 누적 소요 상위 50(행 상세: 전문·실행 계획·Oracle 자식 커서), [대기 이벤트] Oracle V$SYSTEM_EVENT(Idle 제외)·SQL Server dm_os_wait_stats(유휴 제외)·
+      PostgreSQL은 이 순간 활성 세션 집계(누적 없음). pg_stat_statements는 13+ 열 이름이라 12 이하는 오류. PR: #20 · 버전: 1.9.0
+- [x] 4. 모니터 전용 세션 분리 — 지금은 SQL 탭과 세션(트랜잭션·잠금)을 같이 써서 자동 새로 고침이 사용자 실행과 서로 기다린다.
+      상세 결과 캐시와 조회 소요 시간 표시도 함께.
+      → 창마다 전용 DbSession(처음 가져올 때 열고 끊기면 다시 엶, 창·DB Helper 창을 닫으면 정리). 비밀번호는 저장값, 없으면 다시 묻는다(SQL 탭에서 입력한 값은
+      메모리에 두지 않는 원칙). 상태 글에 소요 시간, 상세는 (상세, 키)별 캐시(섹션 새로 고침 때 비움). PR: #20 · 버전: 1.9.0
+- [ ] 5. 변화 보기 — 직전 스냅샷과의 차이(세션 수 증감·테이블스페이스 증가량·로그 스위치 증가), 창이 열려 있는 동안의 간단한 이력,
+      임계값(지금 80·90% 고정) 설정과 Folderss 메시지 탭·트레이 알림. 수집기·저장소가 필요한 영역이라 범위를 먼저 정할 것.
+      → 설계안: [`docs/monitor-history-design.md`](../monitor-history-design.md). 채택: 3단(메모리 · 로컬 숫자 파일 · 서버 자체 이력),
+      로컬 파일 이력은 설정 탭 "성능 모니터"의 선택지(기본 끔, 주기·제외 접속, 보관 기간은 기본 90일·설정에서 숫자로 정하는 선택 값 7~3650일), 저장소는 SQLite(history.db 하나 — PGlite 비권장,
+      Windows에서 e_sqlite3 로드가 안 되면 JSONL). 남은 결정: OS 알림 계약 변경, AWR 읽기.
+      순서 5-1 메모리 구간·추이 → 5-2 임계값·배지·메시지 → 5-3 이력 파일·설정 탭 → 5-4 가득 참 예측.
+- [ ] 6. 저장 공간 보강 — 증가 추세("며칠 뒤 가득 차는가": DBA_HIST_TBSPC_SPACE_USAGE는 Diagnostic Pack 라이선스 필요, 아니면 자체 스냅샷),
+      ASM·OS 디스크 여유(자동 확장의 실제 한도 — 없으면 "최대(MB)"가 안심을 주는 쪽으로 오도).
+- [ ] 7. 권한 현실 — 운영 DB에서 애플리케이션 계정에 SELECT_CATALOG_ROLE을 주는 곳은 드물다. 같은 DB에 "모니터 전용 계정"을 묶는 접속 설정,
+      PostgreSQL `<insufficient privilege>` 값을 권한 안내로 바꾸기.

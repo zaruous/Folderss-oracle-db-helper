@@ -31,6 +31,8 @@ namespace MyPlugin
 
         private readonly IPluginManager _manager;
         private readonly Dictionary<string, DbState> _dbs = new Dictionary<string, DbState>(StringComparer.Ordinal);
+        // 열려 있는 성능 모니터 창(DB마다 하나). 닫히면 뺀다.
+        private readonly Dictionary<string, MonitorWindow> _monitors = new Dictionary<string, MonitorWindow>(StringComparer.Ordinal);
         // 저장된 목록에서 빠졌지만 아직 연결이 살아 있어 목록에 남겨 둔 접속(끊으면 뺀다)
         private readonly HashSet<string> _orphans = new HashSet<string>(StringComparer.Ordinal);
         private readonly DbTreePanel _tree;
@@ -327,6 +329,15 @@ namespace MyPlugin
                 Dialogs.Show(OwnerWindow(), CodeSpecLogic.Title, "트리에서 대상 DB(또는 그 안의 객체)를 고른 뒤 다시 누르세요.", false);
             else
                 CreateCodeSpec(dbId);
+        }
+
+        void IShellCommands.ShowMonitor()
+        {
+            var dbId = _tree.SelectedDbId();
+            if (dbId == null)
+                Dialogs.Show(OwnerWindow(), MonitorLogic.Title, MonitorLogic.PickDbMessage, false);
+            else
+                ShowMonitor(dbId);
         }
 
         public void ShowShortcuts()
@@ -689,6 +700,83 @@ namespace MyPlugin
             catch (Exception ex)
             {
                 ReportUnexpected(ex, dbId);
+            }
+        }
+
+        /// <summary>
+        /// 성능 모니터 창(DB마다 하나, 같은 DB면 있는 창을 앞으로). 창은 **모니터 전용 세션**을 따로 연다 — SQL 탭의 세션·트랜잭션과 무관해서
+        /// 자동 새로 고침과 사용자 실행이 서로 기다리지 않고, 트리에서 연결하지 않아도 열 수 있다. 공급자에 모니터 섹션이 없으면(Generic) 알리고 열지 않는다.
+        /// </summary>
+        public void ShowMonitor(string dbId)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(dbId) || _closed)
+                    return;
+                var profile = FindProfile(dbId);
+                if (profile == null)
+                    return;
+                var provider = DbProviders.For(profile);
+                if (provider.Monitor.Sections.Count == 0)
+                {
+                    Dialogs.Show(OwnerWindow(), MonitorLogic.Title, MonitorLogic.NotSupportedMessage(provider.DisplayName), false);
+                    return;
+                }
+                MonitorWindow existing;
+                if (_monitors.TryGetValue(dbId, out existing))
+                {
+                    existing.Activate();
+                    return;
+                }
+                var window = MonitorWindow.Show(OwnerWindow(), SavedProfile(dbId) ?? profile, provider, () => OpenMonitorSessionAsync(dbId), HelpFolder,
+                    text => AddMessage(dbId, text, MessageKind.Info));
+                _monitors[dbId] = window;
+                window.Closed += (s, e) => _monitors.Remove(dbId);
+            }
+            catch (Exception ex)
+            {
+                ReportUnexpected(ex, dbId);
+            }
+        }
+
+        /// <summary>
+        /// 모니터 전용 세션을 연다(저장된 접속 정보로). 저장된 비밀번호가 없거나 풀 수 없으면 그때 묻는다 — SQL 탭 연결 때 입력한 비밀번호는
+        /// 기억하지 않으므로(메모리에 두지 않는 원칙) 다시 묻는다. 취소하면 null. 연결 오류는 예외로 올린다(창이 그 섹션 상태에 보인다).
+        /// </summary>
+        private async Task<DbSession> OpenMonitorSessionAsync(string dbId)
+        {
+            var profile = SavedProfile(dbId);
+            if (profile == null || _closed)
+                return null;
+            string password = null;
+            string reason = null;
+            try
+            {
+                password = ConnectionRepository.StoredPassword(profile);
+            }
+            catch (Exception ex)
+            {
+                reason = ex.Message;
+            }
+            if (string.IsNullOrEmpty(password))
+            {
+                password = PasswordPrompt.Ask(OwnerWindow(), profile, reason ?? ShellLogic.NoStoredPasswordReason);
+                if (string.IsNullOrEmpty(password) || _closed)
+                    return null;
+            }
+            var provider = DbProviders.For(profile);
+            var connectionString = OracleConnectionStore.BuildConnectionString(profile, password, ShellLogic.ConnectTimeoutSeconds);
+            password = null;
+            var session = DbSession.Create(provider, connectionString);
+            try
+            {
+                await session.OpenAsync();
+                return session;
+            }
+            catch (Exception)
+            {
+                DisposeInBackground(session);
+                throw;
             }
         }
 
@@ -1575,6 +1663,17 @@ namespace MyPlugin
             catch (Exception)
             {
                 // 창이 닫히는 중이라 알릴 곳이 없다 — 세션 정리는 계속한다
+            }
+            try
+            {
+                // 모니터 창은 각자 전용 세션을 갖는다 — 닫으면 그 세션도 정리된다
+                foreach (var monitor in _monitors.Values.ToList())
+                    monitor.Close();
+                _monitors.Clear();
+            }
+            catch (Exception)
+            {
+                // 닫는 중 — 남은 정리를 계속한다
             }
             try
             {

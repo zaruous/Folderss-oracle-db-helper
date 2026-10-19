@@ -32,6 +32,9 @@ namespace MyPlugin
         /// <summary>도구 > GCM 정의서 만들기: 트리에서 고른 DB로 사용자 SQL·별칭 계약 창.</summary>
         void CreateCodeSpec();
 
+        /// <summary>도구 > 성능 모니터: 트리에서 고른 DB의 기본 정보·저장 공간·로그·잠금·세션 창(필요하면 연결한다).</summary>
+        void ShowMonitor();
+
         /// <summary>편집 메뉴(잘라내기·복사·되돌리기 등)의 대상. 없으면 null.</summary>
         TextBox ActiveEditor { get; }
         void ToggleComment();
@@ -302,6 +305,10 @@ namespace MyPlugin
             var codes = Item("GCM 정의서 만들기(_G)…", null, null, _commands.CreateCodeSpec);
             codes.ToolTip = "트리에서 고른 DB에서 공통 코드(GCM) 조회 SQL을 실행해 엑셀·JSON·CSV 정의서를 만듭니다. SQL의 결과 열 별칭(TABLE_NAME·CODE·CODE_NAME …)만 맞으면 됩니다. 창 안에서 대상 DB를 바꿀 수 있습니다";
             top.Items.Add(codes);
+            top.Items.Add(new Separator());
+            var monitor = Item(MonitorLogic.Title + "(_P)…", null, null, _commands.ShowMonitor);
+            monitor.ToolTip = "트리에서 고른 DB의 기본 정보 · 테이블스페이스(남은 용량) · 로그 · 잠금 · 세션을 봅니다. 계정에 V$·DBA_ 뷰(Oracle) 같은 조회 권한이 있어야 합니다";
+            top.Items.Add(monitor);
             // 열 때마다 대상 DB(트리에서 고른 것)를 항목 글에 보인다 — 어느 접속으로 만드는지 바로 알 수 있게
             top.SubmenuOpened += (s, e) =>
             {
@@ -309,6 +316,7 @@ namespace MyPlugin
                     return;
                 var state = SafeState();
                 codes.Header = ShellLogic.CodeSpecMenuText(state.DbName);
+                monitor.Header = MonitorLogic.MenuText(state.DbName);
             };
             return top;
         }

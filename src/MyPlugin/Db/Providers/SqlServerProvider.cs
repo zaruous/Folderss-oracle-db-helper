@@ -16,6 +16,7 @@ namespace MyPlugin
         public const string KindName = "mssql";
 
         private readonly IMetadataProvider _metadata = new SqlServerMetadata();
+        private readonly IMonitorProvider _monitor = new SqlServerMonitor();
 
         public string Kind { get { return KindName; } }
         public string DisplayName { get { return "SQL Server"; } }
@@ -23,6 +24,7 @@ namespace MyPlugin
         public string ServiceLabel { get { return "데이터베이스"; } }
         public ISqlDialect Dialect { get { return SqlDialects.SqlServer; } }
         public IMetadataProvider Metadata { get { return _metadata; } }
+        public IMonitorProvider Monitor { get { return _monitor; } }
 
         public List<string> Validate(OracleConnectionProfile profile, string label)
         {
@@ -95,6 +97,24 @@ namespace MyPlugin
                     return true;
             }
             return sql.Class >= 20;
+        }
+
+        /// <summary>229·230(개체 권한 거부), 297(권한 없음), 300(VIEW SERVER STATE 거부), 916(msdb 같은 다른 DB 접근 불가).</summary>
+        public bool IsPermissionDenied(Exception ex)
+        {
+            var sql = ex as SqlException;
+            if (sql == null)
+                return false;
+            switch (sql.Number)
+            {
+                case 229:
+                case 230:
+                case 297:
+                case 300:
+                case 916:
+                    return true;
+            }
+            return false;
         }
     }
 

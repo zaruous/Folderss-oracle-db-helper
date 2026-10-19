@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="help.css">
 </head>
 <body>
-<div class="nav"><a href="index.html">개요·단축키</a><a href="connections.html">접속</a><a href="table-spec.html">테이블 정의서</a><a href="gcm-spec.html">GCM 정의서</a></div>
+<div class="nav"><a href="index.html">개요·단축키</a><a href="connections.html">접속</a><a href="table-spec.html">테이블 정의서</a><a href="gcm-spec.html">GCM 정의서</a><a href="monitor.html">성능 모니터</a></div>
 <h1>접속</h1>
 <p><b>연결 &gt; 접속 관리…</b>에서 접속을 추가·복제·삭제·편집하고 [접속 테스트]로 확인합니다. 비밀번호는 이 PC의 이 Windows 사용자만 풀 수 있게(DPAPI) 저장하며, 저장하지 않고 연결 때마다 입력할 수도 있습니다. 색 표시(개발 초록 · 검증 노랑 · 운영 빨강)는 탭·트리·확인 창의 배지에 쓰입니다.</p>
 
@@ -29,6 +29,7 @@
 <tr><td>GCM 정의서</td><td>됨</td><td>됨</td><td>됨</td></tr>
 <tr><td>테이블 정보(F4) · 테이블 정의서</td><td>됨</td><td>안내만(예정)</td><td>안내만(예정)</td></tr>
 <tr><td>PL/SQL 컴파일 오류 목록</td><td>됨</td><td>—</td><td>—</td></tr>
+<tr><td><a href="monitor.html">성능 모니터</a>(기본 정보 · 저장 공간 · 로그 · 잠금 · 세션)</td><td>됨(V$·DBA_ 뷰 권한)</td><td>됨(일부는 pg_read_all_stats)</td><td>됨(VIEW SERVER STATE)</td></tr>
 </table>
 <div class="note"><b>PostgreSQL</b>은 연결당 결과 커서가 하나입니다. 조회 결과를 열어 둔 채 다른 문장이나 조회(GCM 정의서 포함)를 실행하면 이전 결과의 [다음 행 가져오기]가 꺼집니다(가져온 행은 그대로).</div>
 

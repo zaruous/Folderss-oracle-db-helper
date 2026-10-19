@@ -35,10 +35,30 @@ namespace MyPlugin
         public static readonly IReadOnlyList<string> Common = new[] { Info, Storage, Log, Locks, Sessions };
     }
 
-    /// <summary>성능 모니터 섹션 하나: 제목·설명·필요 권한·조회 SQL.</summary>
+    /// <summary>
+    /// 섹션 위 대시보드의 사용률 원형(도넛) 차트: 행마다 하나, 이름 열·사용 열·전체 열 이름(결과 열 별칭)으로 그린다.
+    /// 전체가 0이거나 수로 읽히지 않는 행은 건너뛴다. 한도가 없는 저장 공간(PostgreSQL 테이블스페이스)은 차트를 두지 않는다.
+    /// </summary>
+    internal sealed class MonitorUsageChart
+    {
+        public MonitorUsageChart(string nameColumn, string usedColumn, string totalColumn)
+        {
+            if (string.IsNullOrWhiteSpace(nameColumn) || string.IsNullOrWhiteSpace(usedColumn) || string.IsNullOrWhiteSpace(totalColumn))
+                throw new ArgumentException("차트 열 이름이 비었습니다.");
+            NameColumn = nameColumn;
+            UsedColumn = usedColumn;
+            TotalColumn = totalColumn;
+        }
+
+        public string NameColumn { get; }
+        public string UsedColumn { get; }
+        public string TotalColumn { get; }
+    }
+
+    /// <summary>성능 모니터 섹션 하나: 제목·설명·필요 권한·조회 SQL(·사용률 차트).</summary>
     internal sealed class MonitorSection
     {
-        public MonitorSection(string id, string title, string description, string privilege, string sql)
+        public MonitorSection(string id, string title, string description, string privilege, string sql, MonitorUsageChart chart = null)
         {
             if (string.IsNullOrWhiteSpace(id))
                 throw new ArgumentException("id가 비었습니다.", nameof(id));
@@ -51,6 +71,7 @@ namespace MyPlugin
             Description = description ?? "";
             Privilege = privilege ?? "";
             Sql = sql;
+            Chart = chart;
         }
 
         /// <summary>식별자(<see cref="MonitorSections"/> 또는 DBMS 고유). 소문자.</summary>
@@ -67,6 +88,9 @@ namespace MyPlugin
 
         /// <summary>조회 SQL(바인드 없음). 결과 열 별칭이 화면 머리글.</summary>
         public string Sql { get; }
+
+        /// <summary>표 위에 그릴 사용률 원형 차트. 없으면 null(표만).</summary>
+        public MonitorUsageChart Chart { get; }
     }
 
     /// <summary>섹션이 없는 공급자(Generic)용.</summary>

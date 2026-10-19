@@ -101,5 +101,84 @@ namespace MyPlugin
             decimal ignored;
             return decimal.TryParse(text, NumberStyles.Float, Inv, out ignored);
         }
+
+        // ---------- 사용률 차트(대시보드) ----------
+
+        /// <summary>대시보드에 그릴 최대 도넛 수(테이블스페이스·파일이 아주 많아도 표가 밀려나지 않게). 나머지는 "외 N개"로 알린다.</summary>
+        public const int MaxCharts = 12;
+
+        /// <summary>사용률 경고 문턱(%): 이 이상이면 경고색, <see cref="DangerPercent"/> 이상이면 위험색.</summary>
+        public const double WarningPercent = 80;
+        public const double DangerPercent = 90;
+
+        /// <summary>
+        /// 결과 표에서 차트 조각을 뽑는다(행 순서대로, 최대 max개). 이름·사용·전체 열이 없으면 빈 목록.
+        /// 전체가 0 이하이거나 사용·전체가 수로 읽히지 않는 행은 건너뛴다. 사용률은 0~100으로 자른다.
+        /// </summary>
+        public static List<UsageSlice> Usage(QueryTable table, MonitorUsageChart chart, int max)
+        {
+            var slices = new List<UsageSlice>();
+            if (table == null || chart == null)
+                return slices;
+            var name = table.Columns.IndexOf(chart.NameColumn);
+            var used = table.Columns.IndexOf(chart.UsedColumn);
+            var total = table.Columns.IndexOf(chart.TotalColumn);
+            if (name < 0 || used < 0 || total < 0)
+                return slices;
+            foreach (var row in table.Rows)
+            {
+                if (slices.Count >= max)
+                    break;
+                if (row.Length <= Math.Max(name, Math.Max(used, total)))
+                    continue;
+                decimal usedValue, totalValue;
+                if (!decimal.TryParse(row[used], NumberStyles.Float, Inv, out usedValue) || !decimal.TryParse(row[total], NumberStyles.Float, Inv, out totalValue) || totalValue <= 0)
+                    continue;
+                var percent = (double)(usedValue * 100 / totalValue);
+                slices.Add(new UsageSlice
+                {
+                    Name = row[name] ?? "",
+                    Used = usedValue,
+                    Total = totalValue,
+                    Percent = Math.Max(0, Math.Min(100, percent))
+                });
+            }
+            return slices;
+        }
+
+        /// <summary>사용률 색 단계: 0 보통(강조색), 1 경고(80% 이상), 2 위험(90% 이상).</summary>
+        public static int UsageLevel(double percent)
+        {
+            if (percent >= DangerPercent)
+                return 2;
+            return percent >= WarningPercent ? 1 : 0;
+        }
+
+        /// <summary>도넛 가운데 글: "93%"(소수점 없이 반올림).</summary>
+        public static string PercentText(double percent)
+        {
+            return Math.Round(percent, MidpointRounding.AwayFromZero).ToString("0", Inv) + "%";
+        }
+
+        /// <summary>도넛 아래 글: "191,562 / 204,800"(단위는 열 이름이 말한다 — MB).</summary>
+        public static string UsageText(UsageSlice slice)
+        {
+            return slice.Used.ToString("#,##0.##", Inv) + " / " + slice.Total.ToString("#,##0.##", Inv);
+        }
+
+        /// <summary>차트 수가 MaxCharts를 넘을 때 대시보드 끝의 안내: "외 3개는 표에서". 넘지 않으면 null.</summary>
+        public static string MoreChartsText(int rows, int shown)
+        {
+            return rows > shown ? "외 " + (rows - shown).ToString(Inv) + "개는 표에서" : null;
+        }
+    }
+
+    /// <summary>사용률 도넛 하나: 이름·사용·전체·사용률(0~100).</summary>
+    internal sealed class UsageSlice
+    {
+        public string Name { get; set; }
+        public decimal Used { get; set; }
+        public decimal Total { get; set; }
+        public double Percent { get; set; }
     }
 }

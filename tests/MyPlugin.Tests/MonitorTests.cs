@@ -234,6 +234,70 @@ namespace MyPlugin.Tests
             Assert.Throws<ArgumentNullException>(() => MonitorLogic.Columns(null));
         }
 
+        // ---------- 사용률 차트(대시보드) ----------
+
+        [Fact]
+        public void StorageChart_OracleAndSqlServer_ColumnsExistInSql_PostgresNone()
+        {
+            foreach (var provider in new[] { DbProviders.Oracle, DbProviders.SqlServer })
+            {
+                var storage = provider.Monitor.Sections.First(s => s.Id == MonitorSections.Storage);
+                Assert.NotNull(storage.Chart);
+                foreach (var column in new[] { storage.Chart.NameColumn, storage.Chart.UsedColumn, storage.Chart.TotalColumn })
+                    Assert.Contains("\"" + column + "\"", storage.Sql.Replace("[", "\"").Replace("]", "\""));
+            }
+            Assert.Null(DbProviders.Postgres.Monitor.Sections.First(s => s.Id == MonitorSections.Storage).Chart);
+            foreach (var provider in Real)
+            foreach (var section in provider.Monitor.Sections.Where(s => s.Id != MonitorSections.Storage))
+                Assert.Null(section.Chart);
+            Assert.Throws<ArgumentException>(() => new MonitorUsageChart("a", "", "c"));
+        }
+
+        [Fact]
+        public void Usage_SlicesFromTable_SkipsUnreadable_ClampsAndCaps()
+        {
+            var chart = new MonitorUsageChart("테이블스페이스", "사용(MB)", "크기(MB)");
+            var table = new QueryTable();
+            table.Columns.AddRange(new[] { "테이블스페이스", "종류", "크기(MB)", "사용(MB)" });
+            table.Rows.Add(new[] { "MES_DATA", "PERMANENT", "204800", "191562" });
+            table.Rows.Add(new[] { "EMPTY", "PERMANENT", "0", "0" });          // 전체 0 → 건너뜀
+            table.Rows.Add(new[] { "BROKEN", "PERMANENT", "100", null });       // 사용 NULL → 건너뜀
+            table.Rows.Add(new[] { "OVER", "PERMANENT", "100", "120" });        // 100으로 자름
+            table.Rows.Add(new[] { "SHORT" });                                   // 열 부족 → 건너뜀
+            table.Rows.Add(new[] { null, "UNDO", "8192", "1517.5" });
+
+            var slices = MonitorLogic.Usage(table, chart, MonitorLogic.MaxCharts);
+
+            Assert.Equal(new[] { "MES_DATA", "OVER", "" }, slices.Select(s => s.Name));
+            Assert.Equal(93.5, slices[0].Percent, 1);
+            Assert.Equal(100, slices[1].Percent);
+            Assert.Equal(18.5, slices[2].Percent, 1);
+            Assert.Equal("191,562 / 204,800", MonitorLogic.UsageText(slices[0]));
+            Assert.Equal("1,517.5 / 8,192", MonitorLogic.UsageText(slices[2]));
+
+            Assert.Equal(2, MonitorLogic.Usage(table, chart, 2).Count);
+            Assert.Empty(MonitorLogic.Usage(table, new MonitorUsageChart("없는열", "사용(MB)", "크기(MB)"), 12));
+            Assert.Empty(MonitorLogic.Usage(table, null, 12));
+            Assert.Empty(MonitorLogic.Usage(null, chart, 12));
+        }
+
+        [Fact]
+        public void UsageLevel_PercentText_MoreCharts()
+        {
+            Assert.Equal(0, MonitorLogic.UsageLevel(0));
+            Assert.Equal(0, MonitorLogic.UsageLevel(79.9));
+            Assert.Equal(1, MonitorLogic.UsageLevel(80));
+            Assert.Equal(1, MonitorLogic.UsageLevel(89.9));
+            Assert.Equal(2, MonitorLogic.UsageLevel(90));
+            Assert.Equal(2, MonitorLogic.UsageLevel(100));
+            Assert.Equal("94%", MonitorLogic.PercentText(93.5));
+            Assert.Equal("0%", MonitorLogic.PercentText(0.4));
+            Assert.Equal("100%", MonitorLogic.PercentText(100));
+            Assert.Null(MonitorLogic.MoreChartsText(12, 12));
+            Assert.Equal("외 3개는 표에서", MonitorLogic.MoreChartsText(15, 12));
+            Assert.Equal(12, MonitorLogic.MaxCharts);
+        }
+
         /// <summary>섹션 SQL을 QueryTableAsync로 읽는 흐름(SQLite): 열 이름이 별칭 그대로이고 MaxRows만큼만 읽는다.</summary>
         [Fact]
         public async System.Threading.Tasks.Task QueryTable_WithMaxRows_ReadsOnlyThatMany()

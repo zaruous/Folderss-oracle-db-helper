@@ -47,7 +47,8 @@ namespace MyPlugin
                 + " CASE WHEN f.is_percent_growth = 1 THEN CONVERT(nvarchar(10), f.growth) + N'%' ELSE CONVERT(nvarchar(20), CONVERT(bigint, f.growth) * 8 / 1024) + N' MB' END AS [증가],"
                 + " f.physical_name AS [경로]"
                 + " FROM sys.database_files f LEFT JOIN sys.filegroups fg ON fg.data_space_id = f.data_space_id"
-                + " ORDER BY f.type, f.name"),
+                + " ORDER BY f.type, f.name",
+                new MonitorUsageChart("파일", "사용(MB)", "크기(MB)")),
 
             new MonitorSection(MonitorSections.Log, "트랜잭션 로그",
                 "현재 DB의 sys.dm_db_log_space_usage · log_reuse_wait_desc · msdb.dbo.backupset의 마지막 전체·로그 백업.", Privilege,

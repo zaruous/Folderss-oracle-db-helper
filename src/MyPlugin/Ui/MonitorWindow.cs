@@ -7,6 +7,8 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Shapes;
 using System.Windows.Threading;
 
 namespace MyPlugin
@@ -18,6 +20,8 @@ namespace MyPlugin
     /// - 섹션은 처음 고를 때 가져오고, [새로 고침]·자동 새로 고침은 보고 있는 섹션만 다시 가져온다(무거운 DBA_FREE_SPACE 등을 매번 다 읽지 않게).
     /// - 세션은 그 DB의 지금 세션을 그때그때 받는다(끊었다 다시 연결해도 창을 다시 열 필요가 없다). 그 DB에서 사용자 문장이 실행 중이면 기다리지 않고 알린다.
     /// - 권한 오류(<see cref="IDbProvider.IsPermissionDenied"/>)는 섹션의 필요 권한과 함께 보인다. 섹션마다 따로 실패한다.
+    /// - 섹션에 <see cref="MonitorSection.Chart"/>가 있으면(테이블스페이스·데이터 파일) 표 위 대시보드에 행마다 사용률 도넛을 그린다
+    ///   (80% 이상 경고색, 90% 이상 위험색, 최대 12개 — 나머지는 "외 N개는 표에서"). 코드로 그리는 Path라 차트 라이브러리는 없다.
     /// </summary>
     internal sealed class MonitorWindow
     {
@@ -210,6 +214,15 @@ namespace MyPlugin
             top.Children.Add(description);
             DockPanel.SetDock(top, Dock.Top);
             panel.Children.Add(top);
+            if (view.Section.Chart != null)
+            {
+                view.Dashboard = new WrapPanel { Margin = new Thickness(8, 0, 8, 6), Visibility = Visibility.Collapsed };
+                AutomationProperties.SetName(view.Dashboard, view.Section.Title + " 사용률 차트");
+                var dashBorder = new Border { Child = view.Dashboard, BorderThickness = new Thickness(0, 0, 0, 1) };
+                dashBorder.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
+                DockPanel.SetDock(dashBorder, Dock.Top);
+                panel.Children.Add(dashBorder);
+            }
             view.Grid = new ResultGridView(all =>
             {
                 var rows = all ? view.Grid.RowsInViewOrder() : view.Grid.SelectedRows();
@@ -267,6 +280,7 @@ namespace MyPlugin
                     for (var i = 0; i < table.Rows.Count; i++)
                         rows.Add(new ResultGridRow(i + 1, table.Rows[i]));
                     view.Grid.Show(view.Columns, rows);
+                    ShowDashboard(view, table);
                     view.Loaded = true;
                     SetStatus(view, MonitorLogic.RefreshedText(DateTime.Now, table.Rows.Count), false);
                 }
@@ -290,6 +304,109 @@ namespace MyPlugin
             {
                 // async void — 예외를 밖으로 내보내면 Folderss가 멈춘다
             }
+        }
+
+        // ================= 대시보드(사용률 도넛) =================
+
+        private static void ShowDashboard(SectionView view, QueryTable table)
+        {
+            if (view.Dashboard == null)
+                return;
+            view.Dashboard.Children.Clear();
+            var slices = MonitorLogic.Usage(table, view.Section.Chart, MonitorLogic.MaxCharts);
+            if (slices.Count == 0)
+            {
+                view.Dashboard.Visibility = Visibility.Collapsed;
+                return;
+            }
+            foreach (var slice in slices)
+                view.Dashboard.Children.Add(Donut(slice));
+            var more = MonitorLogic.MoreChartsText(table.Rows.Count, slices.Count);
+            if (more != null)
+            {
+                var note = Theme.Secondary(more);
+                note.VerticalAlignment = VerticalAlignment.Center;
+                note.Margin = new Thickness(8, 0, 0, 0);
+                view.Dashboard.Children.Add(note);
+            }
+            view.Dashboard.Visibility = Visibility.Visible;
+        }
+
+        private const double DonutSize = 64;
+        private const double DonutThickness = 9;
+
+        /// <summary>도넛 하나: 바탕 고리(테두리색) 위에 사용 호(단계별 색), 가운데 "93%", 아래 이름과 "사용 / 전체".</summary>
+        private static FrameworkElement Donut(UsageSlice slice)
+        {
+            var ring = new Grid { Width = DonutSize, Height = DonutSize };
+            var inner = DonutSize - DonutThickness;
+            var track = new Ellipse { Width = inner, Height = inner, StrokeThickness = DonutThickness, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            track.SetResourceReference(Shape.StrokeProperty, Theme.Border);
+            ring.Children.Add(track);
+
+            var level = MonitorLogic.UsageLevel(slice.Percent);
+            Shape used;
+            if (slice.Percent >= 99.95)
+            {
+                used = new Ellipse { Width = inner, Height = inner, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            }
+            else
+            {
+                used = new Path { Data = Arc(slice.Percent) };
+            }
+            used.StrokeThickness = DonutThickness;
+            if (level == 2)
+                used.Stroke = Theme.Danger;
+            else if (level == 1)
+                used.Stroke = Theme.Warning;
+            else
+                used.SetResourceReference(Shape.StrokeProperty, Theme.Accent);
+            if (slice.Percent > 0)
+                ring.Children.Add(used);
+
+            var percent = Theme.Text(MonitorLogic.PercentText(slice.Percent));
+            percent.FontSize = 12;
+            percent.FontWeight = FontWeights.SemiBold;
+            percent.HorizontalAlignment = HorizontalAlignment.Center;
+            percent.VerticalAlignment = VerticalAlignment.Center;
+            if (level == 2)
+                percent.Foreground = Theme.Danger;
+            else if (level == 1)
+                percent.Foreground = Theme.Warning;
+            ring.Children.Add(percent);
+
+            var panel = new StackPanel { Width = 104, Margin = new Thickness(0, 6, 6, 4) };
+            panel.Children.Add(ring);
+            var name = Theme.Text(slice.Name);
+            name.FontSize = 11.5;
+            name.TextTrimming = TextTrimming.CharacterEllipsis;
+            name.TextAlignment = TextAlignment.Center;
+            name.Margin = new Thickness(0, 4, 0, 0);
+            name.ToolTip = slice.Name;
+            panel.Children.Add(name);
+            var text = Theme.Secondary(MonitorLogic.UsageText(slice));
+            text.FontSize = 10.5;
+            text.TextTrimming = TextTrimming.CharacterEllipsis;
+            text.TextAlignment = TextAlignment.Center;
+            panel.Children.Add(text);
+            panel.ToolTip = slice.Name + " — " + MonitorLogic.UsageText(slice) + " (" + MonitorLogic.PercentText(slice.Percent) + ")";
+            return panel;
+        }
+
+        /// <summary>12시 방향에서 시계 방향으로 percent만큼 도는 호(고리 중심선 반지름).</summary>
+        private static Geometry Arc(double percent)
+        {
+            var radius = (DonutSize - DonutThickness) / 2;
+            var center = DonutSize / 2;
+            var angle = Math.Max(0, Math.Min(99.95, percent)) / 100 * 2 * Math.PI;
+            var start = new Point(center, center - radius);
+            var end = new Point(center + radius * Math.Sin(angle), center - radius * Math.Cos(angle));
+            var figure = new PathFigure { StartPoint = start, IsClosed = false, IsFilled = false };
+            figure.Segments.Add(new ArcSegment(end, new Size(radius, radius), 0, angle > Math.PI, SweepDirection.Clockwise, true));
+            var geometry = new PathGeometry();
+            geometry.Figures.Add(figure);
+            geometry.Freeze();
+            return geometry;
         }
 
         private static void SetStatus(SectionView view, string text, bool error)
@@ -317,6 +434,8 @@ namespace MyPlugin
             public FrameworkElement Panel { get; set; }
             public TextBlock Status { get; set; }
             public ResultGridView Grid { get; set; }
+            /// <summary>사용률 도넛 줄(섹션에 Chart가 있을 때만). 조각이 없으면 숨긴다.</summary>
+            public WrapPanel Dashboard { get; set; }
             public List<ResultColumn> Columns { get; set; } = new List<ResultColumn>();
             public bool Loaded { get; set; }
             public bool Loading { get; set; }

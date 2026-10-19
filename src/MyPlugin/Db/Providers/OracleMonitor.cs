@@ -8,6 +8,7 @@ namespace MyPlugin
     /// - 항목·값 꼴의 UNION ALL은 첫 가지 리터럴을 VARCHAR2로 CAST한다(모두 CHAR 리터럴이면 결과가 CHAR로 패딩된다).
     /// - 기본 정보: V$DATABASE·V$INSTANCE·NLS_DATABASE_PARAMETERS·V$LOG_HISTORY(24시간 로그 스위치)·V$SESSION(사용자 세션 수).
     /// - 테이블스페이스: 영구·UNDO는 DBA_DATA_FILES − DBA_FREE_SPACE, 임시는 DBA_TEMP_FILES와 V$TEMP_SPACE_HEADER(사용은 고수위). 최대는 자동 확장이면 MAXBYTES.
+    ///   표 위 대시보드에 테이블스페이스마다 사용률 도넛(사용(MB) / 크기(MB)).
     /// - 리두 로그: V$LOG 그룹마다 멤버 파일(V$LOGFILE).
     /// - 잠금: V$LOCK의 TM·TX 가운데 막고 있거나(BLOCK) 기다리는(REQUEST) 것만. 객체는 ALL_OBJECTS로 푼다(권한 밖이면 빈 칸).
     /// - 세션: V$SESSION의 사용자 세션.
@@ -60,7 +61,8 @@ namespace MyPlugin
                 + " FROM DBA_TABLESPACES t"
                 + " JOIN (" + FileSums("DBA_TEMP_FILES") + ") f ON f.TABLESPACE_NAME = t.TABLESPACE_NAME"
                 + " LEFT JOIN (SELECT TABLESPACE_NAME, SUM(BYTES_USED) AS USED_BYTES FROM V$TEMP_SPACE_HEADER GROUP BY TABLESPACE_NAME) h ON h.TABLESPACE_NAME = t.TABLESPACE_NAME"
-                + ") ORDER BY \"사용률(%)\" DESC NULLS LAST, \"테이블스페이스\""),
+                + ") ORDER BY \"사용률(%)\" DESC NULLS LAST, \"테이블스페이스\"",
+                new MonitorUsageChart("테이블스페이스", "사용(MB)", "크기(MB)")),
 
             new MonitorSection(MonitorSections.Log, "리두 로그",
                 "V$LOG 그룹과 멤버 파일(V$LOGFILE). 로그 모드·24시간 로그 스위치 수는 [기본 정보]에.", Privilege,

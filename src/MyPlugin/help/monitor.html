@@ -9,7 +9,7 @@
 <body>
 <div class="nav"><a href="index.html">개요·단축키</a><a href="connections.html">접속</a><a href="table-spec.html">테이블 정의서</a><a href="gcm-spec.html">GCM 정의서</a><a href="monitor.html">성능 모니터</a></div>
 <h1>성능 모니터</h1>
-<p><b>도구 &gt; 성능 모니터…</b>(트리에서 대상 DB를 고른 뒤) 또는 트리의 DB 행 오른쪽 메뉴에서 엽니다. 연결이 없으면 먼저 연결합니다. 창은 모달이 아니라 열어 둔 채 SQL을 쓸 수 있고, DB마다 하나만 뜹니다(같은 DB에서 다시 열면 그 창이 앞으로).</p>
+<p><b>도구 &gt; 성능 모니터…</b>(트리에서 대상 DB를 고른 뒤) 또는 트리의 DB 행 오른쪽 메뉴에서 엽니다. 트리에서 연결하지 않아도 됩니다. 창은 모달이 아니라 열어 둔 채 SQL을 쓸 수 있고, DB마다 하나만 뜹니다(같은 DB에서 다시 열면 그 창이 앞으로).</p>
 <ul>
   <li>섹션은 처음 고를 때 가져옵니다. <b>[새로 고침]</b>(<span class="kbd">F5</span>)과 <b>자동 새로 고침</b>(끔 · 5초 · 15초 · 60초)은 보고 있는 섹션만 다시 가져옵니다.</li>
   <li><b>저장 공간</b> 섹션(Oracle 테이블스페이스 · SQL Server 데이터 파일)은 표 위 대시보드에 행마다 <b>사용률 도넛 차트</b>를 그립니다(가운데 %, 아래 이름과 사용/전체 MB). 80% 이상은 경고색, 90% 이상은 위험색이고 최대 12개까지 보인 뒤 나머지는 "외 N개는 표에서"로 알립니다. PostgreSQL 테이블스페이스는 한도가 없어 차트가 없습니다.</li>
@@ -17,7 +17,8 @@
   <li><b>잠금·세션</b> 섹션에서 행을 누르면 아래에 [SQL 전문]·[실행 계획]·[세션 정보/통계]가 보입니다. SQL 전문과 실행 계획은 표가 아니라 글 상자라 그대로 복사할 수 있습니다. Oracle은 <code>V$SQL</code>·<code>DBMS_XPLAN.DISPLAY_CURSOR</code>(세션이 쉬는 중이면 직전 문장)·<code>V$SESSTAT</code>, SQL Server는 <code>sys.dm_exec_sql_text</code>(쉬는 세션은 마지막 문장)·<code>sys.dm_exec_text_query_plan</code>(실행 중일 때만, XML), PostgreSQL은 <code>pg_stat_activity.query</code>(서버가 <code>track_activity_query_size</code> 기본 1,024자까지만 보관)와 세션 정보이고 다른 세션의 실행 계획은 주지 않습니다.</li>
   <li>표의 오른쪽 메뉴 <b>[세션 종료…]</b>는 고른 행의 세션 번호로 <code>ALTER SYSTEM KILL SESSION 'sid,serial#' IMMEDIATE</code> · <code>SELECT pg_terminate_backend(pid)</code> · <code>KILL n</code>을 만들어 문장·경고·확인 체크 대화상자를 거친 뒤 실행하고 섹션을 다시 가져옵니다. 그 세션의 커밋하지 않은 변경은 롤백되고 사용자는 끊깁니다. 읽기 전용 접속에서는 막히며, Oracle은 <code>ALTER SYSTEM</code> 권한이 있어야 합니다.</li>
   <li>표는 결과 그리드와 같아 열 머리로 정렬하고 <span class="kbd">Ctrl</span>+C·오른쪽 메뉴로 복사합니다. 섹션 하나는 최대 2,000행까지 가져옵니다.</li>
-  <li>조회는 그 DB의 세션(트랜잭션)을 SQL 탭과 함께 씁니다. 그 DB에서 문장이 실행 중이면 기다리지 않고 알립니다. 자료를 바꾸는 문장은 없습니다.</li>
+  <li>모니터 창은 <b>전용 세션</b>을 따로 엽니다. SQL 탭의 세션·트랜잭션과 무관해서, SQL 탭에서 긴 문장을 실행하는 중에도 모니터는 기다리지 않고, 자동 새로 고침이 SQL 탭 실행을 막지도 않습니다. 저장된 비밀번호가 없으면 모니터를 처음 가져올 때 한 번 묻습니다. DB 쪽 세션이 하나 늘어나며, 세션 목록에 이 창의 세션도 보입니다. 창을 닫으면 그 세션도 닫힙니다. 자료를 바꾸는 문장은 [세션 종료…]뿐입니다.</li>
+  <li>상태 글에 조회 시간(예: "· 0.8초")이 붙습니다. 행 상세는 같은 행을 다시 누르면 다시 조회하지 않고 보관한 결과를 보입니다("· 캐시"). 섹션을 새로 고치면 비웁니다.</li>
   <li>확장 설치나 서버 버전이 필요한 섹션(지금은 PostgreSQL 느린 SQL의 pg_stat_statements·13 이상)은 가져오기 전에 점검해, 안 되면 조회하지 않고 <b>"설치·설정 필요 — …"</b>를 주황색으로 보입니다. 무엇을 어떻게 설치해야 하는지(shared_preload_libraries → 재시작 → CREATE EXTENSION)가 그 글에 있습니다. 권한 오류(빨강)와는 다른 색입니다. 접속이 <b>이 PC</b>(localhost · 127.0.0.1 · 컴퓨터 이름)의 서버면 직접 설치할 수 있으므로, 단계별 절차와 문서·내려받기 링크를 DB Helper <b>메시지 탭</b>에 함께 남깁니다(원격 서버는 관리자에게 전달해야 하므로 남기지 않음).</li>
   <li>권한이 없는 섹션은 그 섹션만 "권한이 없어 가져오지 못했습니다 — 필요 권한: …"으로 보이고 다른 섹션은 그대로 동작합니다.</li>
 </ul>

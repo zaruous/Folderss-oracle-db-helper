@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -19,7 +21,9 @@ namespace MyPlugin
     /// 위: DB 배지·주소, 자동 새로 고침(끔·5초·15초·60초), [새로 고침]·[도움말]·[닫기].
     /// 가운데: 공급자(<see cref="IMonitorProvider"/>)의 섹션마다 고르는 버튼 + 설명 + 상태(갱신 시각·행 수 / 오류) + 표(결과 그리드 — 정렬·복사 됨).
     /// - 섹션은 처음 고를 때 가져오고, [새로 고침]·자동 새로 고침은 보고 있는 섹션만 다시 가져온다(무거운 DBA_FREE_SPACE 등을 매번 다 읽지 않게).
-    /// - 세션은 그 DB의 지금 세션을 그때그때 받는다(끊었다 다시 연결해도 창을 다시 열 필요가 없다). 그 DB에서 사용자 문장이 실행 중이면 기다리지 않고 알린다.
+    /// - 창마다 **모니터 전용 세션**을 따로 연다(SQL 탭의 세션·트랜잭션과 무관 — 자동 새로 고침과 사용자 실행이 서로 기다리지 않는다).
+    ///   처음 가져올 때 열고, 끊겼으면 다음 가져오기 때 다시 연다. 창을 닫으면 정리한다. SQL 탭이 연결돼 있지 않아도 된다.
+    /// - 상태 글에 조회 소요 시간, 상세는 (상세, 키)별로 캐시해 같은 행을 다시 눌러도 다시 조회하지 않는다(섹션을 새로 가져오면 비움).
     /// - 권한 오류(<see cref="IDbProvider.IsPermissionDenied"/>)는 섹션의 필요 권한과 함께 보인다. 섹션마다 따로 실패한다.
     /// - 섹션에 <see cref="MonitorSection.Chart"/>가 있으면(테이블스페이스·데이터 파일) 표 위 대시보드에 행마다 사용률 도넛을 그린다
     ///   (80% 이상 경고색, 90% 이상 위험색, 최대 12개 — 나머지는 "외 N개는 표에서"). 코드로 그리는 Path라 차트 라이브러리는 없다.
@@ -36,8 +40,10 @@ namespace MyPlugin
         private readonly Window _window;
         private readonly IDbProvider _provider;
         private readonly OracleConnectionProfile _profile;
-        private readonly Func<DbSession> _session;
-        private readonly Func<bool> _isRunning;
+        // 모니터 전용 세션을 여는 함수(비밀번호 확인 포함). 취소하면 null. SQL 탭의 세션과 따로라 서로 기다리지 않는다.
+        private readonly Func<Task<DbSession>> _connect;
+        private DbSession _session;
+        private Task<DbSession> _connecting;
         private readonly Action<string> _log;
         private readonly List<SectionView> _sections = new List<SectionView>();
         private readonly CancellationTokenSource _closing = new CancellationTokenSource();
@@ -45,13 +51,12 @@ namespace MyPlugin
         private int _current = -1;
         private bool _closed;
 
-        private MonitorWindow(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<DbSession> session, Func<bool> isRunning, string helpFolder, Action<string> log)
+        private MonitorWindow(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<Task<DbSession>> connect, string helpFolder, Action<string> log)
         {
             _profile = profile;
             _log = log ?? (text => { });
             _provider = provider ?? throw new ArgumentNullException(nameof(provider));
-            _session = session ?? throw new ArgumentNullException(nameof(session));
-            _isRunning = isRunning ?? (() => false);
+            _connect = connect ?? throw new ArgumentNullException(nameof(connect));
             _window = new Window
             {
                 Title = DialogKit.TitleFor(MonitorLogic.Title, profile),
@@ -84,6 +89,10 @@ namespace MyPlugin
                 _closed = true;
                 _timer.Stop();
                 _closing.Cancel();
+                // 모니터 전용 세션은 이 창의 것 — 닫을 때 정리한다(Dispose는 실행 중 작업을 기다리므로 스레드 풀에서)
+                var session = _session;
+                _session = null;
+                DisposeQuietly(session);
             };
             _timer.Tick += (s, e) => Load(_current, true);
         }
@@ -92,13 +101,13 @@ namespace MyPlugin
         /// 창을 만들어 보인다. 공급자에 섹션이 없으면 InvalidOperationException(부르는 쪽이 먼저 확인한다).
         /// log: 메시지 탭에 남길 글(로컬호스트 접속에서 설치 절차 안내). null이면 남기지 않는다.
         /// </summary>
-        public static MonitorWindow Show(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<DbSession> session, Func<bool> isRunning, string helpFolder, Action<string> log = null)
+        public static MonitorWindow Show(Window owner, OracleConnectionProfile profile, IDbProvider provider, Func<Task<DbSession>> connect, string helpFolder, Action<string> log = null)
         {
             if (provider == null)
                 throw new ArgumentNullException(nameof(provider));
             if (provider.Monitor.Sections.Count == 0)
                 throw new InvalidOperationException(MonitorLogic.NotSupportedMessage(provider.DisplayName));
-            var monitor = new MonitorWindow(owner, profile, provider, session, isRunning, helpFolder, log);
+            var monitor = new MonitorWindow(owner, profile, provider, connect, helpFolder, log);
             monitor._window.Show();
             return monitor;
         }
@@ -108,6 +117,12 @@ namespace MyPlugin
         {
             add { _window.Closed += value; }
             remove { _window.Closed -= value; }
+        }
+
+        public void Close()
+        {
+            if (!_closed)
+                _window.Close();
         }
 
         public void Activate()
@@ -390,24 +405,19 @@ namespace MyPlugin
                     Dialogs.Show(_window, action.Title.TrimEnd('…'), MonitorLogic.ActionBadValueText, true);
                     return;
                 }
-                var session = _session();
-                if (session == null || !session.IsOpen || session.IsBroken)
-                {
-                    SetStatus(view, MonitorLogic.NoSessionText, Theme.Danger);
-                    return;
-                }
                 if (!Dialogs.ConfirmDanger(_window, _profile, new SqlStatement { Text = statement, Danger = action.Warning }))
                     return;
                 if (_closed)
                     return;
-                if (_isRunning())
-                {
-                    SetStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), Theme.Danger);
-                    return;
-                }
                 SetStatus(view, MonitorLogic.LoadingText, null);
                 try
                 {
+                    var session = await EnsureSessionAsync();
+                    if (session == null)
+                    {
+                        SetStatus(view, MonitorLogic.NoSessionText, Theme.Danger);
+                        return;
+                    }
                     await session.RunAsync((connection, transaction) =>
                     {
                         using (var command = connection.CreateCommand())
@@ -469,26 +479,31 @@ namespace MyPlugin
                     SetDetailStatus(view, "", null);
                     return;
                 }
-                var session = _session();
-                if (session == null || !session.IsOpen || session.IsBroken)
-                {
-                    SetDetailStatus(view, MonitorLogic.NoSessionText, Theme.Danger);
-                    return;
-                }
-                if (_isRunning())
-                {
-                    SetDetailStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), Theme.Danger);
-                    return;
-                }
                 SetDetailStatus(view, MonitorLogic.LoadingText, null);
                 try
                 {
-                    var table = new QueryTable();
-                    var full = detail.AsText;
-                    var rows = await session.QueryAsync(detail.Query(key), record => ReadRow(record, table, full), work.Token);
-                    if (_closed || work.IsCancellationRequested)
-                        return;
-                    table.Rows.AddRange(rows);
+                    // 같은 행·같은 상세를 다시 누르면 다시 조회하지 않는다(DBA_SEGMENTS 같은 무거운 조회). 섹션을 새로 고치면 비운다
+                    var cacheKey = MonitorLogic.DetailCacheKey(detail, key);
+                    QueryTable table;
+                    var cached = view.DetailCache.TryGetValue(cacheKey, out table);
+                    var watch = Stopwatch.StartNew();
+                    if (!cached)
+                    {
+                        var session = await EnsureSessionAsync();
+                        if (session == null)
+                        {
+                            SetDetailStatus(view, MonitorLogic.NoSessionText, Theme.Danger);
+                            return;
+                        }
+                        table = new QueryTable();
+                        var read = table;
+                        var full = detail.AsText;
+                        var rows = await session.QueryAsync(detail.Query(key), record => ReadRow(record, read, full), work.Token);
+                        if (_closed || work.IsCancellationRequested)
+                            return;
+                        table.Rows.AddRange(rows);
+                        view.DetailCache[cacheKey] = table;
+                    }
                     if (detail.AsText)
                     {
                         view.DetailText.Text = MonitorLogic.DetailText(table);
@@ -502,7 +517,7 @@ namespace MyPlugin
                             gridRows.Add(new ResultGridRow(i + 1, table.Rows[i]));
                         view.DetailGrid.Show(view.DetailColumns, gridRows);
                     }
-                    SetDetailStatus(view, MonitorLogic.DetailRowsText(table.Rows.Count), null);
+                    SetDetailStatus(view, MonitorLogic.DetailRowsText(table.Rows.Count) + (cached ? MonitorLogic.CachedSuffix : MonitorLogic.ElapsedSuffix(watch.Elapsed)), null);
                 }
                 catch (OperationCanceledException)
                 {
@@ -578,21 +593,17 @@ namespace MyPlugin
                 var view = _sections[index];
                 if (view.Loading || (view.Loaded && !force))
                     return;
-                var session = _session();
-                if (session == null || !session.IsOpen || session.IsBroken)
-                {
-                    SetStatus(view, MonitorLogic.NoSessionText, Theme.Danger);
-                    return;
-                }
-                if (_isRunning())
-                {
-                    SetStatus(view, MonitorLogic.BusyText(_profile != null ? _profile.Name : ""), Theme.Danger);
-                    return;
-                }
                 view.Loading = true;
                 SetStatus(view, MonitorLogic.LoadingText, null);
                 try
                 {
+                    var session = await EnsureSessionAsync();
+                    if (session == null)
+                    {
+                        SetStatus(view, MonitorLogic.NoSessionText, Theme.Danger);
+                        return;
+                    }
+                    var watch = Stopwatch.StartNew();
                     // 필요 조건(확장 설치·버전)을 먼저 본다 — 충족되지 않으면 조회하지 않고 설치 안내(경고색, 오류 아님)
                     foreach (var requirement in view.Section.Requirements)
                     {
@@ -626,7 +637,8 @@ namespace MyPlugin
                     view.Grid.Show(view.Columns, rows);
                     ShowDashboard(view, table);
                     view.Loaded = true;
-                    SetStatus(view, MonitorLogic.RefreshedText(DateTime.Now, table.Rows.Count), null);
+                    view.DetailCache.Clear();
+                    SetStatus(view, MonitorLogic.RefreshedText(DateTime.Now, table.Rows.Count) + MonitorLogic.ElapsedSuffix(watch.Elapsed), null);
                 }
                 catch (OperationCanceledException)
                 {
@@ -762,6 +774,63 @@ namespace MyPlugin
             return geometry;
         }
 
+        // ================= 모니터 전용 세션 =================
+
+        /// <summary>
+        /// 모니터 전용 세션: 없거나 끊겼으면 연다(여러 섹션이 동시에 불러도 한 번만 연다). 비밀번호를 묻다 취소하면 null.
+        /// 연결 오류는 예외로 올려 부른 쪽이 그 섹션 상태에 보인다. 여는 동안 창이 닫혔으면 바로 정리하고 null.
+        /// </summary>
+        private async Task<DbSession> EnsureSessionAsync()
+        {
+            var current = _session;
+            if (current != null && current.IsOpen && !current.IsBroken)
+                return current;
+            if (current != null)
+            {
+                _session = null;
+                DisposeQuietly(current);
+            }
+            if (_closed)
+                return null;
+            if (_connecting == null)
+                _connecting = _connect();
+            var connecting = _connecting;
+            try
+            {
+                var opened = await connecting;
+                if (_closed)
+                {
+                    DisposeQuietly(opened);
+                    return null;
+                }
+                if (opened != null && _session == null)
+                    _session = opened;
+                return _session;
+            }
+            finally
+            {
+                if (ReferenceEquals(_connecting, connecting))
+                    _connecting = null;
+            }
+        }
+
+        private static void DisposeQuietly(DbSession session)
+        {
+            if (session == null)
+                return;
+            Task.Run(() =>
+            {
+                try
+                {
+                    session.Dispose();
+                }
+                catch (Exception)
+                {
+                    // 스레드 풀 예외로 Folderss가 끝나지 않게
+                }
+            });
+        }
+
         /// <summary>상태 글. color가 null이면 보조 글자색, 아니면 그 색(오류 Danger · 설치 필요 Warning).</summary>
         private static void SetStatus(SectionView view, string text, Brush color)
         {
@@ -803,6 +872,8 @@ namespace MyPlugin
             public CancellationTokenSource DetailWork { get; set; }
             /// <summary>메시지 탭에 설치 안내를 이미 남긴 필요 조건(점검 SQL로 구분) — 새로 고침마다 되풀이하지 않게.</summary>
             public HashSet<string> GuideLogged { get; } = new HashSet<string>(StringComparer.Ordinal);
+            /// <summary>상세 결과 캐시(상세 id + 키). 섹션을 새로 가져오면 비운다.</summary>
+            public Dictionary<string, QueryTable> DetailCache { get; } = new Dictionary<string, QueryTable>(StringComparer.Ordinal);
             public List<ResultColumn> Columns { get; set; } = new List<ResultColumn>();
             public bool Loaded { get; set; }
             public bool Loading { get; set; }

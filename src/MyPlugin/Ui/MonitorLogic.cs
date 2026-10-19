@@ -17,7 +17,7 @@ namespace MyPlugin
         public static readonly IReadOnlyList<int> RefreshSeconds = new[] { 0, 5, 15, 60 };
 
         public const string PickDbMessage = "트리에서 대상 DB(또는 그 안의 객체)를 고른 뒤 다시 누르세요.";
-        public const string NoSessionText = "연결되어 있지 않습니다. 트리에서 DB를 연결한 뒤 [새로 고침]을 누르세요.";
+        public const string NoSessionText = "모니터 세션을 열지 못했습니다(비밀번호 입력을 취소함). [새로 고침]을 누르면 다시 엽니다.";
         public const string LoadingText = "가져오는 중…";
 
         private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
@@ -41,10 +41,19 @@ namespace MyPlugin
             return displayName + " 접속에서는 " + Title + "를 아직 지원하지 않습니다.";
         }
 
-        /// <summary>그 DB에서 사용자 문장이 실행 중일 때(세션을 같이 쓰므로 기다리지 않고 알린다).</summary>
-        public static string BusyText(string dbName)
+        /// <summary>상태 글 뒤에 붙는 조회 소요 시간: " · 0.8초"(1초 미만은 소수 한 자리, 그 이상도 한 자리).</summary>
+        public static string ElapsedSuffix(TimeSpan elapsed)
         {
-            return "'" + dbName + "'에서 실행 중이라 가져오지 않았습니다. 끝난 뒤 [새로 고침]을 누르세요.";
+            return " · " + Math.Max(0, elapsed.TotalSeconds).ToString("0.0", Inv) + "초";
+        }
+
+        /// <summary>캐시에서 보인 상세의 꼬리 글.</summary>
+        public const string CachedSuffix = " · 캐시(섹션 새로 고침 때 비움)";
+
+        /// <summary>상세 캐시 키: 상세 id와 행 키(구분자는 값에 나오지 않는 문자).</summary>
+        public static string DetailCacheKey(MonitorDetail detail, string key)
+        {
+            return (detail == null ? "" : detail.Id) + "\u001F" + (key ?? "");
         }
 
         /// <summary>"갱신 14:05:31 · 12행" (MaxRows만큼 왔으면 "앞 2,000행 · 더 있을 수 있음").</summary>

@@ -194,7 +194,16 @@ namespace MyPlugin.Tests
             Assert.Equal("권한이 없어 가져오지 못했습니다", MonitorLogic.PermissionDeniedText(new MonitorSection("x", "t", null, null, "SELECT 1"), null));
             Assert.Equal("가져오지 못했습니다 (끊김)", MonitorLogic.FailedText(" 끊김 "));
             Assert.Equal("가져오지 못했습니다", MonitorLogic.FailedText(""));
-            Assert.Equal("'운영'에서 실행 중이라 가져오지 않았습니다. 끝난 뒤 [새로 고침]을 누르세요.", MonitorLogic.BusyText("운영"));
+            Assert.Contains("[새로 고침]", MonitorLogic.NoSessionText);
+            Assert.Equal(" · 0.8초", MonitorLogic.ElapsedSuffix(TimeSpan.FromMilliseconds(812)));
+            Assert.Equal(" · 12.0초", MonitorLogic.ElapsedSuffix(TimeSpan.FromSeconds(12)));
+            Assert.Equal(" · 0.0초", MonitorLogic.ElapsedSuffix(TimeSpan.FromSeconds(-1)));
+            var files = new MonitorDetail("files", "t", "d", "SELECT 1 WHERE x = :name");
+            var segments = new MonitorDetail("segments", "t", "d", "SELECT 1 WHERE x = :name");
+            Assert.NotEqual(MonitorLogic.DetailCacheKey(files, "MES_DATA"), MonitorLogic.DetailCacheKey(segments, "MES_DATA"));
+            Assert.NotEqual(MonitorLogic.DetailCacheKey(files, "MES_DATA"), MonitorLogic.DetailCacheKey(files, "MES_IDX"));
+            Assert.Equal(MonitorLogic.DetailCacheKey(files, "A"), MonitorLogic.DetailCacheKey(files, "A"));
+            Assert.NotEqual(MonitorLogic.DetailCacheKey(files, "A"), MonitorLogic.DetailCacheKey(files, null));
             Assert.Equal("Generic 접속에서는 성능 모니터를 아직 지원하지 않습니다.", MonitorLogic.NotSupportedMessage("Generic"));
         }
 

@@ -55,6 +55,8 @@
       오른쪽 메뉴 [세션 종료…](ALTER SYSTEM KILL SESSION · pg_terminate_backend · KILL)는 위험한 문장 확인 대화상자 + 읽기 전용 접속 차단.
       → 잠금 연쇄(누가 누구를 막는지)를 트리로 보이는 것은 아직 아님. PR: #20 · 버전: 1.9.0
       → 잠금 연쇄 트리 설계: [`docs/monitor-dba-design.md`](../monitor-dba-design.md) 3장(근원 블로커·유발 대기·최소 대기 3초·근원 종료, GV$·RAC 종료).
+      → 잠금 연쇄 트리 Oracle 구현(8-1): [잠금] 섹션 기본 보기, [표로 보기], [근원 세션 종료…]. 11.2 XE·19.9와 Folderss 안에서 실측. PR: #21.
+      남은 것: PostgreSQL·SQL Server 트리(8-5), RAC 실측.
 - [x] 3. 느린 SQL — Top SQL 섹션(Oracle V$SQLAREA, PostgreSQL pg_stat_statements(확장 유무 확인), SQL Server sys.dm_exec_query_stats)과
       대기 이벤트 요약(V$SESSION_WAIT 집계 · pg_stat_activity wait_event 집계 · sys.dm_os_wait_stats).
       → [느린 SQL] 누적 소요 상위 50(행 상세: 전문·실행 계획·Oracle 자식 커서), [대기 이벤트] Oracle V$SYSTEM_EVENT(Idle 제외)·SQL Server dm_os_wait_stats(유휴 제외)·

@@ -17,6 +17,57 @@ namespace MyPlugin
     {
         /// <summary>섹션 목록(화면 순서). 이 DBMS를 지원하지 않으면 빈 목록.</summary>
         IReadOnlyList<MonitorSection> Sections { get; }
+
+        /// <summary>
+        /// 잠금 연쇄 트리(누가 누구를 막는지 — 근원 블로커 아래에 막힌 세션). 있으면 [잠금] 섹션이 트리로 보이고 [표로 보기]로 섹션 표에 돌아간다.
+        /// 지원하지 않으면 null(그 DBMS에서는 [잠금] 섹션 표만). 설계: docs/monitor-dba-design.md 3장.
+        /// </summary>
+        MonitorLockTree LockTree { get; }
+    }
+
+    /// <summary>
+    /// 잠금 연쇄 트리 조회. 결과 행 하나 = 간선 하나(세션 → 그 세션을 막는 세션). 트리 만들기는 공급자가 아니라 <c>LockTreeLogic</c>가 한다.
+    /// - 계약 열(로직이 읽는 고정 이름, 화면에 그대로 보이지 않음): <see cref="SessionKey"/> · <see cref="BlockerKey"/>(근원이면 NULL) ·
+    ///   <see cref="WaitSeconds"/>(지금 대기 중인 초, 아니면 NULL) · <see cref="IdleSeconds"/>(쉬는 세션의 유휴 초, 활성이면 NULL).
+    /// - 그 밖의 열은 표시 열(별칭이 머리글). 블로커가 여럿이면 같은 세션이 행 여러 개로 온다 — 표시 열은 첫 행 값을 쓴다.
+    /// - 키는 공급자가 정하는 불투명한 글(Oracle "INST_ID,SID" · PostgreSQL pid · SQL Server session_id). 상세는 키를 바인드(name)하고,
+    ///   조치(세션 종료)는 표시 열 값으로 문장을 만든다.
+    /// </summary>
+    internal sealed class MonitorLockTree
+    {
+        public const string SessionKey = "SESSION_KEY";
+        public const string BlockerKey = "BLOCKER_KEY";
+        public const string WaitSeconds = "WAIT_SECONDS";
+        public const string IdleSeconds = "IDLE_SECONDS";
+
+        /// <summary>계약 열(이 순서로 SQL 앞에 둔다). 화면은 이 열들을 표시 열에서 뺀다.</summary>
+        public static readonly IReadOnlyList<string> ContractColumns = new[] { SessionKey, BlockerKey, WaitSeconds, IdleSeconds };
+
+        public MonitorLockTree(string description, string privilege, string sql, IReadOnlyList<MonitorDetail> details = null, IReadOnlyList<MonitorAction> actions = null)
+        {
+            if (string.IsNullOrWhiteSpace(sql))
+                throw new ArgumentException("sql이 비었습니다.", nameof(sql));
+            Description = description ?? "";
+            Privilege = privilege ?? "";
+            Sql = sql;
+            Details = details ?? Array.Empty<MonitorDetail>();
+            Actions = actions ?? Array.Empty<MonitorAction>();
+        }
+
+        /// <summary>무엇을 어디서 읽는지 한 줄(트리 위에 보임).</summary>
+        public string Description { get; }
+
+        /// <summary>필요한 권한(권한 오류 메시지에 보임).</summary>
+        public string Privilege { get; }
+
+        /// <summary>조회 SQL(바인드 없음).</summary>
+        public string Sql { get; }
+
+        /// <summary>트리 행을 눌렀을 때의 상세(키 = SESSION_KEY). 화면의 상세 버튼은 [잠금] 섹션 상세와 같은 제목·순서여야 한다.</summary>
+        public IReadOnlyList<MonitorDetail> Details { get; }
+
+        /// <summary>트리 행의 오른쪽 메뉴 조치(세션 종료). 화면이 [근원 …]과 [이 …] 두 가지로 보인다. 열 이름은 표시 열.</summary>
+        public IReadOnlyList<MonitorAction> Actions { get; }
     }
 
     /// <summary>세 DBMS가 함께 갖는 섹션 id(이 순서대로).</summary>
@@ -238,5 +289,7 @@ namespace MyPlugin
         public static readonly NoMonitor Instance = new NoMonitor();
 
         public IReadOnlyList<MonitorSection> Sections { get { return Array.Empty<MonitorSection>(); } }
+
+        public MonitorLockTree LockTree { get { return null; } }
     }
 }

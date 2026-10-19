@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MyPlugin
 {
@@ -198,6 +199,76 @@ namespace MyPlugin
         };
 
         public IReadOnlyList<MonitorSection> Sections { get { return All; } }
+
+        public MonitorLockTree LockTree { get { return Tree; } }
+
+        /// <summary>트리 상세의 키("INST_ID,SID")를 GV$ 조건으로 푼다. 바인드 :name을 여러 번 쓴다(ODP.NET BindByName).</summary>
+        private static string KeyMatch(string alias)
+        {
+            return alias + ".INST_ID = TO_NUMBER(SUBSTR(:name, 1, INSTR(:name, ',') - 1))"
+                + " AND " + alias + ".SID = TO_NUMBER(SUBSTR(:name, INSTR(:name, ',') + 1))";
+        }
+
+        /// <summary>
+        /// 잠금 트리 행의 상세: [잠금] 섹션 상세(<see cref="SessionDetails"/>)와 같은 제목·순서, 키만 "INST_ID,SID"(GV$ — RAC의 다른 인스턴스 세션도).
+        /// DBMS_XPLAN.DISPLAY_CURSOR는 접속한 인스턴스의 커서만 보므로 다른 인스턴스 세션은 안내 한 줄.
+        /// </summary>
+        private static readonly IReadOnlyList<MonitorDetail> TreeDetails = new[]
+        {
+            new MonitorDetail("sql", "SQL 전문", "GV$SQL.SQL_FULLTEXT — 이 세션이 지금 실행 중인(없으면 직전) 문장. 쉬는 근원 세션은 직전 문장.",
+                "SELECT q.SQL_FULLTEXT FROM GV$SESSION s"
+                + " JOIN GV$SQL q ON q.INST_ID = s.INST_ID AND q.SQL_ID = NVL(s.SQL_ID, s.PREV_SQL_ID)"
+                + " AND q.CHILD_NUMBER = NVL2(s.SQL_ID, s.SQL_CHILD_NUMBER, s.PREV_CHILD_NUMBER)"
+                + " WHERE " + KeyMatch("s") + " AND ROWNUM = 1", true),
+            new MonitorDetail("plan", "실행 계획", "DBMS_XPLAN.DISPLAY_CURSOR(SQL_ID, 자식 번호, 'TYPICAL') — 접속한 인스턴스의 세션만(RAC의 다른 인스턴스는 그 인스턴스에 접속해야 한다).",
+                "SELECT p.PLAN_TABLE_OUTPUT FROM GV$SESSION s,"
+                + " TABLE(DBMS_XPLAN.DISPLAY_CURSOR(NVL(s.SQL_ID, s.PREV_SQL_ID), NVL2(s.SQL_ID, s.SQL_CHILD_NUMBER, s.PREV_CHILD_NUMBER), 'TYPICAL')) p"
+                + " WHERE " + KeyMatch("s") + " AND s.INST_ID = USERENV('INSTANCE')"
+                + " UNION ALL SELECT '다른 인스턴스(' || s.INST_ID || ')의 세션입니다. 실행 계획은 그 인스턴스에 접속해야 볼 수 있습니다.'"
+                + " FROM GV$SESSION s WHERE " + KeyMatch("s") + " AND s.INST_ID <> USERENV('INSTANCE')", true),
+            new MonitorDetail("stats", "세션 통계", "GV$SESSTAT · V$STATNAME — CPU·논리/물리 읽기·리두·커밋 수 등 이 세션의 누적 통계(값이 큰 것부터 50개).",
+                "SELECT * FROM (SELECT n.NAME AS \"통계\", st.VALUE AS \"값\", n.CLASS AS \"분류\""
+                + " FROM GV$SESSTAT st JOIN V$STATNAME n ON n.STATISTIC# = st.STATISTIC#"
+                + " WHERE " + KeyMatch("st") + " AND st.VALUE > 0 ORDER BY st.VALUE DESC) WHERE ROWNUM <= 50")
+        };
+
+        /// <summary>트리의 세션 종료: ALTER SYSTEM KILL SESSION 'sid,serial#,@inst' IMMEDIATE(11g+ — RAC의 다른 인스턴스 세션도). 세 값이 모두 수일 때만.</summary>
+        private static readonly IReadOnlyList<MonitorAction> TreeActions = new[]
+        {
+            new MonitorAction("kill", "세션 종료…", new[] { "인스턴스", "SID", "SERIAL#" },
+                "이 세션의 커밋하지 않은 변경은 롤백되고 사용자는 ORA-00028로 끊깁니다. 되돌릴 수 없습니다.",
+                values => values.All(MonitorAction.IsDigits)
+                    ? "ALTER SYSTEM KILL SESSION '" + values[1] + "," + values[2] + ",@" + values[0] + "' IMMEDIATE" : null)
+        };
+
+        /// <summary>
+        /// 잠금 연쇄 트리: GV$SESSION의 BLOCKING_SESSION(대기 사슬, 11gR2의 STATUS = 'VALID')으로 간선을 만든다.
+        /// V$LOCK의 TM·TX보다 넓다 — 라이브러리 캐시 핀·cursor: pin S wait on X·buffer busy처럼 다른 세션을 기다리는 대기도 잡힌다.
+        /// 행 = 막힌 세션과 막는 세션 모두(막는 세션은 BLOCKER_KEY가 NULL인 행 — 쉬는 근원이면 유휴 초·트랜잭션 시작·직전 SQL).
+        /// 객체는 기다리는 세션의 ROW_WAIT_OBJ#(ALL_OBJECTS — 권한 밖이면 빈 칸), SQL은 지금(없으면 직전) 문장의 앞 200자.
+        /// </summary>
+        private static readonly MonitorLockTree Tree = new MonitorLockTree(
+            "GV$SESSION의 BLOCKING_SESSION(대기 사슬)로 근원 블로커 아래에 막힌 세션을 펼친다. 근원이 쉬면 유휴 시간·트랜잭션 시작·직전 SQL. 최소 대기보다 짧은 사슬은 숨긴다.",
+            Privilege,
+            "WITH w AS (SELECT INST_ID, SID, BLOCKING_INSTANCE, BLOCKING_SESSION FROM GV$SESSION WHERE BLOCKING_SESSION_STATUS = 'VALID')"
+            + " SELECT s.INST_ID || ',' || s.SID AS SESSION_KEY,"
+            + " CASE WHEN w.BLOCKING_SESSION IS NOT NULL THEN w.BLOCKING_INSTANCE || ',' || w.BLOCKING_SESSION END AS BLOCKER_KEY,"
+            // 쉬는 근원도 STATE = 'WAITING'(SQL*Net message from client — Idle)이라 그 대기는 빼야 "최장 대기"가 막힌 시간만 센다(실측 11.2 XE)
+            + " CASE WHEN s.STATE = 'WAITING' AND s.WAIT_CLASS <> 'Idle' THEN ROUND(s.WAIT_TIME_MICRO / 1000000) END AS WAIT_SECONDS,"
+            + " CASE WHEN s.STATUS <> 'ACTIVE' THEN s.LAST_CALL_ET END AS IDLE_SECONDS,"
+            + " s.INST_ID AS \"인스턴스\", s.SID AS \"SID\", s.SERIAL# AS \"SERIAL#\", s.USERNAME AS \"사용자\", s.STATUS AS \"상태\","
+            + " CASE WHEN s.STATE = 'WAITING' THEN s.EVENT END AS \"대기 이벤트\","
+            + " CASE WHEN w.SID IS NOT NULL AND s.ROW_WAIT_OBJ# > 0 THEN"
+            + " (SELECT o.OWNER || '.' || o.OBJECT_NAME FROM ALL_OBJECTS o WHERE o.OBJECT_ID = s.ROW_WAIT_OBJ#) END AS \"객체\","
+            + " TO_CHAR(t.START_DATE, 'YYYY-MM-DD HH24:MI:SS') AS \"트랜잭션 시작\","
+            + " s.SQL_ID AS \"SQL_ID\", s.PREV_SQL_ID AS \"직전 SQL_ID\","
+            + " (SELECT SUBSTR(q.SQL_TEXT, 1, 200) FROM GV$SQL q WHERE q.INST_ID = s.INST_ID AND q.SQL_ID = NVL(s.SQL_ID, s.PREV_SQL_ID) AND ROWNUM = 1) AS \"SQL\","
+            + " s.PROGRAM AS \"프로그램\", s.MACHINE AS \"머신\", s.OSUSER AS \"OS 사용자\", s.MODULE AS \"모듈\""
+            + " FROM GV$SESSION s"
+            + " LEFT JOIN w ON w.INST_ID = s.INST_ID AND w.SID = s.SID"
+            + " LEFT JOIN GV$TRANSACTION t ON t.INST_ID = s.INST_ID AND t.ADDR = s.TADDR"
+            + " WHERE (s.INST_ID, s.SID) IN (SELECT INST_ID, SID FROM w UNION SELECT BLOCKING_INSTANCE, BLOCKING_SESSION FROM w)",
+            TreeDetails, TreeActions);
 
         /// <summary>파일 뷰(DBA_DATA_FILES·DBA_TEMP_FILES)를 테이블스페이스별 크기·최대·자동 확장으로 합친다.</summary>
         private static string FileSums(string view)

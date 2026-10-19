@@ -186,5 +186,8 @@ namespace MyPlugin
         };
 
         public IReadOnlyList<MonitorSection> Sections { get { return All; } }
+
+        /// <summary>잠금 연쇄 트리는 아직 Oracle만(설계 docs/monitor-dba-design.md 3장의 대응표대로 나중에 채운다).</summary>
+        public MonitorLockTree LockTree { get { return null; } }
     }
 }

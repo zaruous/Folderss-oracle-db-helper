@@ -155,6 +155,25 @@ WHERE (s.INST_ID, s.SID) IN (SELECT INST_ID, SID FROM w UNION SELECT BLOCKING_IN
   `pg_blocking_pids`는 잠금 관리자를 잠시 독점하므로 자동 새로 고침을 짧게 두지 않는다.
 - **SQL Server**: `blocking_session_id`(`sys.dm_exec_requests`)로 간선을 만든다. 근원은 쉬는 세션일 수 있으므로 노드는 `sys.dm_exec_sessions` 기준으로 모은다(지금 [잠금] 섹션과 같음).
 
+### 구현·실측 (Oracle, 2026-10-19)
+
+- **구현 방식**:
+  - 트리는 TreeView가 아니라 결과 그리드에 선 글자(● ├ └)로 편다. 복사·상세·오른쪽 메뉴를 그대로 쓰기 위해서다.
+  - 앞 열은 세션·막은 세션·유발 대기(초)·대기(초)·유휴(초)다. 막은 세션·유발 대기는 계산값이라 끝 줄도 0이다.
+  - 공급자 계약은 `IMonitorProvider.LockTree`(`MonitorLockTree`), 로직은 `LockTreeLogic`이다.
+- **쉬는 근원의 대기**:
+  - 쉬는 근원도 `STATE = 'WAITING'`(`SQL*Net message from client`, Idle)이다.
+  - 그 대기를 세면 "최장 대기"가 부풀므로 `WAIT_SECONDS`는 Idle 분류를 뺀다. 유휴 시간은 `IDLE_SECONDS`(`LAST_CALL_ET`)가 따로 보인다.
+- **11.2 XE·19.9**:
+  - 2단 사슬(A 쉼 → B → C)에서 트리 근원 = `FINAL_BLOCKING_SESSION` = A로 일치했다.
+  - 세 세션의 상세(SQL 전문·실행 계획·세션 통계)가 모두 조회됐다. 쉬는 A의 SQL 전문은 직전 문장이다.
+  - `ALTER SYSTEM KILL SESSION 'sid,serial#,@1' IMMEDIATE` 실행 뒤 B가 진행하고 B가 새 근원(→ C)이 됐다. B를 롤백하자 C가 진행했고 트리는 비었다.
+- **Folderss 1.8.8 안에서(UI)**:
+  - 트리·요약·근원 상세·[표로 보기]↔[트리로 보기]를 확인했다.
+  - 오른쪽 메뉴 [근원 세션 종료…] → 확인 대화상자(문장 `… '82,455,@1' IMMEDIATE`) → 실행 → 새로 고침에서 B가 근원이 됐다.
+- **KILLED 잔존**: `IMMEDIATE`로 끊은 세션은 두 버전 모두 바로 사라져 따로 표시하지 않았다. 남으면 상태 열에 `KILLED`로 보인다.
+- **아직 못 한 것**: RAC(다른 인스턴스의 세션·종료·실행 계획 안내 줄)는 RAC 환경을 구해 실측해야 한다. 순환(교착)은 Oracle이 몇 초 안에 깨서 실측하지 못했고 단위 테스트만 있다.
+
 ## 4. 활성 세션 이력 (TODO 5-1 확장) — 라이선스 없는 Top Activity
 
 ### 화면
@@ -437,7 +456,7 @@ CREATE TABLE check_result (
 | 단계 | 내용 | 완료 조건(검증 가능) |
 |---|---|---|
 | 8-0 | 2장 공통 기반: `IMonitorProvider` 확장, 세션 키, 대기 분류, 지표 목록, 상태·임계값 | 중립 로직 단위 테스트, PG·SQL Server·Generic은 null·빈 목록으로 기존 테스트 통과 |
-| 8-1 | 3장 잠금 트리 | `LockTreeLogic` 테스트(근원·자손 수·유발 대기·순환·여러 블로커·최소 대기). XE 11g·19c에서 2단 연쇄(A→B→C)와 쉬는 근원을 만들어 실측(`FINAL_BLOCKING_SESSION`과 근원 일치), 근원 종료 뒤 B·C 진행 |
+| 8-1 ✔ | 3장 잠금 트리 (Oracle — 2026-10-19 완료, 3장 "구현·실측") | `LockTreeLogic` 테스트(근원·자손 수·유발 대기·순환·여러 블로커·최소 대기). XE 11g·19c에서 2단 연쇄(A→B→C)와 쉬는 근원을 만들어 실측(`FINAL_BLOCKING_SESSION`과 근원 일치), 근원 종료 뒤 B·C 진행 |
 | 8-2 | 5장 전체 DB | `OverviewLogic` 경계값 테스트, 접속 실패·비밀번호 없음·시간 초과 타일, 동시 4개 제한 테스트. 실측: 3개 이상 DB를 동시에 |
 | 8-3a | SQLite 저장소(이력 설계 5-3의 파일·스키마 버전·손상 처리) + 점검 테이블 | ① Windows Folderss 안에서 `history.db` 열고 쓰고 읽기 PoC(실패하면 JSON 대체로 전환) ② 스키마 생성·버전 올림·새 버전 파일은 읽기만 ③ 두 연결 동시 쓰기(busy_timeout) ④ 손상 파일이면 기록만 끄고 예외 없음 |
 | 8-3b | 6장 일일 점검 실행·판정·엑셀 | `CheckRunner` 테스트(시간 제한·권한·필요 조건·하나 실패해도 계속), 직전 대비 비교 테스트, 결과에 발견 행이 저장되지 않음 테스트, 기본 양식 렌더 테스트. 실측: SELECT_CATALOG_ROLE 계정으로 전체 묶음, 11g의 경고 로그 건너뜀 안내 |

@@ -149,6 +149,12 @@ namespace MyPlugin
             foreach (var section in _provider.Monitor.Sections)
             {
                 var view = new SectionView(section, index++);
+                // 공급자가 잠금 연쇄 트리를 주면 [잠금] 섹션은 트리가 기본, [표로 보기]로 섹션 표(잠금 모드 상세)
+                if (section.Id == MonitorSections.Locks && _provider.Monitor.LockTree != null)
+                {
+                    view.Tree = _provider.Monitor.LockTree;
+                    view.TreeMode = true;
+                }
                 Border underline;
                 view.Button = WorkspaceUi.SelectorButton(Theme.Text(section.Title), out underline);
                 view.Underline = underline;
@@ -235,13 +241,19 @@ namespace MyPlugin
             view.Status.VerticalAlignment = VerticalAlignment.Center;
             DockPanel.SetDock(view.Status, Dock.Right);
             top.Children.Add(view.Status);
-            var description = Theme.Secondary(view.Section.Description);
-            description.TextWrapping = TextWrapping.Wrap;
-            description.VerticalAlignment = VerticalAlignment.Center;
-            description.Margin = new Thickness(0, 0, 12, 0);
-            top.Children.Add(description);
+            view.Description = Theme.Secondary(view.TreeMode ? view.Tree.Description : view.Section.Description);
+            view.Description.TextWrapping = TextWrapping.Wrap;
+            view.Description.VerticalAlignment = VerticalAlignment.Center;
+            view.Description.Margin = new Thickness(0, 0, 12, 0);
+            top.Children.Add(view.Description);
             DockPanel.SetDock(top, Dock.Top);
             panel.Children.Add(top);
+            if (view.Tree != null)
+            {
+                var bar = TreeBar(view);
+                DockPanel.SetDock(bar, Dock.Top);
+                panel.Children.Add(bar);
+            }
             if (view.Section.Chart != null)
             {
                 view.Dashboard = new WrapPanel { Margin = new Thickness(8, 0, 8, 6), Visibility = Visibility.Collapsed };
@@ -255,7 +267,16 @@ namespace MyPlugin
             foreach (var action in view.Section.Actions)
             {
                 var act = action;
-                view.Grid.AddMenuAction(act.Title, () => true, () => RunAction(view, act));
+                view.Grid.AddMenuAction(act.Title, () => !view.TreeMode, () => RunAction(view, act));
+            }
+            if (view.Tree != null)
+            {
+                foreach (var action in view.Tree.Actions)
+                {
+                    var act = action;
+                    view.Grid.AddMenuAction(MonitorLogic.RootActionTitle(act), () => view.TreeMode, () => RunTreeAction(view, act, true));
+                    view.Grid.AddMenuAction(act.Title, () => view.TreeMode, () => RunTreeAction(view, act, false));
+                }
             }
             if (view.Section.Details.Count == 0)
             {
@@ -266,8 +287,18 @@ namespace MyPlugin
             view.Grid.View.SelectionChanged += (s, e) =>
             {
                 var row = view.Grid.SelectedRows().FirstOrDefault();
-                if (row != null)
+                if (row == null)
+                    return;
+                if (view.TreeMode)
+                {
+                    var treeRow = TreeRowOf(view, row);
+                    if (treeRow != null)
+                        ShowDetail(view, treeRow.Node.Key);
+                }
+                else
+                {
                     ShowDetail(view, MonitorLogic.KeyOf(view.Columns, row.Values, view.Section.KeyColumn));
+                }
             };
             var split = new Grid();
             split.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 80 });
@@ -382,27 +413,49 @@ namespace MyPlugin
         // ================= 행 조치(세션 종료) =================
 
         /// <summary>표의 오른쪽 메뉴 조치: 고른 행 → 문장 → 확인 대화상자 → 실행 → 섹션 새로 고침.</summary>
-        private async void RunAction(SectionView view, MonitorAction action)
+        private void RunAction(SectionView view, MonitorAction action)
+        {
+            var row = view.Grid.SelectedRows().FirstOrDefault();
+            if (row == null)
+            {
+                Dialogs.Show(_window, action.Title.TrimEnd('…'), MonitorLogic.ActionNoRowText, false);
+                return;
+            }
+            RunActionWith(view, action, action.Title, MonitorLogic.ActionValues(view.Columns, row.Values, action), MonitorLogic.ActionBadValueText);
+        }
+
+        /// <summary>트리의 오른쪽 메뉴 조치: 고른 줄의 세션(toRoot면 그 사슬의 근원)으로 문장을 만든다.</summary>
+        private void RunTreeAction(SectionView view, MonitorAction action, bool toRoot)
+        {
+            var title = toRoot ? MonitorLogic.RootActionTitle(action) : action.Title;
+            var row = view.Grid.SelectedRows().FirstOrDefault();
+            var treeRow = row == null ? null : TreeRowOf(view, row);
+            if (treeRow == null)
+            {
+                Dialogs.Show(_window, title.TrimEnd('…'), MonitorLogic.ActionNoRowText, false);
+                return;
+            }
+            var node = toRoot ? treeRow.Root : treeRow.Node;
+            RunActionWith(view, action, title, LockTreeLogic.ActionValues(view.Forest, node, action),
+                node.Known ? MonitorLogic.ActionBadValueText : MonitorLogic.ActionUnknownSessionText);
+        }
+
+        /// <summary>조치 실행: 읽기 전용 차단 → 문장 → 확인 대화상자(문장·경고·확인 체크) → 모니터 세션에서 실행 → 섹션 새로 고침.</summary>
+        private async void RunActionWith(SectionView view, MonitorAction action, string title, string[] values, string badValueText)
         {
             try
             {
                 if (_closed)
                     return;
-                var row = view.Grid.SelectedRows().FirstOrDefault();
-                if (row == null)
-                {
-                    Dialogs.Show(_window, action.Title.TrimEnd('…'), MonitorLogic.ActionNoRowText, false);
-                    return;
-                }
                 if (_profile != null && _profile.ReadOnly)
                 {
-                    Dialogs.Show(_window, action.Title.TrimEnd('…'), MonitorLogic.ActionReadOnlyText, true);
+                    Dialogs.Show(_window, title.TrimEnd('…'), MonitorLogic.ActionReadOnlyText, true);
                     return;
                 }
-                var statement = action.Build(MonitorLogic.ActionValues(view.Columns, row.Values, action));
+                var statement = action.Build(values);
                 if (statement == null)
                 {
-                    Dialogs.Show(_window, action.Title.TrimEnd('…'), MonitorLogic.ActionBadValueText, true);
+                    Dialogs.Show(_window, title.TrimEnd('…'), badValueText, true);
                     return;
                 }
                 if (!Dialogs.ConfirmDanger(_window, _profile, new SqlStatement { Text = statement, Danger = action.Warning }))
@@ -448,6 +501,12 @@ namespace MyPlugin
             }
         }
 
+        /// <summary>지금 보기의 상세 목록: 트리면 트리 상세(키 = SESSION_KEY), 아니면 섹션 상세. 버튼은 섹션 상세의 제목으로 만든다(같은 제목·순서).</summary>
+        private static IReadOnlyList<MonitorDetail> CurrentDetails(SectionView view)
+        {
+            return view.TreeMode ? view.Tree.Details : view.Section.Details;
+        }
+
         private static void SelectDetailButton(SectionView view)
         {
             for (var i = 0; i < view.DetailButtons.Count; i++)
@@ -459,9 +518,10 @@ namespace MyPlugin
         {
             try
             {
-                if (_closed || view.DetailGrid == null || view.DetailIndex >= view.Section.Details.Count)
+                var details = CurrentDetails(view);
+                if (_closed || view.DetailGrid == null || view.DetailIndex >= details.Count)
                     return;
-                var detail = view.Section.Details[view.DetailIndex];
+                var detail = details[view.DetailIndex];
                 view.DetailKey = key;
                 if (view.DetailWork != null)
                     view.DetailWork.Cancel();
@@ -594,6 +654,9 @@ namespace MyPlugin
                 if (view.Loading || (view.Loaded && !force))
                     return;
                 view.Loading = true;
+                // 가져오는 동안 보기를 바꾸면 이전 보기의 결과가 새 보기에 그려진다 — 끝날 때까지 전환을 막는다
+                if (view.ModeButton != null)
+                    view.ModeButton.IsEnabled = false;
                 SetStatus(view, MonitorLogic.LoadingText, null);
                 try
                 {
@@ -604,6 +667,18 @@ namespace MyPlugin
                         return;
                     }
                     var watch = Stopwatch.StartNew();
+                    if (view.TreeMode)
+                    {
+                        var treeTable = await session.QueryTableAsync(view.Tree.Sql, MonitorLogic.MaxRows, _closing.Token);
+                        if (_closed)
+                            return;
+                        view.TreeTable = treeTable;
+                        ShowTree(view);
+                        view.Loaded = true;
+                        view.DetailCache.Clear();
+                        SetStatus(view, MonitorLogic.RefreshedText(DateTime.Now, treeTable.Rows.Count) + MonitorLogic.ElapsedSuffix(watch.Elapsed), null);
+                        return;
+                    }
                     // 필요 조건(확장 설치·버전)을 먼저 본다 — 충족되지 않으면 조회하지 않고 설치 안내(경고색, 오류 아님)
                     foreach (var requirement in view.Section.Requirements)
                     {
@@ -654,12 +729,112 @@ namespace MyPlugin
                 finally
                 {
                     view.Loading = false;
+                    if (view.ModeButton != null)
+                        view.ModeButton.IsEnabled = true;
                 }
             }
             catch (Exception)
             {
                 // async void — 예외를 밖으로 내보내면 Folderss가 멈춘다
             }
+        }
+
+        // ================= 잠금 연쇄 트리 =================
+
+        /// <summary>[잠금] 섹션 위 막대: 왼쪽 요약("근원 2 · 막힌 세션 5 · 최장 대기 …"), 오른쪽 최소 대기 · [표로 보기]/[트리로 보기].</summary>
+        private FrameworkElement TreeBar(SectionView view)
+        {
+            var bar = new DockPanel { Margin = new Thickness(8, 0, 8, 6) };
+            var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            view.MinWaitLabel = Theme.Text("최소 대기", Theme.SecondaryText);
+            view.MinWaitLabel.VerticalAlignment = VerticalAlignment.Center;
+            view.MinWaitLabel.Margin = new Thickness(0, 0, 6, 0);
+            right.Children.Add(view.MinWaitLabel);
+            view.MinWaitBox = new ComboBox { MinWidth = 64, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0), ToolTip = MonitorLogic.MinWaitToolTip };
+            foreach (var seconds in LockTreeLogic.MinWaitChoices)
+            {
+                view.MinWaitBox.Items.Add(new ComboBoxItem { Content = LockTreeLogic.MinWaitText(seconds), Tag = seconds });
+                if (seconds == view.MinWaitSeconds)
+                    view.MinWaitBox.SelectedIndex = view.MinWaitBox.Items.Count - 1;
+            }
+            view.MinWaitBox.SelectionChanged += (s, e) =>
+            {
+                var item = view.MinWaitBox.SelectedItem as ComboBoxItem;
+                view.MinWaitSeconds = item == null ? 0 : (int)item.Tag;
+                // 다시 조회하지 않고 가져온 결과로 다시 그린다
+                if (view.TreeMode && view.TreeTable != null)
+                    ShowTree(view);
+            };
+            AutomationProperties.SetName(view.MinWaitBox, "최소 대기");
+            right.Children.Add(view.MinWaitBox);
+            view.ModeButton = new Button { Padding = new Thickness(12, 3, 12, 3) };
+            view.ModeButton.Click += (s, e) => ToggleTree(view);
+            right.Children.Add(view.ModeButton);
+            DockPanel.SetDock(right, Dock.Right);
+            bar.Children.Add(right);
+            view.TreeSummary = Theme.Text("", Theme.SecondaryText);
+            view.TreeSummary.VerticalAlignment = VerticalAlignment.Center;
+            view.TreeSummary.FontWeight = FontWeights.SemiBold;
+            view.TreeSummary.TextWrapping = TextWrapping.Wrap;
+            bar.Children.Add(view.TreeSummary);
+            ApplyTreeMode(view);
+            return bar;
+        }
+
+        /// <summary>보기에 맞춰 설명·버튼 글·트리 전용 조각(요약·최소 대기)을 보이거나 숨긴다.</summary>
+        private static void ApplyTreeMode(SectionView view)
+        {
+            view.Description.Text = view.TreeMode ? view.Tree.Description : view.Section.Description;
+            view.ModeButton.Content = view.TreeMode ? MonitorLogic.TableViewText : MonitorLogic.TreeViewText;
+            view.ModeButton.ToolTip = view.TreeMode ? MonitorLogic.TableViewToolTip : MonitorLogic.TreeViewToolTip;
+            var visibility = view.TreeMode ? Visibility.Visible : Visibility.Collapsed;
+            view.TreeSummary.Visibility = visibility;
+            view.MinWaitLabel.Visibility = visibility;
+            view.MinWaitBox.Visibility = visibility;
+        }
+
+        /// <summary>트리 ↔ 표 전환: 표와 상세를 비우고 그 보기로 다시 가져온다(가져오는 중에는 버튼이 꺼져 있다).</summary>
+        private void ToggleTree(SectionView view)
+        {
+            if (_closed || view.Loading)
+                return;
+            view.TreeMode = !view.TreeMode;
+            ApplyTreeMode(view);
+            view.TreeTable = null;
+            view.Forest = null;
+            view.Columns = new List<ResultColumn>();
+            view.Grid.Show(view.Columns, new ObservableCollection<ResultGridRow>());
+            view.DetailCache.Clear();
+            ShowDetail(view, null);
+            view.Loaded = false;
+            Load(view.Index, true);
+        }
+
+        /// <summary>가져온 트리 결과를 최소 대기로 걸러 표로 그리고 요약을 고친다(근원·순환이 있으면 경고색).</summary>
+        private static void ShowTree(SectionView view)
+        {
+            view.Forest = LockTreeLogic.Build(view.TreeTable, view.MinWaitSeconds);
+            var table = LockTreeLogic.ToTable(view.Forest);
+            view.Columns = MonitorLogic.Columns(table);
+            var rows = new ObservableCollection<ResultGridRow>();
+            for (var i = 0; i < table.Rows.Count; i++)
+                rows.Add(new ResultGridRow(i + 1, table.Rows[i]));
+            view.Grid.Show(view.Columns, rows);
+            view.TreeSummary.Text = LockTreeLogic.SummaryText(view.Forest, view.MinWaitSeconds);
+            if (view.Forest.RootCount > 0 || view.Forest.HasCycle)
+                view.TreeSummary.Foreground = Theme.Warning;
+            else
+                view.TreeSummary.SetResourceReference(TextBlock.ForegroundProperty, Theme.SecondaryText);
+        }
+
+        /// <summary>표의 행 → 트리 줄(행 번호 = 트리 줄 순서 + 1 — 열 머리로 정렬해도 번호는 따라간다).</summary>
+        private static LockTreeRow TreeRowOf(SectionView view, ResultGridRow row)
+        {
+            var forest = view.Forest;
+            if (forest == null || row == null)
+                return null;
+            var index = row.Number - 1;
+            return index >= 0 && index < forest.Rows.Count ? forest.Rows[index] : null;
         }
 
         // ================= 대시보드(사용률 도넛) =================
@@ -877,6 +1052,20 @@ namespace MyPlugin
             public List<ResultColumn> Columns { get; set; } = new List<ResultColumn>();
             public bool Loaded { get; set; }
             public bool Loading { get; set; }
+            public TextBlock Description { get; set; }
+            // 잠금 연쇄 트리([잠금] 섹션이고 공급자가 LockTree를 줄 때만)
+            public MonitorLockTree Tree { get; set; }
+            /// <summary>트리 보기면 true(기본), [표로 보기]면 false. 트리가 없는 섹션은 늘 false.</summary>
+            public bool TreeMode { get; set; }
+            /// <summary>마지막으로 가져온 트리 조회 결과(최소 대기를 바꾸면 다시 조회하지 않고 이것으로 다시 그린다).</summary>
+            public QueryTable TreeTable { get; set; }
+            /// <summary>표에 그린 트리(행 번호 - 1 = 줄 위치).</summary>
+            public LockForest Forest { get; set; }
+            public int MinWaitSeconds { get; set; } = LockTreeLogic.DefaultMinWaitSeconds;
+            public TextBlock TreeSummary { get; set; }
+            public TextBlock MinWaitLabel { get; set; }
+            public ComboBox MinWaitBox { get; set; }
+            public Button ModeButton { get; set; }
         }
     }
 }

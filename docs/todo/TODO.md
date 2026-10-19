@@ -48,9 +48,13 @@
 - [ ] 1. 세 DBMS 실 검증 — 모든 섹션·상세·조치 SQL을 Oracle 11g/19c · PostgreSQL 10+ · SQL Server 2012+에 실제로 붙여 돌려 본다
       (이 세션의 리눅스 환경에서는 못 함). 문법 오류 한 건이 도구 전체 신뢰를 깎는다.
       → 임시(V$SORT_SEGMENT)·UNDO(DBA_UNDO_EXTENTS ACTIVE·UNEXPIRED) 사용률 수정은 함. PR: #20 · 버전: 1.9.0
+      → 실측(2026-10-19, Folderss 1.8.8 안에서): Oracle 11.2 XE · 19.9, PostgreSQL 16, SQL Server 2022(·2008 SP1) — 모든 섹션·상세·실제 잠금·세션 종료.
+      찾은 것 4건 수정(SQL Server 기본 정보 정렬 충돌, MARS 세션 SQL 전문 중복, Oracle 잠금 객체 '.', PostgreSQL 크기 함수 권한). 남은 것: PostgreSQL 10~15,
+      SQL Server 2012~2019 실측, SQL Server 2012 미만 버전 안내(필요 조건).
 - [x] 2. 세션 상세와 세션 종료 — 잠금·세션 행을 누르면 SQL 전문·실행 계획(Oracle DBMS_XPLAN, SQL Server XML)·세션 정보/통계,
       오른쪽 메뉴 [세션 종료…](ALTER SYSTEM KILL SESSION · pg_terminate_backend · KILL)는 위험한 문장 확인 대화상자 + 읽기 전용 접속 차단.
       → 잠금 연쇄(누가 누구를 막는지)를 트리로 보이는 것은 아직 아님. PR: #20 · 버전: 1.9.0
+      → 잠금 연쇄 트리 설계: [`docs/monitor-dba-design.md`](../monitor-dba-design.md) 3장(근원 블로커·유발 대기·최소 대기 3초·근원 종료, GV$·RAC 종료).
 - [x] 3. 느린 SQL — Top SQL 섹션(Oracle V$SQLAREA, PostgreSQL pg_stat_statements(확장 유무 확인), SQL Server sys.dm_exec_query_stats)과
       대기 이벤트 요약(V$SESSION_WAIT 집계 · pg_stat_activity wait_event 집계 · sys.dm_os_wait_stats).
       → [느린 SQL] 누적 소요 상위 50(행 상세: 전문·실행 계획·Oracle 자식 커서), [대기 이벤트] Oracle V$SYSTEM_EVENT(Idle 제외)·SQL Server dm_os_wait_stats(유휴 제외)·
@@ -65,7 +69,13 @@
       로컬 파일 이력은 설정 탭 "성능 모니터"의 선택지(기본 끔, 주기·제외 접속, 보관 기간은 기본 90일·설정에서 숫자로 정하는 선택 값 7~3650일), 저장소는 SQLite(history.db 하나 — PGlite 비권장,
       Windows에서 e_sqlite3 로드가 안 되면 JSONL). 남은 결정: OS 알림 계약 변경, AWR 읽기.
       순서 5-1 메모리 구간·추이 → 5-2 임계값·배지·메시지 → 5-3 이력 파일·설정 탭 → 5-4 가득 참 예측.
+      → 5-1 확장(라이선스 없는 Top Activity — V$SESSION 표본, 분류별 누적 차트·구간 선택·Top SQL/세션): [`docs/monitor-dba-design.md`](../monitor-dba-design.md) 4장.
 - [ ] 6. 저장 공간 보강 — 증가 추세("며칠 뒤 가득 차는가": DBA_HIST_TBSPC_SPACE_USAGE는 Diagnostic Pack 라이선스 필요, 아니면 자체 스냅샷),
       ASM·OS 디스크 여유(자동 확장의 실제 한도 — 없으면 "최대(MB)"가 안심을 주는 쪽으로 오도).
 - [ ] 7. 권한 현실 — 운영 DB에서 애플리케이션 계정에 SELECT_CATALOG_ROLE을 주는 곳은 드물다. 같은 DB에 "모니터 전용 계정"을 묶는 접속 설정,
       PostgreSQL `<insufficient privilege>` 값을 권한 안내로 바꾸기.
+- [ ] 8. 전체 DB 한 화면 — 등록한 DB마다 타일(가장 심각한 상태 색과 그 이유 한 줄, 활성 세션·미니 추이, 공간(최대 기준)·FRA·마지막 백업), 심각도 정렬·고정,
+      누르면 그 DB의 성능 모니터. Oracle 먼저, 지표는 긴 형식(METRIC·ITEM·VALUE)으로 이력 설계와 같은 이름. 설계: [`docs/monitor-dba-design.md`](../monitor-dba-design.md) 5장.
+- [ ] 9. 일일 점검 리포트 — 점검 항목(가용성·공간·백업·로그·객체·작업·보안)을 여러 DB에 한 번에 돌려 정상·주의·위험·건너뜀으로 판정하고 엑셀로(정의서 양식 엔진 재사용).
+      Oracle 기본 묶음 먼저. 11g 경고 로그 권한·오래된 통계의 휴지통 ORA-20001 같은 함정은 설계 6장. 설계: [`docs/monitor-dba-design.md`](../monitor-dba-design.md) 6장.
+      공통 기반(공급자 인터페이스 확장·세션 키·대기 분류·지표·임계값)과 구현 순서·결정 사항은 같은 문서 2·7장.

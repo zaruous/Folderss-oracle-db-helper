@@ -352,6 +352,11 @@ namespace MyPlugin
             ShowChecks();
         }
 
+        void IShellCommands.ShowEditorPoc()
+        {
+            _workspace.ShowEditorPoc();
+        }
+
         /// <summary>
         /// 일일 점검 창(DB Helper 창마다 하나, 있으면 앞으로). DB마다 점검 전용 세션을 열고(<see cref="OpenMonitorSessionAsync"/> — 비밀번호가 없으면 묻는다) 끝나면 닫는다.
         /// </summary>

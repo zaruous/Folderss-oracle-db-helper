@@ -38,6 +38,7 @@ controls:
   - {id: dialogs, name: Dialogs, kind: dialog, title: 확인·안내 대화상자}
   - {id: table-info-window, name: TableInfoWindow, kind: window, title: 테이블 정보 창}
   - {id: object-source-window, name: ObjectSourceWindow, kind: window, title: 소스 창}
+  - {id: avalonedit-poc-window, name: AvalonEditPocWindow, kind: window, title: AvalonEdit PoC 창 (시험판)}
   - {id: table-spec-dialog, name: TableSpecDialog, kind: dialog, title: 테이블 정의서 만들기}
   - {id: code-spec-dialog, name: CodeSpecDialog, kind: dialog, title: GCM 정의서 만들기}
   - {id: monitor-window, name: MonitorWindow, kind: window, title: 성능 모니터 창}

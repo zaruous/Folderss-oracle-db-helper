@@ -234,8 +234,9 @@ namespace MyPlugin
 
         /// <summary>
         /// 예/아니요 확인(기본은 [취소]). danger면 경고색 문구와 확인 체크를 켜야 [yes]가 눌린다(되돌릴 수 없는 일 — 이력 지우기 등).
+        /// yesIsDefault면 [yes]가 기본 버튼(Enter)이다 — 되돌릴 일이 없는 확인(다시 연결 등)에만. danger면 무시한다.
         /// </summary>
-        public static bool Confirm(Window owner, string title, string message, string yes, bool danger)
+        public static bool Confirm(Window owner, string title, string message, string yes, bool danger, bool yesIsDefault = false)
         {
             var window = DialogKit.Create(owner, string.IsNullOrWhiteSpace(title) ? "DB Helper" : title, 440);
             var body = DialogKit.Body(window);
@@ -246,7 +247,9 @@ namespace MyPlugin
                 Theme.Foreground(text);
             body.Children.Add(text);
             var ok = danger ? DialogKit.PlainButton(yes) : DialogKit.PrimaryButton(yes);
-            var cancel = DialogKit.CancelButton("취소", true);
+            var yesDefault = yesIsDefault && !danger;
+            var cancel = DialogKit.CancelButton("취소", !yesDefault);
+            ok.IsDefault = yesDefault;
             if (danger)
             {
                 var check = DialogKit.Check("되돌릴 수 없는 것을 알고 진행합니다");
@@ -261,7 +264,7 @@ namespace MyPlugin
                 window.DialogResult = true;
             };
             body.Children.Add(DialogKit.Buttons(ok, cancel));
-            DialogKit.FocusOnLoad(window, cancel);
+            DialogKit.FocusOnLoad(window, yesDefault ? ok : cancel);
             window.ShowDialog();
             return result;
         }

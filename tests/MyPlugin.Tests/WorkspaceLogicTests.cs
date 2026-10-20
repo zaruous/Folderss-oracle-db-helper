@@ -380,6 +380,14 @@ namespace MyPlugin.Tests
         }
 
         [Fact]
+        public void ReconnectQuestion_WarnsLostPending()
+        {
+            Assert.Equal("대상 DB(운영)의 연결이 끊겼습니다. 다시 연결할까요?", WorkspaceLogic.ReconnectQuestion("운영", null));
+            Assert.Equal("대상 DB(운영)의 연결이 끊겼습니다. 다시 연결할까요?" + Environment.NewLine + "커밋하지 않은 변경(커밋 대기 2행)은 서버에서 이미 사라졌습니다.",
+                WorkspaceLogic.ReconnectQuestion("운영", "커밋 대기 2행"));
+        }
+
+        [Fact]
         public void BusyStatuses_MatchPocWording()
         {
             Assert.Equal("같은 DB(개발)에서 다른 탭이 실행 중입니다. 끝난 뒤 실행하세요 (DB마다 세션 1개).",

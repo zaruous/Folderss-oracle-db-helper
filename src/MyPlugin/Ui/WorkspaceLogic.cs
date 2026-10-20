@@ -780,6 +780,15 @@ namespace MyPlugin
             return status;
         }
 
+        /// <summary>끊긴 세션에서 실행할 때 다시 연결할지 묻는 글. 커밋 대기가 있었으면 이미 서버에서 사라졌다고 덧붙인다.</summary>
+        public static string ReconnectQuestion(string name, string pendingText)
+        {
+            var question = "대상 DB(" + name + ")의 연결이 끊겼습니다. 다시 연결할까요?";
+            return string.IsNullOrEmpty(pendingText)
+                ? question
+                : question + Environment.NewLine + "커밋하지 않은 변경(" + pendingText + ")은 서버에서 이미 사라졌습니다.";
+        }
+
         public static StatusInfo ConnectedStatus(bool reconnected)
         {
             return TextStatus(reconnected ? "다시 연결됨 — 다시 실행하세요." : "연결됨 — 다시 실행하세요.");

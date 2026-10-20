@@ -80,6 +80,31 @@ namespace MyPlugin
         public List<string> Types { get; } = new List<string>();
     }
 
+    /// <summary>구문 강조 구간의 종류.</summary>
+    public enum SqlSpanKind
+    {
+        /// <summary>줄 주석(--)·블록 주석(/* */, 힌트 /*+ */ 포함)</summary>
+        Comment,
+        /// <summary>문자열 '…'·N'…'·q'[…]'·nq'[…]'</summary>
+        String
+    }
+
+    /// <summary>구문 강조 구간: 글에서의 위치(UTF-16 인덱스 — string.Substring과 같다)와 길이.</summary>
+    public readonly struct SqlSpan
+    {
+        public SqlSpan(SqlSpanKind kind, int start, int length)
+        {
+            Kind = kind;
+            Start = start;
+            Length = length;
+        }
+
+        public SqlSpanKind Kind { get; }
+        public int Start { get; }
+        public int Length { get; }
+        public int End { get { return Start + Length; } }
+    }
+
     /// <summary>
     /// SQL 편집기 텍스트를 문장으로 나누고 종류를 판정한다(순수 로직, 테스트 대상).
     /// 구분 규칙(SQL Developer와 비슷하게):
@@ -141,6 +166,26 @@ namespace MyPlugin
                 i = SkipSeparators(script, tokens, end + 1);
             }
             return result;
+        }
+
+        /// <summary>
+        /// 구문 강조용 주석·문자열 구간(앞에서 뒤로, 겹치지 않음). 문장 나누기(<see cref="Split"/>)와 같은 토큰 규칙이라
+        /// 실행할 때 문장을 나누는 기준과 화면에 칠하는 기준이 같다. 따옴표 식별자("…")·숫자·키워드는 구간이 아니다.
+        /// 줄 주석은 줄 끝 공백을 넣지 않고, 닫히지 않은 문자열·주석은 글 끝까지다. null·빈 글은 빈 목록.
+        /// </summary>
+        public static List<SqlSpan> HighlightSpans(string script)
+        {
+            var spans = new List<SqlSpan>();
+            if (string.IsNullOrEmpty(script))
+                return spans;
+            foreach (var t in Tokenize(script))
+            {
+                if (t.IsComment)
+                    spans.Add(new SqlSpan(SqlSpanKind.Comment, t.Start, t.End - t.Start));
+                else if (t.Type == TokenType.Literal)
+                    spans.Add(new SqlSpan(SqlSpanKind.String, t.Start, t.End - t.Start));
+            }
+            return spans;
         }
 
         /// <summary>

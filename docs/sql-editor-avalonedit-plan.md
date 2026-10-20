@@ -47,7 +47,7 @@
 | 단계 | 내용 | 완료 조건 (확인 방법) |
 |---|---|---|
 | 1. PoC | 별도 브랜치에서 SQL 탭 하나만 AvalonEdit으로 띄운다. 강조는 xshd 기본 SQL 정의로 충분 | 4절 실측 A~E 모두 기록, 막는 문제(✗) 없음. 하나라도 ✗면 여기서 멈추고 대안 검토 |
-| 2. 구간 계산 | `SqlScript`에서 주석·문자열 구간을 내는 공개 함수 추가 | 5절 D1의 기대 구간을 단위 테스트로 먼저 작성 → 통과. 기존 `SqlScriptTests` 전부 통과 |
+| 2. 구간 계산 (완료 2026-10-20: `SqlScript.HighlightSpans`, `tests/MyPlugin.Tests/SqlHighlightTests.cs`) | `SqlScript`에서 주석·문자열 구간을 내는 공개 함수 추가 | 5절 D1의 기대 구간을 단위 테스트로 먼저 작성 → 통과. 기존 `SqlScriptTests` 전부 통과 |
 | 3. 교체 | `SqlEditor` 도입, `SqlTabState.Editor`·호출부 교체, 직접 그린 줄 번호 삭제 | 빌드 통과, 6절 회귀 확인표 전부 ✓, `docs/controls/sql-workspace.yml`(+ 새 컨트롤이면 `sql-editor.yml`) 갱신, `python3 scripts/check_controls_docs.py` 통과 |
 | 4. 강조 연결 | 2단계 구간으로 색칠, 테마 7종 색 지정 | 실측 B·C 다시 측정해 PoC 대비 악화 없음 |
 
@@ -164,4 +164,5 @@ SELECT '닫히지 않은 문자열 → 끝까지 문자열
 
 | 날짜 | 측정자 | 환경(Windows·Folderss·AvalonEdit 버전) | 항목 | 결과 | 판단 |
 |---|---|---|---|---|---|
+| 2026-10-20 | Claude | Linux 컨테이너 4코어, .NET 8 Release (Windows·AvalonEdit 아님 — 순수 함수만) | 강조 구간 계산 `SqlScript.HighlightSpans` 단독, D3 구성(CRLF), 5회 중앙값 | D3-1 1만 줄(0.6MB) 6.6ms · D3-2 5만 줄(2.8MB) 37.1ms · D3-3 10만 줄(5.5MB) 52.9ms | 1만 줄까지는 키 입력마다 전체 다시 계산해도 16ms 안. 그 위는 넘으므로 4단계에서 입력이 멈춘 뒤 계산(지연)하거나 바뀐 위치 이후만 다시 계산해야 한다. Windows PoC에서 같은 데이터로 다시 잰다 |
 | | | | | | |

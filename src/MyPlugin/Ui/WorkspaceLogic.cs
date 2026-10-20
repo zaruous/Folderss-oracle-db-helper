@@ -298,14 +298,16 @@ namespace MyPlugin
 
         /// <summary>
         /// 기록을 눌러 편집기 맨 위에 넣을 텍스트: 실행한 문장 + 끝 구분자 + 빈 줄.
-        /// PL/SQL 블록(EXEC를 바꾼 BEGIN … END; 포함)은 '/' 줄로 끝내야 한다 — ';'로 끝내면 아래 문장까지 블록으로 읽힌다.
+        /// 블록(PL/SQL — EXEC를 바꾼 BEGIN … END; 포함, SQL Server CREATE PROCEDURE 등)은 구분 줄(Oracle '/', SQL Server GO)로 끝내야 한다
+        /// — ';'로 끝내면 아래 문장까지 블록으로 읽힌다. rules는 그 탭 대상 DB의 규칙(null이면 Oracle).
         /// </summary>
-        public static string HistoryInsertText(string sql)
+        public static string HistoryInsertText(string sql, SqlLexRules rules = null)
         {
+            rules = rules ?? SqlLexRules.Oracle;
             sql = (sql ?? "").Trim();
-            var parsed = SqlScript.Parse(sql);
-            var block = parsed != null && parsed.IsPlSqlBlock;
-            return sql + (block ? "\n/\n\n" : ";\n\n");
+            var parsed = SqlScript.Parse(sql, rules);
+            var block = parsed != null && parsed.IsPlSqlBlock && rules.BlockEndLine != null;
+            return sql + (block ? "\n" + rules.BlockEndLine + "\n\n" : ";\n\n");
         }
 
         // ---------- 시간 ----------

@@ -39,8 +39,11 @@
   ScrollIntoView(offset)
   TextChanged, SelectionChanged
   ```
-- 강조 구간 계산은 순수 함수(예: `SqlScript.Tokens(text)` → 주석·문자열 구간 목록)로 두고 단위 테스트한다.
+- 강조 구간 계산은 순수 함수 `SqlScript.HighlightSpans(text, rules)`(주석·문자열 구간 목록)로 두고 단위 테스트한다.
   화면 쪽은 그 결과로 색만 칠한다(`DocumentColorizingTransformer`).
+- **DBMS별 규칙**(2026-10-20 반영): 문장 나누기와 강조가 같은 `SqlLexRules`를 따른다 — 스캐너는 하나, 규칙은 데이터
+  (`SqlLexRules.Oracle`·`Postgres`·`SqlServer`, 공급자 `IDbProvider.Lex`). 3·4단계의 편집기는 탭 대상 DB의 규칙으로 칠하고,
+  **탭 대상을 바꾸면 다시 칠해야 한다**(같은 글이 DB마다 다르게 나뉨).
 
 ## 3. 진행 단계와 완료 조건
 

@@ -23,6 +23,7 @@ namespace MyPlugin
         public int DefaultPort { get { return 1433; } }
         public string ServiceLabel { get { return "데이터베이스"; } }
         public ISqlDialect Dialect { get { return SqlDialects.SqlServer; } }
+        public SqlLexRules Lex { get { return SqlLexRules.SqlServer; } }
         public IMetadataProvider Metadata { get { return _metadata; } }
         public IMonitorProvider Monitor { get { return _monitor; } }
 

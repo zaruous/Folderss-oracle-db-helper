@@ -1336,7 +1336,7 @@ namespace MyPlugin
                 session = CheckSession(tab, profile);
                 if (session == null)
                     return;
-                var statement = SqlScript.Parse(WorkspaceLogic.QuickQueryStatement(owner, objectName, where, key != null && key.Kind == RowKeyKind.RowId));
+                var statement = SqlScript.Parse(WorkspaceLogic.QuickQueryStatement(owner, objectName, where, key != null && key.Kind == RowKeyKind.RowId), LexOf(dbId));
                 AddMessage(dbId, WorkspaceLogic.QuickQueryMessage(WorkspaceLogic.QualifiedName(owner, objectName), tab.Title, where), MessageKind.Info);
                 await RunSingleAsync(tab, profile, session, statement, WorkspaceLogic.QuickQueryRows);
                 AttachEditTarget(tab, profile, owner, objectName, statement.Text, metadata, key, metadataError, where);
@@ -1953,7 +1953,8 @@ namespace MyPlugin
             var dbId = Profile(entry.DbId) != null ? entry.DbId : null;
             bool moved;
             var tab = TabForInsert(dbId, out moved);
-            InsertAtTop(tab, WorkspaceLogic.HistoryInsertText(entry.Sql));
+            // 구분 줄('/'·GO)은 넣을 탭 대상 DB의 규칙으로
+            InsertAtTop(tab, WorkspaceLogic.HistoryInsertText(entry.Sql, LexOf(tab.DbId)));
             if (moved)
                 AddMessage(dbId, WorkspaceLogic.HistoryInsertedMessage(entry.Sql, tab.Title, NameOf(dbId)), MessageKind.Info);
         }
@@ -2002,7 +2003,7 @@ namespace MyPlugin
                 return;
             }
 
-            var statements = StatementsToRun(tab.Editor, wholeScript);
+            var statements = StatementsToRun(tab.Editor, wholeScript, LexOf(tab.DbId));
             if (statements.Count == 0)
             {
                 AddMessage(dbId, "실행할 문장이 없습니다.", MessageKind.Error);
@@ -2093,20 +2094,21 @@ namespace MyPlugin
         /// <summary>
         /// 실행할 문장들. 스크립트 실행(F5)은 편집기 전체, 선택 영역은 그 안의 문장들(문장 하나면 지금처럼 선택 전체를 한 문장으로),
         /// 선택이 없으면 커서가 있는 문장 하나. 여러 문장은 <see cref="SqlScript.SplitForRun"/>으로 나눈다(문장 안의 빈 줄 허용).
+        /// rules는 그 탭 대상 DB의 구문 규칙(PostgreSQL $$, SQL Server GO 등).
         /// </summary>
-        private static List<SqlStatement> StatementsToRun(TextBox editor, bool wholeScript)
+        private static List<SqlStatement> StatementsToRun(TextBox editor, bool wholeScript, SqlLexRules rules)
         {
             if (wholeScript)
-                return SqlScript.SplitForRun(editor.Text);
+                return SqlScript.SplitForRun(editor.Text, rules);
             if (editor.SelectionLength > 0)
             {
-                var parts = SqlScript.SplitForRun(editor.SelectedText);
+                var parts = SqlScript.SplitForRun(editor.SelectedText, rules);
                 if (parts.Count > 1)
                     return parts;
-                var one = SqlScript.Parse(editor.SelectedText);
+                var one = SqlScript.Parse(editor.SelectedText, rules);
                 return one == null ? new List<SqlStatement>() : new List<SqlStatement> { one };
             }
-            var atCaret = SqlScript.AtCaret(editor.Text, editor.CaretIndex);
+            var atCaret = SqlScript.AtCaret(editor.Text, editor.CaretIndex, rules);
             return atCaret == null ? new List<SqlStatement>() : new List<SqlStatement> { atCaret };
         }
 
@@ -3045,6 +3047,12 @@ namespace MyPlugin
         private OracleConnectionProfile Profile(string dbId)
         {
             return string.IsNullOrEmpty(dbId) ? null : _host.FindProfile(dbId);
+        }
+
+        /// <summary>그 DB의 문장 나누기·구문 강조 규칙. 대상이 없거나 접속이 지워졌으면 Oracle 규칙(지금까지와 같음).</summary>
+        private SqlLexRules LexOf(string dbId)
+        {
+            return DbProviders.For(Profile(dbId)).Lex;
         }
 
         private string NameOf(string dbId)

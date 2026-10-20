@@ -23,6 +23,7 @@ namespace MyPlugin
         public int DefaultPort { get { return 1521; } }
         public string ServiceLabel { get { return "서비스명"; } }
         public ISqlDialect Dialect { get { return SqlDialects.Oracle; } }
+        public SqlLexRules Lex { get { return SqlLexRules.Oracle; } }
         public IMetadataProvider Metadata { get { return _metadata; } }
         public IMonitorProvider Monitor { get { return _monitor; } }
 
@@ -151,6 +152,8 @@ namespace MyPlugin
         public int DefaultPort { get { return 0; } }
         public string ServiceLabel { get { return "데이터베이스"; } }
         public ISqlDialect Dialect { get { return SqlDialects.Generic; } }
+        // 시험(SQLite)·모르는 연결: 지금까지처럼 Oracle 규칙
+        public SqlLexRules Lex { get { return SqlLexRules.Oracle; } }
         public IMetadataProvider Metadata { get { throw new NotSupportedException("이 연결에는 데이터 사전 조회가 없습니다."); } }
         public IMonitorProvider Monitor { get { return NoMonitor.Instance; } }
         public List<string> Validate(OracleConnectionProfile profile, string label) { return new List<string>(); }

@@ -1992,7 +1992,15 @@ namespace MyPlugin
             var dbId = profile.Id;
             var session = CheckSession(tab, profile);
             if (session == null)
+            {
+                // 끊긴 세션: 트리·상태줄까지 가지 않게 여기서 다시 연결할지 묻는다(연결만 — 실행은 사용자가 다시 한다)
+                var broken = _host.GetSession(dbId);
+                if (broken != null && broken.IsBroken && !IsRunningOther(dbId, tab)
+                    && Dialogs.Confirm(Window.GetWindow(this), "연결 끊김", WorkspaceLogic.ReconnectQuestion(profile.Name, broken.PendingText), "다시 연결", false)
+                    && tab.DbId == dbId && !tab.Running)
+                    await ConnectFromStatusAsync(tab, true);
                 return;
+            }
 
             var statements = StatementsToRun(tab.Editor, wholeScript);
             if (statements.Count == 0)

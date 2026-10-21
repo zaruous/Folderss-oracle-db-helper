@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace MyPlugin
 {
     /// <summary>
@@ -14,7 +18,9 @@ namespace MyPlugin
             QQuote = true,
             Blocks = true,
             BlockEndLine = "/",
-            ExecAsPlSqlBlock = true
+            ExecAsPlSqlBlock = true,
+            Keywords = SqlKeywords.Of(SqlKeywords.Common, SqlKeywords.Oracle),
+            Types = SqlKeywords.Of(SqlKeywords.CommonTypes, SqlKeywords.OracleTypes)
         };
 
         /// <summary>
@@ -26,7 +32,9 @@ namespace MyPlugin
             Name = "PostgreSQL",
             DollarQuote = true,
             EscapeString = true,
-            NestedComments = true
+            NestedComments = true,
+            Keywords = SqlKeywords.Of(SqlKeywords.Common, SqlKeywords.Postgres),
+            Types = SqlKeywords.Of(SqlKeywords.CommonTypes, SqlKeywords.PostgresTypes)
         };
 
         /// <summary>
@@ -39,7 +47,9 @@ namespace MyPlugin
             BracketIdentifier = true,
             Blocks = true,
             BlockEndLine = "GO",
-            BeginTranIsStatement = true
+            BeginTranIsStatement = true,
+            Keywords = SqlKeywords.Of(SqlKeywords.Common, SqlKeywords.SqlServer),
+            Types = SqlKeywords.Of(SqlKeywords.CommonTypes, SqlKeywords.SqlServerTypes)
         };
 
         private SqlLexRules() { }
@@ -72,5 +82,27 @@ namespace MyPlugin
 
         /// <summary>EXEC p(…) → BEGIN p(…); END;(SQL*Plus처럼, Oracle).</summary>
         public bool ExecAsPlSqlBlock { get; private set; }
+
+        /// <summary>구문 강조 키워드: 공통 SQL(문장·절·조건·DDL·트랜잭션·블록) + 이 DBMS 것(Oracle MINUS, PostgreSQL LIMIT·RETURNING, SQL Server TOP·GO …).</summary>
+        public SqlKeywords Keywords { get; private set; }
+
+        /// <summary>구문 강조 자료형(키워드와 따로 칠할 수 있게): 공통 + 이 DBMS 것(Oracle NUMBER·VARCHAR2, PostgreSQL TEXT·JSONB, SQL Server NVARCHAR·DATETIME2 …).</summary>
+        public SqlKeywords Types { get; private set; }
+
+        /// <summary>
+        /// 강조용 사본: 키워드에 add를 더하고 키워드·자료형에서 remove를 뺀다(대소문자 무시 — 설정의 "더 칠할 낱말"·"칠하지 않을 낱말").
+        /// 문장 나누기 규칙은 그대로이고 이름도 같다. 더할 것·뺄 것이 없으면 자신을 돌려준다.
+        /// </summary>
+        public SqlLexRules WithKeywords(IEnumerable<string> add, IEnumerable<string> remove)
+        {
+            var added = (add ?? Enumerable.Empty<string>()).ToList();
+            var removed = new HashSet<string>(remove ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            if (added.Count == 0 && removed.Count == 0)
+                return this;
+            var copy = (SqlLexRules)MemberwiseClone();
+            copy.Keywords = new SqlKeywords((Keywords == null ? Enumerable.Empty<string>() : Keywords.Words).Concat(added).Where(w => !removed.Contains(w)));
+            copy.Types = new SqlKeywords((Types == null ? Enumerable.Empty<string>() : Types.Words).Where(w => !removed.Contains(w)));
+            return copy;
+        }
     }
 }

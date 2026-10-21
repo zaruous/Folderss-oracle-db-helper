@@ -18,6 +18,7 @@ namespace MyPlugin
 
             manager.AddSettingsPage(new ConnectionSettingsPage(manager));
             manager.AddSettingsPage(new MonitorSettingsPage(manager));
+            manager.AddSettingsPage(new SqlEditorSettingsPage(manager));
         }
 
         /// <summary>

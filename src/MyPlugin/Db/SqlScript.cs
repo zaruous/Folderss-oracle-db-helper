@@ -86,7 +86,13 @@ namespace MyPlugin
         /// <summary>줄 주석(--)·블록 주석(/* */, 힌트 /*+ */ 포함)</summary>
         Comment,
         /// <summary>문자열 '…'·N'…'·q'[…]'·nq'[…]'</summary>
-        String
+        String,
+        /// <summary>키워드(<see cref="SqlLexRules.Keywords"/>, SQL Server GO 줄). <see cref="SqlScript.EditorSpans"/>만 낸다</summary>
+        Keyword,
+        /// <summary>따옴표 식별자 "…"·[…] — 칠하지 않는다. 증분 강조가 여러 줄 식별자 안에서 다시 훑기 시작하지 않게 구간으로 둔다(<see cref="SqlScript.EditorSpans"/>만 낸다)</summary>
+        Identifier,
+        /// <summary>자료형(<see cref="SqlLexRules.Types"/> — NUMBER·VARCHAR2·TEXT·NVARCHAR …). 키워드와 따로 칠할 수 있게 나눈다. <see cref="SqlScript.EditorSpans"/>만 낸다</summary>
+        DataType
     }
 
     /// <summary>구문 강조 구간: 글에서의 위치(UTF-16 인덱스 — string.Substring과 같다)와 길이.</summary>
@@ -189,6 +195,49 @@ namespace MyPlugin
                     spans.Add(new SqlSpan(SqlSpanKind.Comment, t.Start, t.End - t.Start));
                 else if (t.Type == TokenType.Literal)
                     spans.Add(new SqlSpan(SqlSpanKind.String, t.Start, t.End - t.Start));
+            }
+            return spans;
+        }
+
+        /// <summary>
+        /// 편집기 구문 강조 구간 전부: 주석·문자열(<see cref="HighlightSpans"/>와 같음)에 키워드·자료형과 따옴표 식별자(칠하지 않음)를 더한다. 앞에서 뒤로, 겹치지 않음.
+        /// 자료형은 낱말 토큰이 <see cref="SqlLexRules.Types"/>에, 키워드는 <see cref="SqlLexRules.Keywords"/>에 있을 때다 — 문자열·주석·따옴표 식별자 안은 토큰이 아니라 저절로 빠지고,
+        /// 바로 앞이 . : @ &amp;인 낱말(t.date, :from, @from, &amp;var)도 뺀다. SQL Server GO 줄은 키워드다.
+        /// start부터만 훑는다(위치는 s 기준). start는 줄 시작이고 여러 줄 토큰 안이 아니어야 한다 — 처음부터 훑은 것과 같으려면(<see cref="SqlHighlighter"/>).
+        /// </summary>
+        public static List<SqlSpan> EditorSpans(string s, SqlLexRules rules = null, int start = 0)
+        {
+            rules = rules ?? SqlLexRules.Oracle;
+            var spans = new List<SqlSpan>();
+            if (string.IsNullOrEmpty(s) || start >= s.Length)
+                return spans;
+            foreach (var t in Tokenize(s, rules, start))
+            {
+                switch (t.Type)
+                {
+                    case TokenType.LineComment:
+                    case TokenType.BlockComment:
+                        spans.Add(new SqlSpan(SqlSpanKind.Comment, t.Start, t.End - t.Start));
+                        break;
+                    case TokenType.Literal:
+                        spans.Add(new SqlSpan(SqlSpanKind.String, t.Start, t.End - t.Start));
+                        break;
+                    case TokenType.QuotedIdentifier:
+                        spans.Add(new SqlSpan(SqlSpanKind.Identifier, t.Start, t.End - t.Start));
+                        break;
+                    case TokenType.Word:
+                        if (t.Start > 0 && ".:@&".IndexOf(s[t.Start - 1]) >= 0)
+                            break;
+                        if (rules.Types != null && rules.Types.Contains(s, t.Start, t.End - t.Start))
+                            spans.Add(new SqlSpan(SqlSpanKind.DataType, t.Start, t.End - t.Start));
+                        else if (rules.Keywords != null && rules.Keywords.Contains(s, t.Start, t.End - t.Start))
+                            spans.Add(new SqlSpan(SqlSpanKind.Keyword, t.Start, t.End - t.Start));
+                        break;
+                    case TokenType.SlashLine:
+                        if (s[t.Start] != '/')
+                            spans.Add(new SqlSpan(SqlSpanKind.Keyword, t.Start, t.End - t.Start));
+                        break;
+                }
             }
             return spans;
         }
@@ -853,14 +902,15 @@ namespace MyPlugin
         /// <summary>
         /// 한 번 훑어 토큰으로 나눈다. 공백은 버리고, 문자열·주석 밖의 빈 줄과 구분 줄('/'·GO)은 표시 토큰으로 남긴다.
         /// 줄바꿈은 CRLF·LF·CR. 닫히지 않은 문자열·주석·따옴표 식별자는 끝까지로 본다. DBMS별 문법은 rules가 켠다.
+        /// from부터 훑는다(줄 시작이어야 한다 — 줄에 내용이 있었는지를 거기서 새로 센다).
         /// </summary>
-        private static List<Token> Tokenize(string s, SqlLexRules rules)
+        private static List<Token> Tokenize(string s, SqlLexRules rules, int from = 0)
         {
             var slashLine = rules.BlockEndLine == "/";
             var goLine = rules.BlockEndLine == "GO";
             var tokens = new List<Token>();
             var n = s.Length;
-            var pos = 0;
+            var pos = from;
             // 지금 줄에 공백 말고 무엇이 있었는지. 여러 줄 문자열·주석이 끝난 줄도 내용이 있는 줄이다.
             var lineHasContent = false;
             while (pos < n)

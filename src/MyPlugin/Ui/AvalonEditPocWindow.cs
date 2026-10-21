@@ -5,24 +5,24 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using ICSharpCode.AvalonEdit;
-using ICSharpCode.AvalonEdit.Document;
-using ICSharpCode.AvalonEdit.Rendering;
 
 namespace MyPlugin
 {
     /// <summary>
     /// [시험판 전용] AvalonEdit 편집기 PoC 창(docs/sql-editor-avalonedit-plan.md 1단계 실측용). 본 SQL 탭은 바꾸지 않는다.
-    /// 도구 > AvalonEdit PoC로 지금 SQL 탭의 글·대상 DB 규칙을 가져와 연다. 주석·문자열은 SqlScript.HighlightSpans로 칠한다.
-    /// 화면 아래에 실측값(넣기→첫 화면, 글 꺼내기·구간 계산 시간, 키가 편집기에서 처리됐는지)을 보이고 [결과 복사]로 표 한 줄씩 복사한다.
+    /// 도구 > AvalonEdit PoC로 지금 SQL 탭의 글·대상 DB 규칙을 가져와 연다. 주석·문자열·키워드는 <see cref="SqlEditorHighlighting"/>이 칠한다 —
+    /// 기본은 증분(바뀐 곳 근처만 다시 훑음), 비교용으로 글이 바뀔 때마다 전체 다시 계산. 색은 테마에서 정하고 테마를 바꾸면 다시 칠한다.
+    /// 화면 아래에 실측값(넣기→첫 화면, 강조 계산 시간·다시 훑은 글자, 키가 편집기에서 처리됐는지)을 보이고 [결과 복사]로 표 한 줄씩 복사한다.
     /// </summary>
     internal static class AvalonEditPocWindow
     {
-        public static Window Show(Window owner, string text, SqlLexRules rules, Action<string> copy)
+        public static Window Show(Window owner, string text, SqlLexRules rules, SqlEditorSettings settings, Action<string> copy)
         {
             var window = new Window
             {
@@ -36,9 +36,10 @@ namespace MyPlugin
             };
             Theme.ApplyWindow(window);
             DialogKit.SetOwner(window, owner);
-            var poc = new Poc(window, rules ?? SqlLexRules.Oracle, copy);
+            var poc = new Poc(window, rules ?? SqlLexRules.Oracle, settings ?? new SqlEditorSettings(), copy);
             window.Content = poc.Root;
             window.Loaded += (s, e) => poc.Load(string.IsNullOrEmpty(text) ? PocData.D1 : text, "지금 SQL 탭");
+            window.Closed += (s, e) => poc.Detach();
             window.Show();
             return window;
         }
@@ -48,17 +49,20 @@ namespace MyPlugin
             private readonly Window _window;
             private readonly Action<string> _copy;
             private readonly TextEditor _editor;
-            private readonly SpanColorizer _colorizer = new SpanColorizer();
+            private readonly SqlEditorHighlighting _highlighting;
             private readonly ComboBox _rules;
+            private readonly ComboBox _mode;
             private readonly TextBlock _measure;
             private readonly TextBlock _keys;
             private readonly List<string> _keyLog = new List<string>();
             private readonly List<double> _computeTimes = new List<double>();
             private readonly List<string> _results = new List<string>();
+            private SqlEditorSettings _settings;
             private string _dataName = "";
             private string _loadLine = "";
+            private string _lastCompute = "";
 
-            public Poc(Window window, SqlLexRules rules, Action<string> copy)
+            public Poc(Window window, SqlLexRules rules, SqlEditorSettings settings, Action<string> copy)
             {
                 _window = window;
                 _copy = copy;
@@ -71,17 +75,28 @@ namespace MyPlugin
                 Root.Children.Add(note);
 
                 var bar = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
-                _rules = new ComboBox { Width = 120, Margin = new Thickness(0, 0, 8, 0), ToolTip = "구문 규칙(문장 나누기와 같은 규칙)" };
+                _rules = new ComboBox { Width = 120, Margin = new Thickness(0, 0, 8, 4), ToolTip = "구문 규칙(문장 나누기와 같은 규칙 — 키워드 목록도 DBMS마다 다름)" };
+                AutomationProperties.SetAutomationId(_rules, "PocRules");
                 foreach (var r in new[] { SqlLexRules.Oracle, SqlLexRules.Postgres, SqlLexRules.SqlServer })
                     _rules.Items.Add(new ComboBoxItem { Content = r.Name, Tag = r });
                 _rules.SelectedIndex = rules == SqlLexRules.Postgres ? 1 : rules == SqlLexRules.SqlServer ? 2 : 0;
-                _rules.SelectionChanged += (s, e) => Recompute("규칙 바꿈");
+                _rules.SelectionChanged += (s, e) => { if (_highlighting != null) _highlighting.Rules = Rules; };
                 bar.Children.Add(_rules);
+                _mode = new ComboBox { Width = 170, Margin = new Thickness(0, 0, 8, 4), ToolTip = "강조 계산 방식: 증분(바뀐 곳 근처만) / 전체 다시 계산(비교용)" };
+                AutomationProperties.SetAutomationId(_mode, "PocMode");
+                _mode.Items.Add(new ComboBoxItem { Content = "증분 강조" });
+                _mode.Items.Add(new ComboBoxItem { Content = "전체 다시 계산(비교용)" });
+                _mode.SelectedIndex = 0;
+                _mode.SelectionChanged += (s, e) => { if (_highlighting != null) _highlighting.Incremental = _mode.SelectedIndex == 0; };
+                bar.Children.Add(_mode);
                 bar.Children.Add(Button("D1 경계 사례", () => Load(PocData.D1, "D1")));
+                bar.Children.Add(Button("D2 실무형 1천 줄", () => Load(PocData.D2(1000), "D2 1천 줄")));
                 bar.Children.Add(Button("D3-1 1만 줄", () => Load(PocData.D3(10000), "D3-1 1만 줄")));
                 bar.Children.Add(Button("D3-2 5만 줄", () => Load(PocData.D3(50000), "D3-2 5만 줄")));
                 bar.Children.Add(Button("D3-3 10만 줄", () => Load(PocData.D3(100000), "D3-3 10만 줄")));
+                bar.Children.Add(Button("D4-1 한 줄 1MB", () => Load(PocData.D41(1 << 20), "D4-1 한 줄 1MB")));
                 bar.Children.Add(Button("D4-2 맨 앞 /* 넣기·빼기", ToggleLeadingComment));
+                bar.Children.Add(Button("D4-3 전부 주석 10만 줄", () => Load(PocData.D43(100000), "D4-3 전부 주석")));
                 bar.Children.Add(Button("결과 복사", CopyResults));
                 DockPanel.SetDock(bar, Dock.Top);
                 Root.Children.Add(bar);
@@ -100,14 +115,14 @@ namespace MyPlugin
                 _editor = new TextEditor
                 {
                     ShowLineNumbers = true,
-                    FontFamily = Theme.Mono,
-                    FontSize = 13,
                     HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
                     VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                     BorderThickness = new Thickness(1)
                 };
-                _editor.Options.EnableHyperlinks = false;
-                _editor.Options.EnableEmailHyperlinks = false;
+                // 키 동작 결정(Ctrl+D 끔, Insert 겹쳐쓰기 전환)과 줄 간격 — 3단계 SqlEditor와 같은 설정
+                SqlEditorSetup.ApplyBehavior(_editor);
+                SqlEditorSetup.ApplyFont(_editor, Theme.Mono, 13, settings.LineHeight);
+                _settings = settings;
                 _editor.SetResourceReference(Control.BackgroundProperty, Theme.PanelBackground);
                 _editor.SetResourceReference(Control.ForegroundProperty, Theme.PrimaryText);
                 _editor.SetResourceReference(Control.BorderBrushProperty, Theme.Border);
@@ -116,8 +131,11 @@ namespace MyPlugin
                 // 선택 영역 글자는 원래 색 그대로(기본값은 흰 글자라 밝은 테마에서 안 보임)
                 _editor.TextArea.SelectionForeground = null;
                 _editor.TextArea.SelectionBorder = null;
-                _editor.TextArea.TextView.LineTransformers.Add(_colorizer);
-                _editor.Document.TextChanged += (s, e) => Recompute(null);
+                // 주석·문자열·키워드 강조(증분, 테마 색) — 4단계 SqlEditor가 쓸 것과 같은 것
+                _highlighting = SqlEditorHighlighting.Attach(_editor, Rules, settings);
+                // 설정 창에서 저장하면 바로 따른다
+                SqlEditorSettings.Changed += OnSettingsChanged;
+                _highlighting.Updated += (s, e) => ShowCompute(_highlighting.Last);
                 Root.Children.Add(_editor);
 
                 // 키 흐름: 창의 KeyDown(버블)에 처리된 이벤트까지 받아, 편집기가 먹었는지(Handled) 기록한다
@@ -131,9 +149,20 @@ namespace MyPlugin
                 get { return (SqlLexRules)((ComboBoxItem)_rules.SelectedItem).Tag; }
             }
 
+            private bool Incremental
+            {
+                get { return _mode.SelectedIndex == 0; }
+            }
+
+            public void Detach()
+            {
+                SqlEditorSettings.Changed -= OnSettingsChanged;
+                _highlighting.Detach();
+            }
+
             private static Button Button(string text, Action click)
             {
-                var button = new Button { Content = text, Padding = new Thickness(10, 2, 10, 2), Margin = new Thickness(0, 0, 6, 0), Focusable = false };
+                var button = new Button { Content = text, Padding = new Thickness(10, 2, 10, 2), Margin = new Thickness(0, 0, 6, 4), Focusable = false };
                 button.Click += (s, e) => click();
                 return button;
             }
@@ -152,10 +181,15 @@ namespace MyPlugin
                     var shown = watch.Elapsed.TotalMilliseconds;
                     _loadLine = name + ": 줄 " + _editor.Document.LineCount.ToString("N0", CultureInfo.InvariantCulture)
                         + " · 글 " + Mb(text.Length) + " · 넣기 " + Ms(assigned) + " · 첫 화면까지 " + Ms(shown);
-                    _results.Add(Row("넣기→첫 화면 (" + name + ")", _loadLine));
+                    _results.Add(Row("넣기→첫 화면 (" + name + ", " + ModeName + ")", _loadLine));
                     ShowMeasure();
                     _editor.Focus();
                 }));
+            }
+
+            private string ModeName
+            {
+                get { return Incremental ? "증분" : "전체"; }
             }
 
             private void ToggleLeadingComment()
@@ -167,34 +201,39 @@ namespace MyPlugin
                     doc.Insert(0, "/*");
             }
 
-            private void Recompute(string reason)
+            private void ShowCompute(SqlHighlightUpdate update)
             {
-                var watch = Stopwatch.StartNew();
-                var text = _editor.Document.Text;
-                var taken = watch.Elapsed.TotalMilliseconds;
-                var spans = SqlScript.HighlightSpans(text, Rules);
-                var computed = watch.Elapsed.TotalMilliseconds - taken;
-                _colorizer.Spans = spans;
-                _colorizer.Comment = Brush(Theme.SecondaryText) ?? Brushes.Gray;
-                _colorizer.String = Theme.Warning;
-                _editor.TextArea.TextView.Redraw();
-                _computeTimes.Add(taken + computed);
-                _lastCompute = "구간 계산: 글 꺼내기 " + Ms(taken) + " + 계산 " + Ms(computed) + " = " + Ms(taken + computed)
-                    + " (구간 " + spans.Count.ToString("N0", CultureInfo.InvariantCulture) + "개, 규칙 " + Rules.Name + (reason != null ? ", " + reason : "") + ")"
-                    + (_computeTimes.Count > 1 ? " · 이번 글에서 " + _computeTimes.Count + "회 중앙값 " + Ms(Median(_computeTimes)) + " · 최대 " + Ms(_computeTimes.Max()) : "");
+                var n = CultureInfo.InvariantCulture;
+                if (update.Reason != null)
+                {
+                    _computeTimes.Clear();
+                    _lastCompute = update.Reason + ": 처음부터 다시 훑기 " + Ms(update.Milliseconds) + " (" + ModeName + ", 구간 " + update.Spans.ToString("N0", n) + "개 · 규칙 " + Rules.Name + ")";
+                }
+                else
+                {
+                    _computeTimes.Add(update.Milliseconds);
+                    _lastCompute = (update.Incremental
+                            ? "증분 강조: " + Ms(update.Milliseconds) + " (다시 훑은 글 " + update.Scanned.ToString("N0", n) + "자 · 다시 칠할 범위 " + update.Range.ToString("N0", n) + "자 · "
+                            : "전체 다시 계산: 글 꺼내기 " + Ms(update.TextMilliseconds) + " + 계산 " + Ms(update.Milliseconds - update.TextMilliseconds) + " = " + Ms(update.Milliseconds) + " (")
+                        + "구간 " + update.Spans.ToString("N0", n) + "개 · 규칙 " + Rules.Name + ")";
+                    if (_computeTimes.Count > 1)
+                        _lastCompute += " · 이번 글에서 " + _computeTimes.Count + "회 중앙값 " + Ms(Median(_computeTimes)) + " · 최대 " + Ms(_computeTimes.Max());
+                }
                 ShowMeasure();
             }
 
-            private string _lastCompute = "";
-
-            private Brush Brush(string key)
+            private void OnSettingsChanged(object sender, SqlEditorSettings settings)
             {
-                return _editor.TryFindResource(key) as Brush;
+                _settings = settings;
+                SqlEditorSetup.ApplyFont(_editor, Theme.Mono, 13, settings.LineHeight);
+                _highlighting.Settings = settings;
             }
 
             private void ShowMeasure()
             {
-                _measure.Text = _loadLine + "\n" + _lastCompute + "\n16ms를 넘으면 키 입력마다 전체 다시 계산은 무리(4단계에서 지연·증분 계산).";
+                _measure.Text = _loadLine + "\n" + _lastCompute + "\n16ms를 넘으면 키 입력이 한 프레임을 넘는다(증분이 기본, 전체 다시 계산은 비교용). "
+                    + "설정: 줄 간격 " + SqlEditorSettings.LineHeightLabel(_settings.LineHeight) + " · " + _settings.MaxColoredLine.ToString("N0", CultureInfo.InvariantCulture)
+                    + "자 넘는 줄은 칠하지 않음";
             }
 
             private void OnKeyDown(object sender, KeyEventArgs e)
@@ -214,7 +253,7 @@ namespace MyPlugin
             {
                 var lines = new List<string>(_results);
                 if (_computeTimes.Count > 0)
-                    lines.Add(Row("키 입력 강조 계산 (" + _dataName + ")", "중앙값 " + Ms(Median(_computeTimes)) + " · 최대 " + Ms(_computeTimes.Max()) + " · " + _computeTimes.Count + "회"));
+                    lines.Add(Row("키 입력 강조 계산 (" + _dataName + ", " + ModeName + ")", "중앙값 " + Ms(Median(_computeTimes)) + " · 최대 " + Ms(_computeTimes.Max()) + " · " + _computeTimes.Count + "회"));
                 lines.AddRange(_keyLog.Select(k => Row("키", k)));
                 _copy(string.Join(Environment.NewLine, lines));
             }
@@ -242,40 +281,7 @@ namespace MyPlugin
             }
         }
 
-        /// <summary>구간 목록으로 줄마다 색을 칠한다(구간은 앞에서 뒤로 정렬 — 줄 시작 위치를 이분 탐색).</summary>
-        private sealed class SpanColorizer : DocumentColorizingTransformer
-        {
-            public List<SqlSpan> Spans = new List<SqlSpan>();
-            public Brush Comment = Brushes.Gray;
-            public Brush String = Brushes.Orange;
-
-            protected override void ColorizeLine(DocumentLine line)
-            {
-                var spans = Spans;
-                if (spans.Count == 0)
-                    return;
-                int lo = 0, hi = spans.Count;
-                while (lo < hi)
-                {
-                    var mid = (lo + hi) / 2;
-                    if (spans[mid].End <= line.Offset)
-                        lo = mid + 1;
-                    else
-                        hi = mid;
-                }
-                for (var i = lo; i < spans.Count && spans[i].Start < line.EndOffset; i++)
-                {
-                    var start = Math.Max(spans[i].Start, line.Offset);
-                    var end = Math.Min(spans[i].End, line.EndOffset);
-                    if (end <= start)
-                        continue;
-                    var brush = spans[i].Kind == SqlSpanKind.Comment ? Comment : String;
-                    ChangeLinePart(start, end, element => element.TextRunProperties.SetForegroundBrush(brush));
-                }
-            }
-        }
-
-        /// <summary>계획서 5절 시험 데이터: D1(경계 사례), D3(크기별 생성 — 구성 비율 고정).</summary>
+        /// <summary>계획서 5절 시험 데이터: D1(경계 사례), D2(실무형), D3(크기별 생성 — 구성 비율 고정), D4-1(한 줄 1MB), D4-3(전부 주석).</summary>
         private static class PocData
         {
             public const string D1 = "-- 줄 주석 한글\n"
@@ -303,6 +309,46 @@ namespace MyPlugin
                 + "GO\n"
                 + "SELECT '닫히지 않은 문자열 → 끝까지 문자열\n";
 
+            // 실제 작업 스크립트 모양(조회·조건·조인·집계, 테이블 정의, DML, PL/SQL 배치, 한글 주석) — 키워드가 많은 글
+            private static readonly string[] Work =
+            {
+                "-- ===== 주문 집계 (월 마감) =====",
+                "SELECT o.order_id, o.order_date, c.customer_name AS \"고객명\", SUM(l.amount) AS total",
+                "  FROM orders o",
+                "  JOIN customers c ON c.customer_id = o.customer_id",
+                "  LEFT OUTER JOIN order_lines l ON l.order_id = o.order_id",
+                " WHERE o.order_date BETWEEN :from_date AND :to_date",
+                "   AND o.status IN ('PAID', 'SHIPPED')",
+                "   AND c.grade IS NOT NULL",
+                " GROUP BY o.order_id, o.order_date, c.customer_name",
+                "HAVING SUM(l.amount) > 1000",
+                " ORDER BY total DESC;",
+                "",
+                "CREATE TABLE t_order_hist (",
+                "  hist_id     NUMBER(12)      CONSTRAINT pk_order_hist PRIMARY KEY,",
+                "  order_id    NUMBER(12)      NOT NULL REFERENCES orders(order_id),",
+                "  changed_at  DATE            DEFAULT SYSDATE NOT NULL,",
+                "  memo        VARCHAR2(4000)  -- 변경 메모",
+                ");",
+                "",
+                "UPDATE orders SET status = 'CANCELLED', updated_at = SYSDATE WHERE order_id = 1001 AND status = 'PAID';",
+                "INSERT INTO t_order_hist (hist_id, order_id, memo) VALUES (seq_hist.NEXTVAL, 1001, q'[고객 요청 '취소']');",
+                "/* 아래 PL/SQL은",
+                "   야간 배치에서 돈다 */",
+                "BEGIN",
+                "  FOR r IN (SELECT order_id FROM orders WHERE status = 'PAID') LOOP",
+                "    UPDATE orders SET status = 'DONE' WHERE order_id = r.order_id;",
+                "  END LOOP;",
+                "  COMMIT;",
+                "EXCEPTION",
+                "  WHEN OTHERS THEN",
+                "    ROLLBACK;",
+                "    RAISE;",
+                "END;",
+                "/",
+                ""
+            };
+
             // 줄 주석 20%, 블록 주석 10%(3줄), 문자열 포함 30%(q'[…]' 포함), 일반 40%, 한글은 주석·문자열에 절반
             private static readonly string[] Unit =
             {
@@ -312,11 +358,37 @@ namespace MyPlugin
                 "SELECT a, b, c FROM t1 JOIN t2 ON t1.id = t2.id;", "INSERT INTO t (a, b) VALUES (1, 2);", "SELECT COUNT(*) FROM orders;", "DELETE FROM t WHERE id = 3;"
             };
 
+            public static string D2(int lines)
+            {
+                return Repeat(Work, lines);
+            }
+
             public static string D3(int lines)
             {
-                var sb = new StringBuilder(lines * 40);
+                return Repeat(Unit, lines);
+            }
+
+            /// <summary>D4-1: 한 줄짜리 긴 INSERT … VALUES (…),(…),… (chars자 남짓).</summary>
+            public static string D41(int chars)
+            {
+                var sb = new StringBuilder(chars + 64);
+                sb.Append("INSERT INTO t_big (id, name, memo) VALUES ");
+                for (var i = 1; sb.Length < chars; i++)
+                    sb.Append(i == 1 ? "" : ", ").Append('(').Append(i).Append(", '이름").Append(i).Append("', NULL)");
+                return sb.Append(";\r\n").ToString();
+            }
+
+            /// <summary>D4-3: D3 전체가 블록 주석 하나(안의 */는 끊어 둔다).</summary>
+            public static string D43(int lines)
+            {
+                return "/* 전부 주석\r\n" + D3(lines).Replace("*/", "* /") + "*/\r\n";
+            }
+
+            private static string Repeat(string[] unit, int lines)
+            {
+                var sb = new StringBuilder(lines * 48);
                 for (var i = 0; i < lines; i++)
-                    sb.Append(Unit[i % Unit.Length]).Append("\r\n");
+                    sb.Append(unit[i % unit.Length]).Append("\r\n");
                 return sb.ToString();
             }
         }

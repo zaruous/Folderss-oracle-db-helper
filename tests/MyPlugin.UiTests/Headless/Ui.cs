@@ -235,13 +235,19 @@ namespace MyPlugin.UiTests.Headless
             var content = window.Content as FrameworkElement;
             if (content == null)
                 throw new InvalidOperationException("창 내용이 없습니다.");
+            return SnapElement(content, window.Background, folder, name);
+        }
+
+        /// <summary>요소 하나를 PNG로(메뉴 팝업처럼 창 밖에 뜬 것도). background 위에 그린다.</summary>
+        public static string SnapElement(FrameworkElement content, Brush background, string folder, string name)
+        {
             content.UpdateLayout();
             var width = Math.Max(1, (int)Math.Ceiling(content.ActualWidth));
             var height = Math.Max(1, (int)Math.Ceiling(content.ActualHeight));
             var visual = new DrawingVisual();
             using (var dc = visual.RenderOpen())
             {
-                dc.DrawRectangle(window.Background ?? Brushes.Black, null, new Rect(0, 0, width, height));
+                dc.DrawRectangle(background ?? Brushes.Black, null, new Rect(0, 0, width, height));
                 dc.DrawRectangle(new VisualBrush(content) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top }, null, new Rect(0, 0, width, height));
             }
             var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);

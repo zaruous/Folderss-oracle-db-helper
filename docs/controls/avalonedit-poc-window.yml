@@ -1,0 +1,33 @@
+id: avalonedit-poc-window
+name: AvalonEditPocWindow
+title: AvalonEdit PoC 창 (시험판)
+kind: window
+source:
+  - src/MyPlugin/Ui/AvalonEditPocWindow.cs
+base: System.Windows.Window
+used_by: [sql-workspace, shell-menu]
+summary: >-
+  [시험판 전용 — poc/avalonedit-editor 브랜치] 도구 > AvalonEdit PoC로 여는 편집기 실측 창.
+  지금 SQL 탭의 글과 대상 DB 규칙을 가져와 AvalonEdit으로 보이고 주석·문자열을 칠한다. 본 SQL 탭은 바꾸지 않는다.
+features:
+  - name: 편집기
+    description: >-
+      AvalonEdit TextEditor(줄 번호, 고정폭 글꼴, 하이퍼링크 끔). 주석·문자열은 SqlScript.HighlightSpans(규칙 콤보: Oracle·PostgreSQL·SQL Server)로
+      DocumentColorizingTransformer가 칠한다. 글이 바뀔 때마다 전체 다시 계산(실측 대상).
+  - name: 시험 데이터
+    description: "[D1 경계 사례]·[D3-1 1만 줄]·[D3-2 5만 줄]·[D3-3 10만 줄](계획서 5절 구성으로 생성)·[D4-2 맨 앞 /* 넣기·빼기]."
+  - name: 실측 표시
+    description: >-
+      넣기→첫 화면 시간, 글 꺼내기·구간 계산 시간(이번 글의 중앙값·최대), 최근 키 8개와 편집기가 처리했는지(Handled) 통과했는지.
+      [결과 복사]는 계획서 7절 표 형식 줄로 클립보드에.
+theme:
+  - part: 편집기 바탕·글자·테두리·줄 번호·선택
+    keys: [PanelBackground, PrimaryText, BorderBrush, SecondaryText, SelectionBrush]
+  - part: 주석 / 문자열
+    keys: [SecondaryText, Theme.Warning]
+limits:
+  - 시험판 전용이다. main에 머지하지 않는다(3단계에서 SQL 탭 편집기 교체로 대신한다).
+  - 저장·실행·찾기·SQL 탭 단축키는 없다(키가 편집기에서 처리되는지만 본다).
+verification:
+  - Linux에서 빌드·publish zip에 ICSharpCode.AvalonEdit.dll·.deps.json 등록까지 확인. 화면·IME·키는 Windows에서 확인해야 한다.
+related: [sql-workspace, shell-menu]

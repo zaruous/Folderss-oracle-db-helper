@@ -41,6 +41,9 @@ namespace MyPlugin
         /// <summary>도구 > 일일 점검: 고른 DB들에 점검 묶음(공간·백업·로그·객체·작업·보안)을 돌려 상태·직전 대비를 보이고 엑셀로 저장.</summary>
         void ShowChecks();
 
+        /// <summary>[시험판] 도구 > AvalonEdit PoC: 지금 SQL 탭의 글·대상 DB 규칙으로 편집기 실측 창(본 탭은 그대로).</summary>
+        void ShowEditorPoc();
+
         /// <summary>편집 메뉴(잘라내기·복사·되돌리기 등)의 대상. 없으면 null.</summary>
         TextBox ActiveEditor { get; }
         void ToggleComment();
@@ -321,6 +324,10 @@ namespace MyPlugin
             var checks = Item(CheckLogic.Title + "(_C)…", null, null, _commands.ShowChecks);
             checks.ToolTip = "고른 DB들에 일일 점검 항목(테이블스페이스·FRA·백업·경고 로그·INVALID 객체·실패 잡·비밀번호 만료 …)을 돌려 정상·주의·위험과 직전 대비를 보고, 엑셀 보고서로 저장합니다(지금은 Oracle)";
             top.Items.Add(checks);
+            top.Items.Add(new Separator());
+            var poc = Item("AvalonEdit PoC (시험판)…", null, null, _commands.ShowEditorPoc);
+            poc.ToolTip = "[시험판 전용] 구문 강조 편집기(AvalonEdit) 실측 창 — 플러그인 로드·한글 IME·단축키·테마·성능 확인용. 본 SQL 탭은 바뀌지 않습니다";
+            top.Items.Add(poc);
             // 열 때마다 대상 DB(트리에서 고른 것)를 항목 글에 보인다 — 어느 접속으로 만드는지 바로 알 수 있게
             top.SubmenuOpened += (s, e) =>
             {

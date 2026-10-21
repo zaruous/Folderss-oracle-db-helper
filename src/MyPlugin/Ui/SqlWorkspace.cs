@@ -3049,6 +3049,13 @@ namespace MyPlugin
             return string.IsNullOrEmpty(dbId) ? null : _host.FindProfile(dbId);
         }
 
+        /// <summary>[시험판] AvalonEdit PoC 창: 지금 탭의 글과 대상 DB 규칙으로 연다(본 탭은 그대로).</summary>
+        public void ShowEditorPoc()
+        {
+            Safe(() => AvalonEditPocWindow.Show(Window.GetWindow(this), _active != null ? _active.Editor.Text : null,
+                LexOf(_active != null ? _active.DbId : null), text => CopyText(text, "PoC 실측 결과를 복사했습니다(계획서 7절 표 형식).")));
+        }
+
         /// <summary>그 DB의 문장 나누기·구문 강조 규칙. 대상이 없거나 접속이 지워졌으면 Oracle 규칙(지금까지와 같음).</summary>
         private SqlLexRules LexOf(string dbId)
         {

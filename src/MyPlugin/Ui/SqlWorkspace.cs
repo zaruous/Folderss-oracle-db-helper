@@ -48,6 +48,9 @@ namespace MyPlugin
         /// <summary>플러그인 데이터 폴더(SQL 임시 저장 위치). 쓸 수 없으면 null.</summary>
         string DataDirectory { get; }
 
+        /// <summary>설정 "SQL 편집기" 탭에 저장한 편집기 설정(없거나 깨졌으면 기본값).</summary>
+        SqlEditorSettings EditorSettings { get; }
+
         /// <summary>SQL 파일을 열거나 저장한 마지막 폴더(열기·저장 창의 처음 위치). 없으면 null.</summary>
         string LastSqlFolder { get; set; }
 
@@ -3053,7 +3056,7 @@ namespace MyPlugin
         public void ShowEditorPoc()
         {
             Safe(() => AvalonEditPocWindow.Show(Window.GetWindow(this), _active != null ? _active.Editor.Text : null,
-                LexOf(_active != null ? _active.DbId : null), text => CopyText(text, "PoC 실측 결과를 복사했습니다(계획서 7절 표 형식).")));
+                LexOf(_active != null ? _active.DbId : null), _host.EditorSettings, text => CopyText(text, "PoC 실측 결과를 복사했습니다(계획서 7절 표 형식).")));
         }
 
         /// <summary>그 DB의 문장 나누기·구문 강조 규칙. 대상이 없거나 접속이 지워졌으면 Oracle 규칙(지금까지와 같음).</summary>

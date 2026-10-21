@@ -11,9 +11,43 @@ namespace MyPlugin.Tests
     /// </summary>
     public class SqlKeywordTests
     {
+        // 강조 낱말(키워드와 자료형) — 아래 기대값은 칠하는 낱말 전부
         private static List<string> Keywords(string script, SqlLexRules rules)
         {
-            return SqlScript.EditorSpans(script, rules).Where(s => s.Kind == SqlSpanKind.Keyword).Select(s => script.Substring(s.Start, s.Length)).ToList();
+            return SqlScript.EditorSpans(script, rules).Where(s => s.Kind == SqlSpanKind.Keyword || s.Kind == SqlSpanKind.DataType)
+                .Select(s => script.Substring(s.Start, s.Length)).ToList();
+        }
+
+        private static List<(SqlSpanKind, string)> Kinds(string script, SqlLexRules rules)
+        {
+            return SqlScript.EditorSpans(script, rules).Where(s => s.Kind == SqlSpanKind.Keyword || s.Kind == SqlSpanKind.DataType)
+                .Select(s => (s.Kind, script.Substring(s.Start, s.Length))).ToList();
+        }
+
+        [Fact]
+        public void DataTypes_AreSeparateKind_PerDbms()
+        {
+            const SqlSpanKind K = SqlSpanKind.Keyword;
+            const SqlSpanKind T = SqlSpanKind.DataType;
+            Assert.Equal(new[] { (K, "CREATE"), (K, "TABLE"), (T, "NUMBER"), (K, "PRIMARY"), (K, "KEY"), (T, "VARCHAR2"), (T, "DATE"), (K, "DEFAULT"), (K, "SYSDATE") },
+                Kinds("CREATE TABLE t (id NUMBER(10) PRIMARY KEY, name VARCHAR2(10), at DATE DEFAULT SYSDATE);", SqlLexRules.Oracle));
+            Assert.Equal(new[] { (T, "TEXT"), (T, "JSONB"), (T, "TIMESTAMPTZ") }, Kinds("x TEXT, y JSONB, z TIMESTAMPTZ", SqlLexRules.Postgres));
+            Assert.Equal(new[] { (T, "NVARCHAR"), (K, "IDENTITY"), (T, "DATETIME2") }, Kinds("a NVARCHAR(10), b IDENTITY, c DATETIME2", SqlLexRules.SqlServer));
+            // 다른 DBMS 자료형은 아무것도 아님
+            Assert.Empty(Kinds("VARCHAR2 JSONB", SqlLexRules.SqlServer));
+        }
+
+        [Fact]
+        public void WithKeywords_AddsKeywords_RemovesKeywordsAndTypes_KeepsSplitRules()
+        {
+            var rules = SqlLexRules.Oracle.WithKeywords(new[] { "NVL", "DECODE" }, new[] { "level", "DATE" });
+            Assert.Equal("Oracle", rules.Name);
+            Assert.Equal(SqlLexRules.Oracle.BlockEndLine, rules.BlockEndLine);
+            Assert.Equal(new[] { (SqlSpanKind.Keyword, "SELECT"), (SqlSpanKind.Keyword, "NVL"), (SqlSpanKind.Keyword, "decode"), (SqlSpanKind.Keyword, "FROM") },
+                Kinds("SELECT NVL(a, 1), decode(b), level, DATE FROM t", rules));
+            // 원래 규칙은 그대로
+            Assert.Contains("level", Keywords("SELECT level FROM t", SqlLexRules.Oracle));
+            Assert.Same(SqlLexRules.Oracle, SqlLexRules.Oracle.WithKeywords(null, new string[0]));
         }
 
         private const string OracleQuery = "SELECT e.emp_id, e.name AS \"Select\", e.date, COUNT(*) cnt\n"

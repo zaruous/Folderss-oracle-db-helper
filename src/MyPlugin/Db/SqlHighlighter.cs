@@ -70,7 +70,7 @@ namespace MyPlugin
                 return false;
             var span = spans[i];
             // 여는 표시(/*·q'[·N'·$$ 앞부분)와 닫는 표시를 건드리지 않는 안쪽만
-            if (span.Kind == SqlSpanKind.Keyword || offset < span.Start + 3 || offset + removed > span.End - 3)
+            if (span.Kind == SqlSpanKind.Keyword || span.Kind == SqlSpanKind.DataType || offset < span.Start + 3 || offset + removed > span.End - 3)
                 return false;
             var opening = text.GetText(span.Start, 2);
             string sequence = null;

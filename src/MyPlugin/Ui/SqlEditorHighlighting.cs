@@ -32,31 +32,35 @@ namespace MyPlugin
     /// 4단계 SqlEditor가 그대로 쓴다(지금은 PoC 창).
     /// - 글이 바뀌면 <see cref="SqlHighlighter"/>로 바뀐 곳 근처만 다시 훑고 그 범위만 다시 칠한다. <see cref="Incremental"/> = false는 비교용(글마다 전체 다시 계산·전체 다시 칠함).
     /// - 색은 칠할 때 테마에서 정하고(<see cref="SqlHighlightLogic.Palette"/>) 편집기 바탕이 바뀌면(테마 변경 — 바탕이 리소스 참조일 때) 전부 다시 칠한다.
-    /// - 아주 긴 줄(<see cref="MaxColoredLine"/>자 넘음)은 칠하지 않는다: 한 줄에 구간 수만 개를 나누면 AvalonEdit 줄 그리기가 구간 수의 제곱으로 느려진다.
+    /// - 아주 긴 줄(설정 <see cref="SqlEditorSettings.MaxColoredLine"/>, 기본 2만 자 넘음)은 칠하지 않는다: 한 줄에 구간 수만 개를 나누면 AvalonEdit 줄 그리기가 구간 수의 제곱으로 느려진다.
+    /// - 설정(<see cref="Settings"/>)의 대상별 모양(칠함·색·굵게·기울임)과 더 칠할·칠하지 않을 낱말을 따른다.
     /// </summary>
     public sealed class SqlEditorHighlighting
     {
-        public const int MaxColoredLine = 20000;
         private static readonly DependencyPropertyDescriptor BackgroundProperty = DependencyPropertyDescriptor.FromProperty(Control.BackgroundProperty, typeof(TextEditor));
         private readonly TextEditor _editor;
         private readonly DocumentSource _source;
         private readonly SpanColorizer _colorizer;
         private SqlLexRules _rules;
+        private SqlLexRules _highlightRules;
+        private SqlEditorSettings _settings;
         private bool _incremental = true;
         private SqlHighlighter _highlighter;
         private List<SqlSpan> _full = new List<SqlSpan>();
 
-        private SqlEditorHighlighting(TextEditor editor, SqlLexRules rules)
+        private SqlEditorHighlighting(TextEditor editor, SqlLexRules rules, SqlEditorSettings settings)
         {
             _editor = editor;
             _rules = rules ?? SqlLexRules.Oracle;
+            _settings = (settings ?? new SqlEditorSettings()).Clone();
+            _highlightRules = _rules.WithKeywords(_settings.ExtraKeywords, _settings.ExcludedKeywords);
             _source = new DocumentSource(editor.Document);
-            _colorizer = new SpanColorizer(() => _incremental ? _highlighter.Spans : (IReadOnlyList<SqlSpan>)_full);
+            _colorizer = new SpanColorizer(() => _incremental ? _highlighter.Spans : (IReadOnlyList<SqlSpan>)_full, _settings);
         }
 
-        public static SqlEditorHighlighting Attach(TextEditor editor, SqlLexRules rules)
+        public static SqlEditorHighlighting Attach(TextEditor editor, SqlLexRules rules, SqlEditorSettings settings = null)
         {
-            var highlighting = new SqlEditorHighlighting(editor, rules);
+            var highlighting = new SqlEditorHighlighting(editor, rules, settings);
             editor.TextArea.TextView.LineTransformers.Add(highlighting._colorizer);
             editor.Document.Changed += highlighting.OnDocumentChanged;
             BackgroundProperty.AddValueChanged(editor, highlighting.OnThemeChanged);
@@ -81,7 +85,21 @@ namespace MyPlugin
                 if (value == null || value == _rules)
                     return;
                 _rules = value;
+                _highlightRules = _rules.WithKeywords(_settings.ExtraKeywords, _settings.ExcludedKeywords);
                 Rehighlight("규칙 바꿈");
+            }
+        }
+
+        /// <summary>대상별 모양·더 칠할·칠하지 않을 낱말·긴 줄 기준. 바꾸면 처음부터 다시 훑고 전부 다시 칠한다(사본을 둔다).</summary>
+        public SqlEditorSettings Settings
+        {
+            get { return _settings.Clone(); }
+            set
+            {
+                _settings = (value ?? new SqlEditorSettings()).Clone();
+                _highlightRules = _rules.WithKeywords(_settings.ExtraKeywords, _settings.ExcludedKeywords);
+                _colorizer.Use(_settings);
+                Rehighlight("설정 바꿈");
             }
         }
 
@@ -131,7 +149,7 @@ namespace MyPlugin
             {
                 var text = _editor.Document.Text;
                 update.TextMilliseconds = watch.Elapsed.TotalMilliseconds;
-                _full = SqlScript.EditorSpans(text, _rules);
+                _full = SqlScript.EditorSpans(text, _highlightRules);
                 update.Milliseconds = watch.Elapsed.TotalMilliseconds;
                 update.Scanned = text.Length;
                 update.Range = text.Length;
@@ -154,13 +172,13 @@ namespace MyPlugin
         private bool InsideLongLine(int start, int end)
         {
             var line = _editor.Document.GetLineByOffset(start);
-            return line.Length > MaxColoredLine && end <= line.EndOffset + line.DelimiterLength;
+            return line.Length > _settings.MaxColoredLine && end <= line.EndOffset + line.DelimiterLength;
         }
 
         private void Rehighlight(string reason)
         {
             var watch = Stopwatch.StartNew();
-            _highlighter = new SqlHighlighter(_rules);
+            _highlighter = new SqlHighlighter(_highlightRules);
             if (_incremental)
             {
                 _highlighter.Reset(_source);
@@ -168,7 +186,7 @@ namespace MyPlugin
             }
             else
             {
-                _full = SqlScript.EditorSpans(_editor.Document.Text, _rules);
+                _full = SqlScript.EditorSpans(_editor.Document.Text, _highlightRules);
             }
             _editor.TextArea.TextView.Redraw();
             Publish(new SqlHighlightUpdate
@@ -226,17 +244,20 @@ namespace MyPlugin
         }
 
         /// <summary>
-        /// 구간 목록(앞에서 뒤로)으로 줄마다 색을 칠한다 — 줄에 걸친 첫 구간을 이분 탐색. 색은 처음 칠할 때 테마에서 정해 두고
-        /// 테마가 바뀌면(<see cref="ForgetPalette"/>) 다시 정한다 — 줄마다 리소스를 찾으면 스크롤이 느려진다.
+        /// 구간 목록(앞에서 뒤로)으로 줄마다 칠한다 — 줄에 걸친 첫 구간을 이분 탐색. 색은 처음 칠할 때 테마와 설정에서 정해 두고
+        /// 테마나 설정이 바뀌면(<see cref="ForgetPalette"/>·<see cref="Use"/>) 다시 정한다 — 줄마다 리소스를 찾으면 스크롤이 느려진다.
+        /// 대상별 설정: 끈 대상은 칠하지 않고, 색을 정했으면 그 색(아니면 테마 색 — 자료형은 키워드와 같은 색), 굵게·기울임은 글꼴 모양으로.
         /// </summary>
         private sealed class SpanColorizer : DocumentColorizingTransformer
         {
             private readonly Func<IReadOnlyList<SqlSpan>> _spans;
+            private SqlEditorSettings _settings;
             private Brush[] _brushes;
 
-            public SpanColorizer(Func<IReadOnlyList<SqlSpan>> spans)
+            public SpanColorizer(Func<IReadOnlyList<SqlSpan>> spans, SqlEditorSettings settings)
             {
                 _spans = spans;
+                _settings = settings;
             }
 
             public void ForgetPalette()
@@ -244,34 +265,63 @@ namespace MyPlugin
                 _brushes = null;
             }
 
+            public void Use(SqlEditorSettings settings)
+            {
+                _settings = settings;
+                _brushes = null;
+            }
+
             protected override void ColorizeLine(DocumentLine line)
             {
                 var spans = _spans();
-                if (spans.Count == 0 || line.Length > MaxColoredLine)
+                if (spans.Count == 0 || line.Length > _settings.MaxColoredLine)
                     return;
                 var brushes = PaletteBrushes(CurrentContext.TextView);
                 for (var i = SqlHighlighter.FirstEndingAfter(spans, line.Offset); i < spans.Count && spans[i].Start < line.EndOffset; i++)
                 {
                     var kind = spans[i].Kind;
-                    if (kind == SqlSpanKind.Identifier)
+                    var brush = (int)kind < brushes.Length ? brushes[(int)kind] : null;
+                    if (brush == null)
                         continue;
                     var start = Math.Max(spans[i].Start, line.Offset);
                     var end = Math.Min(spans[i].End, line.EndOffset);
                     if (end <= start)
                         continue;
-                    var brush = brushes[(int)kind];
-                    ChangeLinePart(start, end, element => element.TextRunProperties.SetForegroundBrush(brush));
+                    var style = _settings.Style(kind);
+                    if (style.Bold || style.Italic)
+                    {
+                        ChangeLinePart(start, end, element =>
+                        {
+                            element.TextRunProperties.SetForegroundBrush(brush);
+                            var face = element.TextRunProperties.Typeface;
+                            element.TextRunProperties.SetTypeface(new Typeface(face.FontFamily, style.Italic ? FontStyles.Italic : face.Style,
+                                style.Bold ? FontWeights.Bold : face.Weight, face.Stretch));
+                        });
+                    }
+                    else
+                    {
+                        ChangeLinePart(start, end, element => element.TextRunProperties.SetForegroundBrush(brush));
+                    }
                 }
             }
 
-            // 테마 색 네 가지로 정한 붓(종류 번호 순: 주석·문자열·키워드)
+            // 종류 번호 순 붓(주석·문자열·키워드·식별자(null)·자료형). 끈 대상은 null
             private Brush[] PaletteBrushes(FrameworkElement view)
             {
                 if (_brushes == null)
                 {
                     var palette = SqlHighlightLogic.Palette(Rgb(view, Theme.PanelBackground, 0x000000), Rgb(view, Theme.PrimaryText, 0xFFFFFF),
                         Rgb(view, Theme.SecondaryText, 0x999999), Rgb(view, Theme.Accent, 0x4F8CFF));
-                    _brushes = new[] { Frozen(palette.Comment), Frozen(palette.String), Frozen(palette.Keyword) };
+                    Func<SqlSpanKind, int, Brush> brush = (kind, themeColor) =>
+                    {
+                        var style = _settings.Style(kind);
+                        return style.Enabled ? Frozen(style.Color ?? themeColor) : null;
+                    };
+                    _brushes = new[]
+                    {
+                        brush(SqlSpanKind.Comment, palette.Comment), brush(SqlSpanKind.String, palette.String), brush(SqlSpanKind.Keyword, palette.Keyword),
+                        null, brush(SqlSpanKind.DataType, palette.Keyword)
+                    };
                 }
                 return _brushes;
             }

@@ -2,8 +2,9 @@
 
 작성일 2026-10-14. 상태: **1단계 실측 중** — 헤드리스로 A·B·D·E를 쟀고(2026-10-21, 7·8절) 막는 문제는 없었다.
 키워드 강조와 증분 강조(2-2단계)를 PoC에 넣고 데이터를 바꿔 가며 다시 쟀다 — 키 입력 3~12ms(16ms 안), 테마 7종 대비 4.5:1 이상(8절).
-기능 보고서(단독 호스트 캡처·측정 표): https://claude.ai/artifact/PLzmZy2DH7ia5vLKXfzzWS (비공개).
-남은 것: C(한글 IME, 사람이 확인)와 8절의 결정. 실측 결과가 나오기 전에는 본 교체를 시작하지 않는다.
+기능 보고서(단독 호스트 캡처·측정 표·설정 탭): [docs/reports/2026-10-21-sql-editor-highlight/index.html](reports/2026-10-21-sql-editor-highlight/index.html)(측정 원본은 같은 폴더 data/), 게시본 https://claude.ai/artifact/PLzmZy2DH7ia5vLKXfzzWS (비공개).
+2026-10-21 8절 결정을 반영했다(키 동작, 줄 간격·강조 모양·키워드 대상·긴 줄 기준은 설정 "SQL 편집기" 탭 — 2-3단계).
+남은 것: C(한글 IME, 사람이 확인). 실측 결과가 나오기 전에는 본 교체를 시작하지 않는다.
 
 ## 0. 목표와 범위
 
@@ -59,6 +60,7 @@
 | 1. PoC (시험판 창 main에 들어감 — PR #24. 헤드리스 A·B·D·E 2026-10-21, C 남음) | 별도 브랜치에서 SQL 탭 하나만 AvalonEdit으로 띄운다. 강조는 xshd 기본 SQL 정의로 충분 | 4절 실측 A~E 모두 기록, 막는 문제(✗) 없음. 하나라도 ✗면 여기서 멈추고 대안 검토 |
 | 2. 구간 계산 (완료 2026-10-20: `SqlScript.HighlightSpans`, `tests/MyPlugin.Tests/SqlHighlightTests.cs`) | `SqlScript`에서 주석·문자열 구간을 내는 공개 함수 추가 | 5절 D1의 기대 구간을 단위 테스트로 먼저 작성 → 통과. 기존 `SqlScriptTests` 전부 통과 |
 | 2-2. 키워드·증분 강조 (완료 2026-10-21: `SqlScript.EditorSpans`·`SqlKeywords`·`SqlHighlighter`·`SqlEditorHighlighting`·`SqlHighlightLogic`) | DBMS별 키워드 색, 바뀐 곳 근처만 다시 계산, 테마별 색 | 키워드 단위 테스트(`SqlKeywordTests`), 무작위 고치기에서 증분 = 전체(`SqlHighlighterTests`), 테마 7종 대비(`SqlHighlightLogicTests`), 헤드리스 키워드 색·성능(`EditorPocHeadlessTests`) |
+| 2-3. 편집기 설정·키 결정 (완료 2026-10-21: `SqlEditorSettingsPage`·`SqlEditorSettings`·`SqlEditorSetup`) | 설정 "SQL 편집기" 탭(줄 간격, 긴 줄 기준, 대상별 칠함·색·굵게·기울임, 더 칠할·칠하지 않을 낱말, 미리 보기), 자료형을 키워드와 따로, 키 동작 결정 적용 | `SqlEditorSettingsTests`, 헤드리스 `S_SettingsPage_AppliesToEditor`(미리 보기·저장 뒤 열린 편집기 반영), 키 비교에서 Ctrl+D·Insert가 TextBox와 같음 |
 | 3. 교체 | `SqlEditor` 도입, `SqlTabState.Editor`·호출부 교체, 직접 그린 줄 번호 삭제 | 빌드 통과, 6절 회귀 확인표 전부 ✓, `docs/controls/sql-workspace.yml`(+ 새 컨트롤이면 `sql-editor.yml`) 갱신, `python3 scripts/check_controls_docs.py` 통과 |
 | 4. 강조 연결 | `SqlEditor`에 `SqlEditorHighlighting`을 붙이고 탭 대상 DB가 바뀌면 `Rules`를 바꾼다(색·증분은 2-2에서 끝남) | 실측 B·C 다시 측정해 PoC 대비 악화 없음 |
 
@@ -249,30 +251,33 @@ SELECT '닫히지 않은 문자열 → 끝까지 문자열
 - 남는 한계: **한 줄 1MB(D4-1)는 AvalonEdit·TextBox 모두 키 입력 2~4초** — 편집기 자체의 한계(그 줄을 통째로 다시 배치)라 강조와 무관하다.
   2만 자 넘는 줄은 칠하지 않는다(`MaxColoredLine`, 한 줄에 구간 수만 개면 AvalonEdit 줄 그리기가 제곱으로 느려짐).
 
-### 키 — 결정 필요 (헤드리스 비교, 표 원본은 실행 폴더 `shots/poc-keys.md`)
+### 키 — 결정 (2026-10-21 사용자: 제안대로, 헤드리스 비교 원본은 실행 폴더 `shots/poc-keys.md`)
 | 키 | 지금 TextBox | AvalonEdit | 제안 | 결정 |
 |---|---|---|---|---|
-| Tab (여러 줄 선택) | 선택한 글을 탭 하나로 바꿈(글이 지워짐) | 줄마다 들여쓰기, 선택 유지 | AvalonEdit | |
-| Shift+Tab (여러 줄 선택) | 선택한 글을 탭 하나로 바꿈 | 줄마다 내어쓰기 | AvalonEdit | |
-| Shift+Tab (캐럿만) | 탭 넣음 | 그 줄 내어쓰기 | AvalonEdit | |
-| Enter (들여쓴 줄 끝) | 줄바꿈만 | 앞 줄 들여쓰기 유지 | AvalonEdit | |
-| Home | 줄 맨 앞 | 첫 글자 → 한 번 더 누르면 줄 맨 앞 | AvalonEdit | |
-| Ctrl+C·X (선택 없음) | 아무것도 안 함 | 줄 전체 복사·잘라내기 (`CutCopyWholeLine`) | AvalonEdit(끄려면 옵션) | |
-| Ctrl+D | 없음 | **줄 삭제** | 끔(실수로 줄이 지워짐 — 되돌리기는 됨) | |
-| Insert | 겹쳐쓰기 전환 | 키는 먹지만 전환 안 함(`AllowToggleOverstrikeMode` 기본 끔) | 옵션을 켜 지금과 같게 | |
-| Ctrl+I | 없음 | 먹음(글은 그대로) | 그대로 | |
+| Tab (여러 줄 선택) | 선택한 글을 탭 하나로 바꿈(글이 지워짐) | 줄마다 들여쓰기, 선택 유지 | AvalonEdit | AvalonEdit |
+| Shift+Tab (여러 줄 선택) | 선택한 글을 탭 하나로 바꿈 | 줄마다 내어쓰기 | AvalonEdit | AvalonEdit |
+| Shift+Tab (캐럿만) | 탭 넣음 | 그 줄 내어쓰기 | AvalonEdit | AvalonEdit |
+| Enter (들여쓴 줄 끝) | 줄바꿈만 | 앞 줄 들여쓰기 유지 | AvalonEdit | AvalonEdit |
+| Home | 줄 맨 앞 | 첫 글자 → 한 번 더 누르면 줄 맨 앞 | AvalonEdit | AvalonEdit |
+| Ctrl+C·X (선택 없음) | 아무것도 안 함 | 줄 전체 복사·잘라내기 (`CutCopyWholeLine`) | AvalonEdit(끄려면 옵션) | AvalonEdit |
+| Ctrl+D | 없음 | **줄 삭제** | 끔(실수로 줄이 지워짐 — 되돌리기는 됨) | 끔 — `SqlEditorSetup`이 줄 삭제 명령 연결을 뺌, 헤드리스에서 TextBox와 같음 |
+| Insert | 겹쳐쓰기 전환 | 키는 먹지만 전환 안 함(`AllowToggleOverstrikeMode` 기본 끔) | 옵션을 켜 지금과 같게 | 옵션 켬 — 헤드리스에서 TextBox와 같음 |
+| Ctrl+I | 없음 | 먹음(글은 그대로) | 그대로 | 그대로 |
 | 같음 | Tab(선택 없음), Ctrl+Z·Y·A, Ctrl+Backspace·Delete, End, Ctrl+Home·End | | | |
 
 Ctrl+V는 시험이 클립보드를 건드리지 않게 빼서 C 확인 때 함께 본다.
 
-### 화면 — 결정 필요
-- 줄 간격: AvalonEdit 기본은 글꼴 13에서 15px로 지금(19px)보다 촘촘하다. 그대로 둘지, 19px에 맞출지(AvalonEdit 6.3에 줄 간격 옵션이 없어 방법부터 조사) 정한다.
+### 화면 — 결정 (2026-10-21)
+- 줄 간격: Folderss 설정에는 없는 항목이라 **플러그인 설정 "SQL 편집기" 탭의 선택 설정**으로 둔다 — 기본은 글꼴 기본(13에서 15px), 16~32px에서 고른다(19px는 지금 SQL 탭과 같음).
+  AvalonEdit 6.3에는 줄 간격 속성이 없어 같은 글꼴을 가리키는 합성 글꼴의 `LineSpacing`·기준선으로 정한다(`SqlEditorSetup.WithLineHeight` — 한글·이모지 대체 글꼴과 줄 번호가 따라옴을 헤드리스로 확인).
 - (해결) 문자열색·주석색 대비와 테마 변경 반영 — 2-2단계 `SqlHighlightLogic`·`SqlEditorHighlighting`.
 
-### 키워드 — 결정 필요
-- 범위: 문장·절·조건·테이블 정의(DDL)·트랜잭션·블록 키워드와 **자료형**(NUMBER·VARCHAR2·TEXT·NVARCHAR …)을 한 색으로 칠한다. 함수 이름(COUNT·NVL·SUM)은 칠하지 않는다.
-  자료형을 다른 색으로 나눌지, 함수도 칠할지 정한다. 목록은 `Db/SqlKeywords.cs`(공통 + Oracle·PostgreSQL·SQL Server).
+### 키워드 — 결정 (2026-10-21)
+- 강조 대상과 모양은 **설정 "SQL 편집기" 탭에서 관리**한다: 키워드·자료형·문자열·주석마다 칠함·색(비우면 테마 색)·굵게·기울임, 지금 테마 바탕 대비 명암비 표시, 미리 보기.
+  자료형(NUMBER·VARCHAR2·TEXT·NVARCHAR …)은 키워드와 따로 떼어(`SqlLexRules.Types`, `SqlSpanKind.DataType`) 기본은 키워드와 같은 색이다.
+  함수 이름은 기본 목록에 넣지 않고, 필요하면 "더 칠할 낱말"(예: NVL DECODE)로 더한다. 열 이름과 겹치는 낱말은 "칠하지 않을 낱말"로 뺀다. 목록은 `Db/SqlKeywords.cs`.
+- 긴 줄: 칠하지 않을 기준(기본 20,000자)도 같은 탭에서 바꾼다(1,000~1,000,000).
 - 키워드가 아닌 것: 문자열·주석·따옴표 식별자(`"Select"`·`[select]`) 안, 바로 앞이 `.`·`:`·`@`·`&`인 낱말(`t.date`·`:from`·`@from`·`&var`).
   키워드와 같은 이름의 열(PostgreSQL `text` 등)은 키워드색으로 보인다(이름만 보고 판단 — 메타데이터 대조는 범위 밖).
 - **PostgreSQL 함수 본문 `$$ … $$`는 통째로 문자열색**이다. 문장 나누기와 같은 기준(본문은 문자열 리터럴)이라 그렇다.
-  DBeaver·pgAdmin처럼 본문 안을 SQL로 칠하려면 달러 따옴표 안을 한 번 더 훑어야 한다 — 할지 정한다.
+  DBeaver·pgAdmin처럼 본문 안을 SQL로 칠하려면 달러 따옴표 안을 한 번 더 훑어야 한다 — 보류(필요해지면 강조 대상 설정에 넣는다).

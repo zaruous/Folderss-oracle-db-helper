@@ -234,6 +234,11 @@ namespace MyPlugin
             SaveSetting(SqlFileLogic.RecentSettingKey, SqlFileLogic.SerializeRecent(SqlFileLogic.AddRecent(RecentFiles, path)));
         }
 
+        public SqlEditorSettings EditorSettings
+        {
+            get { return SqlEditorSettings.Parse(SafeSetting(SqlEditorSettings.SettingKey)); }
+        }
+
         private string SafeSetting(string key)
         {
             try

@@ -37,7 +37,7 @@
 
 - [ ] 1. PoC 실측(Windows) — 플러그인 로드, 성능, 한글 IME, 단축키 충돌, 테마 7종. 막는 문제가 있으면 여기서 중단.
       → 시험판 창은 main에 들어감(PR #24). 헤드리스 A·B·D·E 실측(2026-10-21, `EditorPocHeadlessTests`): 막는 문제 없음.
-      남은 것: C 한글 IME(사람), 키·줄 간격·키워드 범위 결정(계획서 8절).
+      남은 것: C 한글 IME(사람). 키·줄 간격·키워드 범위는 2026-10-21 결정(계획서 8절) — 2-3에 반영.
 - [x] 2. 주석·문자열 구간 계산 — `SqlScript.HighlightSpans`(문장 나누기와 같은 토큰 규칙), D1 경계 사례 테스트 `SqlHighlightTests`.
       단독 시간(Linux 참고값): 1만 줄 6.6ms · 5만 줄 37ms · 10만 줄 53ms → 1만 줄 넘으면 4단계에서 지연·증분 계산 필요.
 - [x] 2-1. DBMS별 구문 규칙 `SqlLexRules`(문장 나누기·강조 공통) — Oracle(그대로), PostgreSQL($$·E''·중첩 주석, 블록 없음),
@@ -45,6 +45,9 @@
 - [x] 2-2. 키워드·증분 강조(2026-10-21 요청: SELECT·FROM·조건·테이블 구문 등 키워드 색) — `SqlScript.EditorSpans`·DBMS별 `SqlKeywords`,
       바뀐 곳 근처만 다시 계산하는 `SqlHighlighter`, 편집기에 붙이는 `SqlEditorHighlighting`(4단계가 그대로 씀), 테마별 색 `SqlHighlightLogic`.
       PoC 창에 넣어 헤드리스로 확인: 키워드 47곳·테마 7종 대비 4.5:1·키 입력 3~12ms(전체 다시 계산은 9~73ms). 테스트 `SqlKeywordTests`·`SqlHighlighterTests`·`SqlHighlightLogicTests`.
+- [x] 2-3. 설정 "SQL 편집기" 탭(2026-10-21 요청: 줄 간격 같은 선택 설정, 키워드·강조 스타일과 대상 관리, 긴 줄 기준 기본 2만 자·변경 가능) —
+      `SqlEditorSettingsPage`·`SqlEditorSettings`(키 sqlEditor.settings, JSON)·`SqlEditorSetup`(합성 글꼴로 줄 간격, 키 결정: Ctrl+D 끔·Insert 겹쳐쓰기),
+      자료형을 키워드와 따로(`SqlSpanKind.DataType`). 저장하면 열린 편집기가 바로 따름. 테스트 `SqlEditorSettingsTests`, 헤드리스 `S_SettingsPage_AppliesToEditor`.
 - [ ] 3. `SqlEditor` 전용 컨트롤로 교체 — TextBox 1:1 흉내가 아닌 의도 단위 API, 직접 그린 줄 번호 삭제, 컨트롤 기술서 갱신.
 - [ ] 4. 강조 색칠 연결 — `SqlEditor`에 `SqlEditorHighlighting`을 붙이고 탭 대상 DB가 바뀌면 규칙을 바꾼다, 실측 재측정.
 - [ ] (별도) 테이블 이름 강조 — 메타데이터 대조 방식, 1~4 이후 검토.

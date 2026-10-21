@@ -47,6 +47,7 @@
 - **정렬은 가져온 행 안에서만** 합니다. 더 가져온 행도 정렬 위치에 들어가지만, 전체 결과의 순서는 `ORDER BY`로 정하세요.
 - **임시 저장 위치**: `%LOCALAPPDATA%\Folderss\plugin-data\<플러그인 id>\sql-drafts\`(창마다 파일 하나, 평문). GCM 창의 마지막 SQL과 본보기 SQL은 플러그인 고정 키(AES-GCM)로 잠가 둡니다(비밀 보호가 아니라 노출 방지용). 창을 여러 개 열어도 서로 덮어쓰지 않고, 닫힌 창의 것은 다음에 여는 창이 넘겨받습니다.
 - **여러 문장 실행**에서는 문장 안에 빈 줄이 있어도 됩니다: 빈 줄 다음이 `FROM`·`WHERE`·`SET`·`AND`처럼 문장을 잇는 말이면 같은 문장으로 봅니다(`;`·`/` 줄은 언제나 문장 끝). 한 번에 결과는 20개까지 남깁니다.
+- **SQL 편집기 설정**(설정 창 "SQL 편집기" 탭): 줄 간격, 구문 강조 대상(키워드·자료형·문자열·주석)마다 칠함·색·굵게·기울임, 더 칠할·칠하지 않을 낱말, 칠하지 않을 긴 줄 기준(기본 20,000자). 지금은 도구 › AvalonEdit PoC (시험판) 창에 적용되고, SQL 탭 편집기를 바꾸면 SQL 탭에도 적용됩니다.
 - **문장 구분**: `;`, 빈 줄, 그리고 DBMS별 구분 줄. SQL 탭은 그 탭 대상 DB의 문법으로 나눕니다(규칙 `SqlLexRules`, 구문 강조도 같은 규칙).
   - Oracle: `/`만 있는 줄. PL/SQL 블록(BEGIN·DECLARE·CREATE PROCEDURE 등)은 `/` 줄로 끝내세요. `q'[…]'` 문자열.
   - PostgreSQL: 함수·DO 본문의 `$$…$$`·`$태그$…$태그$`, `E'…'`, 중첩 블록 주석을 압니다. 블록이 없어 `;`로 끝나고(`BEGIN;`은 트랜잭션 시작) `/` 줄은 구분자가 아닙니다.
@@ -118,7 +119,7 @@ dotnet test tests/MyPlugin.OracleIT
 - `scripts/ui-test.ps1`이 **숨은 데스크톱**(CreateDesktop — 화면 전환 없음)에서 `dotnet test`를 돌립니다. 사용자의 마우스·키보드·포커스·창을 건드리지 않고, 도는 동안 사용자 데스크톱에 시험 창이 하나라도 뜨면 실패로 알립니다. 숨은 데스크톱이 아니면 시험은 건너뜁니다.
 - 화면은 자동화 피어(Invoke)·WPF 트리·AutomationId로 찾고 누릅니다. 모달 창을 여는 버튼은 `UiThread.Post`로 누르고, Windows 파일 대화상자는 Win32(UI 스레드의 #32770 창, WM_SETTEXT·IDOK)로 채웁니다. 캡처는 `RenderTargetBitmap`(실행 폴더의 shots).
 - 실제 Oracle이 필요한 시험은 `FMON_UI_ORACLE`(host:port/service)이 있을 때만 — 계정은 `FMON_UI_ORACLE_USER`·`FMON_UI_ORACLE_PW`(SELECT_CATALOG_ROLE).
-- SQL 편집기 AvalonEdit PoC 실측(`EditorPocHeadlessTests`): 플러그인 로드·키워드 색(DBMS별)·성능(데이터 크기·종류별로 증분 강조·전체 다시 계산·강조 없음·지금 TextBox 비교)·키·테마 7종을 재서 shots에 `poc-measure.md`·`poc-keys.md`·`poc-themes.md`와 캡처를 남깁니다.
+- SQL 편집기 AvalonEdit PoC 실측(`EditorPocHeadlessTests`): 플러그인 로드·키워드 색(DBMS별)·설정 "SQL 편집기" 탭(미리 보기·저장 뒤 반영)·성능(데이터 크기·종류별로 증분 강조·전체 다시 계산·강조 없음·지금 TextBox 비교)·키·테마 7종을 재서 shots에 `poc-measure.md`·`poc-keys.md`·`poc-themes.md`와 캡처를 남깁니다.
   Ctrl·Shift는 UI 스레드의 키 상태(`SetKeyboardState`)로 흉내 냅니다 — 키 입력을 보내지 않으므로 다른 창에는 영향이 없습니다. 결과와 판단은 [`docs/sql-editor-avalonedit-plan.md`](docs/sql-editor-avalonedit-plan.md) 7·8절.
 
 ```powershell

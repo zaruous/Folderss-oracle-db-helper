@@ -22,7 +22,7 @@ namespace MyPlugin
     /// </summary>
     internal static class AvalonEditPocWindow
     {
-        public static Window Show(Window owner, string text, SqlLexRules rules, Action<string> copy)
+        public static Window Show(Window owner, string text, SqlLexRules rules, SqlEditorSettings settings, Action<string> copy)
         {
             var window = new Window
             {
@@ -36,7 +36,7 @@ namespace MyPlugin
             };
             Theme.ApplyWindow(window);
             DialogKit.SetOwner(window, owner);
-            var poc = new Poc(window, rules ?? SqlLexRules.Oracle, copy);
+            var poc = new Poc(window, rules ?? SqlLexRules.Oracle, settings ?? new SqlEditorSettings(), copy);
             window.Content = poc.Root;
             window.Loaded += (s, e) => poc.Load(string.IsNullOrEmpty(text) ? PocData.D1 : text, "지금 SQL 탭");
             window.Closed += (s, e) => poc.Detach();
@@ -57,11 +57,12 @@ namespace MyPlugin
             private readonly List<string> _keyLog = new List<string>();
             private readonly List<double> _computeTimes = new List<double>();
             private readonly List<string> _results = new List<string>();
+            private SqlEditorSettings _settings;
             private string _dataName = "";
             private string _loadLine = "";
             private string _lastCompute = "";
 
-            public Poc(Window window, SqlLexRules rules, Action<string> copy)
+            public Poc(Window window, SqlLexRules rules, SqlEditorSettings settings, Action<string> copy)
             {
                 _window = window;
                 _copy = copy;
@@ -114,14 +115,14 @@ namespace MyPlugin
                 _editor = new TextEditor
                 {
                     ShowLineNumbers = true,
-                    FontFamily = Theme.Mono,
-                    FontSize = 13,
                     HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
                     VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                     BorderThickness = new Thickness(1)
                 };
-                _editor.Options.EnableHyperlinks = false;
-                _editor.Options.EnableEmailHyperlinks = false;
+                // 키 동작 결정(Ctrl+D 끔, Insert 겹쳐쓰기 전환)과 줄 간격 — 3단계 SqlEditor와 같은 설정
+                SqlEditorSetup.ApplyBehavior(_editor);
+                SqlEditorSetup.ApplyFont(_editor, Theme.Mono, 13, settings.LineHeight);
+                _settings = settings;
                 _editor.SetResourceReference(Control.BackgroundProperty, Theme.PanelBackground);
                 _editor.SetResourceReference(Control.ForegroundProperty, Theme.PrimaryText);
                 _editor.SetResourceReference(Control.BorderBrushProperty, Theme.Border);
@@ -131,7 +132,9 @@ namespace MyPlugin
                 _editor.TextArea.SelectionForeground = null;
                 _editor.TextArea.SelectionBorder = null;
                 // 주석·문자열·키워드 강조(증분, 테마 색) — 4단계 SqlEditor가 쓸 것과 같은 것
-                _highlighting = SqlEditorHighlighting.Attach(_editor, Rules);
+                _highlighting = SqlEditorHighlighting.Attach(_editor, Rules, settings);
+                // 설정 창에서 저장하면 바로 따른다
+                SqlEditorSettings.Changed += OnSettingsChanged;
                 _highlighting.Updated += (s, e) => ShowCompute(_highlighting.Last);
                 Root.Children.Add(_editor);
 
@@ -153,6 +156,7 @@ namespace MyPlugin
 
             public void Detach()
             {
+                SqlEditorSettings.Changed -= OnSettingsChanged;
                 _highlighting.Detach();
             }
 
@@ -218,9 +222,18 @@ namespace MyPlugin
                 ShowMeasure();
             }
 
+            private void OnSettingsChanged(object sender, SqlEditorSettings settings)
+            {
+                _settings = settings;
+                SqlEditorSetup.ApplyFont(_editor, Theme.Mono, 13, settings.LineHeight);
+                _highlighting.Settings = settings;
+            }
+
             private void ShowMeasure()
             {
-                _measure.Text = _loadLine + "\n" + _lastCompute + "\n16ms를 넘으면 키 입력이 한 프레임을 넘는다(증분이 기본, 전체 다시 계산은 비교용).";
+                _measure.Text = _loadLine + "\n" + _lastCompute + "\n16ms를 넘으면 키 입력이 한 프레임을 넘는다(증분이 기본, 전체 다시 계산은 비교용). "
+                    + "설정: 줄 간격 " + SqlEditorSettings.LineHeightLabel(_settings.LineHeight) + " · " + _settings.MaxColoredLine.ToString("N0", CultureInfo.InvariantCulture)
+                    + "자 넘는 줄은 칠하지 않음";
             }
 
             private void OnKeyDown(object sender, KeyEventArgs e)

@@ -10,6 +10,7 @@ namespace MyPlugin
     public sealed class SqlKeywords
     {
         private readonly Dictionary<int, List<string>> _byHash = new Dictionary<int, List<string>>();
+        private readonly List<string> _words = new List<string>();
         private readonly int _maxLength;
 
         public SqlKeywords(IEnumerable<string> words)
@@ -19,6 +20,7 @@ namespace MyPlugin
             {
                 if (string.IsNullOrEmpty(word) || !seen.Add(word))
                     continue;
+                _words.Add(word);
                 var hash = Hash(word, 0, word.Length);
                 List<string> bucket;
                 if (!_byHash.TryGetValue(hash, out bucket))
@@ -30,6 +32,9 @@ namespace MyPlugin
         }
 
         public int Count { get; }
+
+        /// <summary>목록의 낱말(넣은 순서, 대소문자는 넣은 그대로).</summary>
+        public IReadOnlyList<string> Words { get { return _words; } }
 
         public bool Contains(string word)
         {
@@ -82,7 +87,7 @@ namespace MyPlugin
             return new SqlKeywords(words);
         }
 
-        // ---- 목록: 문장·절·조건·테이블 정의(DDL)·트랜잭션·블록, 그리고 자료형(테이블 정의가 읽히게). 함수 이름(COUNT·NVL …)은 넣지 않는다 ----
+        // ---- 목록: 키워드(문장·절·조건·테이블 정의(DDL)·트랜잭션·블록)와 자료형(따로 칠할 수 있게 나눔). 함수 이름(COUNT·NVL …)은 넣지 않는다 ----
 
         internal const string Common =
             "SELECT FROM WHERE AND OR NOT IN IS NULL LIKE BETWEEN EXISTS AS ON JOIN INNER LEFT RIGHT FULL OUTER CROSS NATURAL USING "
@@ -91,24 +96,32 @@ namespace MyPlugin
             + "PROCEDURE FUNCTION SCHEMA DATABASE MATERIALIZED PRIMARY FOREIGN KEY REFERENCES CONSTRAINT UNIQUE CHECK DEFAULT ADD COLUMN "
             + "WITH RECURSIVE GRANT REVOKE TO COMMIT ROLLBACK SAVEPOINT TRANSACTION LOCK BEGIN DECLARE IF WHILE FOR LOOP RETURN RETURNS "
             + "TRUE FALSE CAST OVER PARTITION ROWS RANGE UNBOUNDED PRECEDING FOLLOWING CURRENT ROW FETCH FIRST NEXT ONLY OFFSET NULLS LAST "
-            + "CASCADE REPLACE COMMENT EXEC EXECUTE CURSOR OPEN CLOSE OUT "
-            + "INT INTEGER SMALLINT BIGINT DECIMAL NUMERIC FLOAT REAL DOUBLE PRECISION CHAR CHARACTER VARCHAR DATE TIME TIMESTAMP INTERVAL ZONE BLOB CLOB";
+            + "CASCADE REPLACE COMMENT EXEC EXECUTE CURSOR OPEN CLOSE OUT";
+
+        internal const string CommonTypes =
+            "INT INTEGER SMALLINT BIGINT DECIMAL NUMERIC FLOAT REAL DOUBLE PRECISION CHAR CHARACTER VARCHAR DATE TIME TIMESTAMP INTERVAL ZONE BLOB CLOB";
 
         internal const string Oracle =
             "MINUS CONNECT PRIOR START NOCYCLE LEVEL ROWNUM ROWID SYSDATE SYSTIMESTAMP "
-            + "NUMBER VARCHAR2 NVARCHAR2 NCHAR NCLOB RAW LONG BINARY_FLOAT BINARY_DOUBLE BOOLEAN PLS_INTEGER BINARY_INTEGER "
             + "PACKAGE BODY TYPE ROWTYPE ELSIF EXCEPTION RAISE PRAGMA OTHERS BULK COLLECT FORALL NOCOPY EXIT CONTINUE GOTO "
             + "SYNONYM PUBLIC TABLESPACE PURGE MODIFY ENABLE DISABLE NOVALIDATE IMMEDIATE RETURNING NOWAIT";
 
+        internal const string OracleTypes =
+            "NUMBER VARCHAR2 NVARCHAR2 NCHAR NCLOB RAW LONG BINARY_FLOAT BINARY_DOUBLE BOOLEAN PLS_INTEGER BINARY_INTEGER";
+
         internal const string Postgres =
             "LIMIT ILIKE SIMILAR RETURNING EXCEPT LATERAL DO LANGUAGE VACUUM ANALYZE EXPLAIN CONFLICT NOTHING EXTENSION OWNER "
-            + "REFRESH CONCURRENTLY PERFORM RAISE NOTICE EXCEPTION ELSIF QUERY TABLESPACE ARRAY VARYING WITHOUT "
-            + "SERIAL BIGSERIAL SMALLSERIAL TEXT BYTEA JSON JSONB UUID BOOLEAN TIMESTAMPTZ";
+            + "REFRESH CONCURRENTLY PERFORM RAISE NOTICE EXCEPTION ELSIF QUERY TABLESPACE ARRAY WITHOUT";
+
+        internal const string PostgresTypes =
+            "SERIAL BIGSERIAL SMALLSERIAL TEXT BYTEA JSON JSONB UUID BOOLEAN TIMESTAMPTZ VARYING";
 
         internal const string SqlServer =
             "TOP GO PROC TRAN PRINT OUTPUT EXCEPT APPLY PIVOT UNPIVOT TRY CATCH THROW RAISERROR WAITFOR USE NOCOUNT "
-            + "IDENTITY CLUSTERED NONCLUSTERED "
-            + "NVARCHAR NCHAR NTEXT TEXT BIT TINYINT DATETIME DATETIME2 DATETIMEOFFSET SMALLDATETIME MONEY SMALLMONEY "
+            + "IDENTITY CLUSTERED NONCLUSTERED";
+
+        internal const string SqlServerTypes =
+            "NVARCHAR NCHAR NTEXT TEXT BIT TINYINT DATETIME DATETIME2 DATETIMEOFFSET SMALLDATETIME MONEY SMALLMONEY "
             + "UNIQUEIDENTIFIER VARBINARY BINARY IMAGE XML";
     }
 }

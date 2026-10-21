@@ -90,7 +90,9 @@ namespace MyPlugin
         /// <summary>키워드(<see cref="SqlLexRules.Keywords"/>, SQL Server GO 줄). <see cref="SqlScript.EditorSpans"/>만 낸다</summary>
         Keyword,
         /// <summary>따옴표 식별자 "…"·[…] — 칠하지 않는다. 증분 강조가 여러 줄 식별자 안에서 다시 훑기 시작하지 않게 구간으로 둔다(<see cref="SqlScript.EditorSpans"/>만 낸다)</summary>
-        Identifier
+        Identifier,
+        /// <summary>자료형(<see cref="SqlLexRules.Types"/> — NUMBER·VARCHAR2·TEXT·NVARCHAR …). 키워드와 따로 칠할 수 있게 나눈다. <see cref="SqlScript.EditorSpans"/>만 낸다</summary>
+        DataType
     }
 
     /// <summary>구문 강조 구간: 글에서의 위치(UTF-16 인덱스 — string.Substring과 같다)와 길이.</summary>
@@ -198,8 +200,8 @@ namespace MyPlugin
         }
 
         /// <summary>
-        /// 편집기 구문 강조 구간 전부: 주석·문자열(<see cref="HighlightSpans"/>와 같음)에 키워드와 따옴표 식별자(칠하지 않음)를 더한다. 앞에서 뒤로, 겹치지 않음.
-        /// 키워드는 낱말 토큰이 <see cref="SqlLexRules.Keywords"/>에 있을 때다 — 문자열·주석·따옴표 식별자 안은 토큰이 아니라 저절로 빠지고,
+        /// 편집기 구문 강조 구간 전부: 주석·문자열(<see cref="HighlightSpans"/>와 같음)에 키워드·자료형과 따옴표 식별자(칠하지 않음)를 더한다. 앞에서 뒤로, 겹치지 않음.
+        /// 자료형은 낱말 토큰이 <see cref="SqlLexRules.Types"/>에, 키워드는 <see cref="SqlLexRules.Keywords"/>에 있을 때다 — 문자열·주석·따옴표 식별자 안은 토큰이 아니라 저절로 빠지고,
         /// 바로 앞이 . : @ &amp;인 낱말(t.date, :from, @from, &amp;var)도 뺀다. SQL Server GO 줄은 키워드다.
         /// start부터만 훑는다(위치는 s 기준). start는 줄 시작이고 여러 줄 토큰 안이 아니어야 한다 — 처음부터 훑은 것과 같으려면(<see cref="SqlHighlighter"/>).
         /// </summary>
@@ -224,8 +226,11 @@ namespace MyPlugin
                         spans.Add(new SqlSpan(SqlSpanKind.Identifier, t.Start, t.End - t.Start));
                         break;
                     case TokenType.Word:
-                        if (rules.Keywords != null && (t.Start == 0 || ".:@&".IndexOf(s[t.Start - 1]) < 0)
-                            && rules.Keywords.Contains(s, t.Start, t.End - t.Start))
+                        if (t.Start > 0 && ".:@&".IndexOf(s[t.Start - 1]) >= 0)
+                            break;
+                        if (rules.Types != null && rules.Types.Contains(s, t.Start, t.End - t.Start))
+                            spans.Add(new SqlSpan(SqlSpanKind.DataType, t.Start, t.End - t.Start));
+                        else if (rules.Keywords != null && rules.Keywords.Contains(s, t.Start, t.End - t.Start))
                             spans.Add(new SqlSpan(SqlSpanKind.Keyword, t.Start, t.End - t.Start));
                         break;
                     case TokenType.SlashLine:

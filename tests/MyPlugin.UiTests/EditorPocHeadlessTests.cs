@@ -369,7 +369,7 @@ namespace MyPlugin.UiTests
         private static object AttachHighlighting(PluginUnderTest plugin, FrameworkElement editor)
         {
             var oracle = plugin.Assembly.GetType("MyPlugin.SqlLexRules", true).GetField("Oracle").GetValue(null);
-            return plugin.Assembly.GetType("MyPlugin.SqlEditorHighlighting", true).GetMethod("Attach").Invoke(null, new[] { editor, oracle });
+            return plugin.Assembly.GetType("MyPlugin.SqlEditorHighlighting", true).GetMethod("Attach").Invoke(null, new[] { editor, oracle, null });
         }
 
         /// <summary>마지막 강조 계산: 시간 · 읽은 글자 · 다시 칠한 범위. UI 스레드에서 부른다.</summary>
@@ -532,6 +532,9 @@ namespace MyPlugin.UiTests
                     var same = boxResult == editorResult;
                     if (!same && !c.SqlTab)
                         differences++;
+                    // 키 결정(계획서 8절): Ctrl+D는 끄고 Insert는 겹쳐쓰기 전환 — 지금 TextBox와 같아야 한다(SqlEditorSetup.ApplyBehavior)
+                    if (c.Name == "Ctrl+D" || c.Name.StartsWith("Insert", StringComparison.Ordinal))
+                        Assert.True(same, c.Name + ": TextBox " + boxResult + " / AvalonEdit " + editorResult);
                     // SQL 탭 키는 SqlWorkspace 처리기가 먼저 처리하므로 편집기 자체 동작(이 표의 값)은 참고용
                     rows.Add("| " + c.Name + " | " + boxResult + " | " + editorResult + " | " + (c.SqlTab ? "SQL 탭이 먼저 처리(참고)" : same ? "같음" : "**다름**") + " |");
                 }
@@ -653,6 +656,162 @@ namespace MyPlugin.UiTests
             Assert.Empty(ui.TakeErrors());
         }
 
+        // ================= 설정 "SQL 편집기" 탭 =================
+
+        /// <summary>
+        /// 설정 "SQL 편집기" 탭: 칸을 바꾸면 미리 보기가 바로 따르고, [저장]하면 열린 PoC 창이 따른다 —
+        /// 줄 간격 19px, 키워드 색·굵게, 주석 끔, 더 칠할 낱말(NVL)·칠하지 않을 낱말(DATE), 긴 줄 기준(5,000자). 잘못 적은 값은 저장 실패, [기본값으로 되돌리기].
+        /// </summary>
+        [UiFact]
+        public async Task S_SettingsPage_AppliesToEditor()
+        {
+            var ui = UiThread.Instance;
+            var plugin = PluginUnderTest.Load(ui);
+            var page = plugin.Manager.SettingsPages.Single(p => p.Title == "SQL 편집기");
+            var (main, poc, editor) = await OpenPoc(ui, plugin);
+            var longLine = "SELECT " + string.Join(", ", Enumerable.Range(1, 900).Select(i => "c" + i)) + " FROM t;";
+            var text = "-- 주석 줄\nSELECT NVL(a, 1), b FROM t WHERE d > DATE '2026-01-01';\n" + longLine + "\n";
+            var host = ui.Run(() =>
+            {
+                var window = new Window { Title = "설정", Content = page.CreateView(), Width = 820, Height = 1150, ShowActivated = false, ShowInTaskbar = false };
+                window.SetResourceReference(Window.BackgroundProperty, "WindowBackground");
+                window.Show();
+                return window;
+            });
+            try
+            {
+                ui.Run(() => SetEditorText(editor, text));
+                await Idle(ui);
+                var at = new Func<string, int>(needle => Nth(text, needle, 0));
+                var before = ui.Run(() =>
+                {
+                    dynamic ed = editor;
+                    var palette = Palette(plugin);
+                    var plain = ColorOf(((Control)editor).Foreground);
+                    return ((double)ed.TextArea.TextView.DefaultLineHeight, ForegroundAt(editor, 0) == palette.Comment, ForegroundAt(editor, at("NVL")) == plain,
+                        ForegroundAt(editor, at("DATE")) == palette.Keyword, ForegroundAt(editor, text.IndexOf(longLine, StringComparison.Ordinal)) == palette.Keyword);
+                });
+                Assert.Equal((15.0, true, true, true, true), before);
+                _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(host, plugin.ShotFolder, "settings-1-default")));
+
+                // 칸 바꾸기 → 미리 보기
+                ui.Run(() =>
+                {
+                    Ui.Choose(Ui.ById<ComboBox>(host, "sqleditor-line-height"), "19px (지금 SQL 탭과 같음)");
+                    Ui.ById<TextBox>(host, "sqleditor-max-line").Text = "5000";
+                    Ui.ById<TextBox>(host, "sqleditor-style-keyword-color").Text = "#FF00FF";
+                    Ui.ClickToggle(Ui.ById<CheckBox>(host, "sqleditor-style-keyword-bold"));
+                    Ui.ClickToggle(Ui.ById<CheckBox>(host, "sqleditor-style-comment-enabled"));
+                    Ui.ById<TextBox>(host, "sqleditor-extra-keywords").Text = "nvl";
+                    Ui.ById<TextBox>(host, "sqleditor-excluded-keywords").Text = "DATE";
+                });
+                await Idle(ui);
+                var preview = ui.Run(() =>
+                {
+                    var view = Ui.ById<FrameworkElement>(host, "sqleditor-preview");
+                    dynamic pv = view;
+                    string previewText = pv.Document.Text;
+                    return ((double)pv.TextArea.TextView.DefaultLineHeight, ForegroundAt(view, previewText.IndexOf("SELECT", StringComparison.Ordinal)),
+                        Ui.ById<TextBlock>(host, "sqleditor-style-keyword-contrast").Text, Ui.ById<TextBlock>(host, "sqleditor-error").Text);
+                });
+                Assert.Equal(19.0, preview.Item1);
+                Assert.Equal(System.Windows.Media.Color.FromRgb(0xFF, 0x00, 0xFF), preview.Item2);
+                Assert.EndsWith(":1", preview.Item3);
+                Assert.Equal("", preview.Item4);
+                _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(host, plugin.ShotFolder, "settings-2-changed")));
+
+                // 잘못 적은 값은 저장 실패(설정 창이 알린다)
+                ui.Run(() =>
+                {
+                    Ui.ById<TextBox>(host, "sqleditor-max-line").Text = "12";
+                    var error = Assert.Throws<InvalidOperationException>(() => page.Save());
+                    Assert.Contains("1,000~1,000,000", error.Message);
+                    Assert.Contains("1,000~1,000,000", Ui.ById<TextBlock>(host, "sqleditor-error").Text);
+                    Ui.ById<TextBox>(host, "sqleditor-max-line").Text = "5000";
+                    page.Save();
+                });
+                Assert.Contains("\"maxColoredLine\":5000", plugin.Manager.GetSetting("sqlEditor.settings"));
+                await Idle(ui);
+
+                // 열린 PoC 창이 바로 따른다
+                var magenta = System.Windows.Media.Color.FromRgb(0xFF, 0x00, 0xFF);
+                var after = ui.Run(() =>
+                {
+                    dynamic ed = editor;
+                    var plain = ColorOf(((Control)editor).Foreground);
+                    return ((double)ed.TextArea.TextView.DefaultLineHeight, ForegroundAt(editor, 0) == plain, ForegroundAt(editor, at("SELECT")) == magenta,
+                        WeightAt(editor, at("SELECT")) == FontWeights.Bold, ForegroundAt(editor, at("NVL")) == magenta, ForegroundAt(editor, at("DATE")) == plain,
+                        ForegroundAt(editor, text.IndexOf(longLine, StringComparison.Ordinal)) == plain, MeasureText(poc));
+                });
+                _out.WriteLine(after.Item8);
+                Assert.Equal((19.0, true, true, true, true, true, true), (after.Item1, after.Item2, after.Item3, after.Item4, after.Item5, after.Item6, after.Item7));
+                Assert.Contains("줄 간격 19px", after.Item8);
+                Assert.Contains("5,000자 넘는 줄은 칠하지 않음", after.Item8);
+                _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, "settings-3-poc-after-save")));
+
+                // 기본값으로 되돌리기 → 저장 → 처음 모습
+                ui.Run(() =>
+                {
+                    Ui.Click(Ui.ById<Button>(host, "sqleditor-reset"));
+                });
+                await Idle(ui);
+                ui.Run(() =>
+                {
+                    Assert.Equal("20000", Ui.ById<TextBox>(host, "sqleditor-max-line").Text);
+                    Assert.Equal("", Ui.ById<TextBox>(host, "sqleditor-style-keyword-color").Text);
+                    page.Save();
+                });
+                await Idle(ui);
+                var reset = ui.Run(() =>
+                {
+                    dynamic ed = editor;
+                    var palette = Palette(plugin);
+                    return ((double)ed.TextArea.TextView.DefaultLineHeight, ForegroundAt(editor, 0) == palette.Comment, ForegroundAt(editor, at("SELECT")) == palette.Keyword);
+                });
+                Assert.Equal((15.0, true, true), reset);
+                Assert.True(ui.Run(() => SqlSettingsIsDefault(plugin)));
+                Report(plugin, "설정 \"SQL 편집기\" 탭",
+                    "줄 간격 15→19px, 키워드 색·굵게, 주석 끔, 더 칠할 NVL·칠하지 않을 DATE, 긴 줄 기준 5,000자 — 미리 보기는 바로, [저장]하면 열린 PoC 창이 바로 따름. 범위 밖 값은 저장 실패, 기본값으로 되돌리기",
+                    "✓");
+            }
+            finally
+            {
+                ui.Run(() =>
+                {
+                    // 다른 시험이 기본 설정을 보도록
+                    plugin.Manager.SetSetting("sqlEditor.settings", null);
+                    host.Close();
+                    poc.Close();
+                    main.Close();
+                });
+            }
+            Assert.Empty(ui.TakeErrors());
+        }
+
+        private static bool SqlSettingsIsDefault(PluginUnderTest plugin)
+        {
+            var type = plugin.Assembly.GetType("MyPlugin.SqlEditorSettings", true);
+            dynamic settings = type.GetMethod("Parse").Invoke(null, new object[] { plugin.Manager.GetSetting("sqlEditor.settings") });
+            return (bool)settings.IsDefault;
+        }
+
+        /// <summary>그 위치 글자의 굵기(그 줄의 VisualLine 요소에서). UI 스레드에서 부른다.</summary>
+        private static FontWeight WeightAt(FrameworkElement editor, int offset)
+        {
+            dynamic ed = editor;
+            var line = ed.Document.GetLineByOffset(offset);
+            var visual = ed.TextArea.TextView.GetOrConstructVisualLine(line);
+            int relative = offset - (int)visual.FirstDocumentLine.Offset;
+            foreach (var element in visual.Elements)
+            {
+                int start = element.RelativeTextOffset;
+                int length = element.DocumentLength;
+                if (relative >= start && relative < start + length)
+                    return ((Typeface)element.TextRunProperties.Typeface).Weight;
+            }
+            return FontWeights.Normal;
+        }
+
         // ================= 기능 둘러보기 캡처 (보고서용) =================
 
         /// <summary>
@@ -769,6 +928,29 @@ namespace MyPlugin.UiTests
                 snap("tour-09-d42-leading-comment");
                 ui.Run(() => Ui.Click(Ui.Button(poc, "D4-2 맨 앞 /* 넣기·빼기")));
                 await Idle(ui);
+
+                // 설정 "SQL 편집기" 탭: 기본 모습, 고친 모습(미리 보기만 — 저장하지 않음)
+                var page = plugin.Manager.SettingsPages.Single(p => p.Title == "SQL 편집기");
+                var settingsWindow = ui.Run(() =>
+                {
+                    var window = new Window { Title = "설정", Content = page.CreateView(), Width = 820, Height = 1150, ShowActivated = false, ShowInTaskbar = false };
+                    window.SetResourceReference(Window.BackgroundProperty, "WindowBackground");
+                    window.Show();
+                    return window;
+                });
+                await Idle(ui);
+                shots.Add(ui.Run(() => Ui.Snap(settingsWindow, plugin.ShotFolder, "tour-10-settings")));
+                ui.Run(() =>
+                {
+                    Ui.Choose(Ui.ById<ComboBox>(settingsWindow, "sqleditor-line-height"), "19px (지금 SQL 탭과 같음)");
+                    Ui.ClickToggle(Ui.ById<CheckBox>(settingsWindow, "sqleditor-style-keyword-bold"));
+                    Ui.ById<TextBox>(settingsWindow, "sqleditor-style-datatype-color").Text = "#C678DD";
+                    Ui.ClickToggle(Ui.ById<CheckBox>(settingsWindow, "sqleditor-style-comment-italic"));
+                    Ui.ById<TextBox>(settingsWindow, "sqleditor-extra-keywords").Text = "NVL";
+                });
+                await Idle(ui);
+                shots.Add(ui.Run(() => Ui.Snap(settingsWindow, plugin.ShotFolder, "tour-11-settings-custom")));
+                ui.Run(() => settingsWindow.Close());
 
                 File.WriteAllLines(Path.Combine(plugin.ShotFolder, "tour-shots.txt"), shots.Select(Path.GetFileName));
                 foreach (var shot in shots)

@@ -1,0 +1,46 @@
+id: sql-editor
+name: SqlEditor
+title: SQL 편집기
+kind: control
+source:
+  - src/MyPlugin/Ui/SqlEditor.cs
+  - src/MyPlugin/Ui/SqlEditorHighlighting.cs
+  - src/MyPlugin/Ui/SqlEditorSetup.cs
+  - src/MyPlugin/Db/SqlHighlighter.cs
+base: System.Windows.Controls.Decorator
+used_by: [sql-workspace]
+summary: >-
+  SQL 탭 편집기(docs/sql-editor-avalonedit-plan.md 3단계). AvalonEdit TextEditor를 품는다 — 상속하지 않아 AvalonEdit API가 밖으로 새지 않는다.
+  밖에 내는 것은 의도 단위: Text·TextLength, CaretOffset, SelectionStart·SelectionLength·SelectedText, Select, Replace(되돌리기 한 번),
+  Load(글 통째로 넣고 되돌리기 기록 비움), ScrollIntoView(세로·가로), ScrollToHome, FocusEditor, CommandTarget(편집 메뉴 명령 대상), CursorInfo,
+  Rules(탭 대상 DB 규칙), ApplySettings(설정 "SQL 편집기" 탭), TextChanged·SelectionChanged. 탭마다 하나씩 두어 글·캐럿·선택·스크롤·되돌리기 기록이 탭별로 남는다.
+features:
+  - name: 줄 번호
+    description: AvalonEdit 내장 줄 번호(흐린 글자). 예전 직접 그린 줄 번호 칸(TextBlock을 스크롤에 맞춰 옮기던 것)은 없앴다.
+  - name: 구문 강조
+    description: >-
+      SqlEditorHighlighting — 주석·문자열·키워드·자료형, 증분(바뀐 곳 근처만 다시 훑음), 탭 대상 DB 규칙(Rules를 바꾸면 처음부터 다시 칠함),
+      테마 색(SqlHighlightLogic.Palette)과 설정의 대상별 모양·더 칠할·칠하지 않을 낱말·긴 줄 기준. 테마가 바뀐 것은 바탕 리소스를 가리키는 자기 속성으로 안다
+      (정적 감시를 걸지 않아 탭·창을 닫으면 그대로 놓인다).
+  - name: 키 동작
+    description: >-
+      SqlEditorSetup.ApplyBehavior — Tab·Shift+Tab 들여쓰기, Enter 들여쓰기 유지, Home(첫 글자 먼저), 선택 없는 Ctrl+C·X 줄 전체는 AvalonEdit 동작,
+      Ctrl+D(줄 삭제)는 끔, Insert는 겹쳐쓰기 전환. SQL 탭 단축키(F4·F3·Ctrl+F·Ctrl+Enter·Ctrl+/·Ctrl+Shift+U·L)는 SqlWorkspace가 이 컨트롤의 PreviewKeyDown에서 먼저 처리한다.
+  - name: 줄 간격·글꼴
+    description: 고정폭 글꼴(Theme.Mono) 13. 줄 간격은 설정(글꼴 기본 15px 또는 16~32px) — 같은 글꼴을 가리키는 합성 글꼴의 LineSpacing으로(SqlEditorSetup.WithLineHeight).
+  - name: 위치 표시
+    description: CursorInfo — 편집기가 아는 줄·열과 선택 글자 수(CRLF는 한 글자)로 "줄 n, 열 m · 선택 k자"(문서 전체를 훑지 않음).
+theme:
+  - part: 바탕·글자·선택
+    keys: [PanelBackground, PrimaryText, SelectionBrush]
+  - part: 줄 번호
+    keys: [DisabledTextBrush]
+  - part: 강조색(테마 색에서 계산)
+    keys: [PanelBackground, PrimaryText, SecondaryText, AccentBrush]
+limits:
+  - 2만 자(설정) 넘는 줄은 칠하지 않는다. 한 줄 1MB는 AvalonEdit도 입력이 2~4초(편집기 자체 한계 — 예전 TextBox도 비슷).
+  - 한글 IME(조합·한자 변환·조합 중 단축키)는 헤드리스로 볼 수 없어 사람이 확인해야 한다.
+verification:
+  - 2026-10-22 헤드리스 SqlEditorHeadlessTests(A 로드·K 탭 대상별 키워드 색·B 성능·D 키·E 테마 7종·S 설정·T 둘러보기)와
+    회귀 확인표 R1~R7(탭 전환 상태 유지, 되돌리기 한 번, 찾기·스크롤, 파일 열기·저장 줄 끝·BOM, 임시 저장 되살리기, 편집 메뉴·위치 표시, Oracle 실행·F4).
+related: [sql-workspace, sql-editor-settings-page, shell-menu]

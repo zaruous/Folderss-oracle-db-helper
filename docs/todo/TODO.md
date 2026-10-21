@@ -48,8 +48,10 @@
 - [x] 2-3. 설정 "SQL 편집기" 탭(2026-10-21 요청: 줄 간격 같은 선택 설정, 키워드·강조 스타일과 대상 관리, 긴 줄 기준 기본 2만 자·변경 가능) —
       `SqlEditorSettingsPage`·`SqlEditorSettings`(키 sqlEditor.settings, JSON)·`SqlEditorSetup`(합성 글꼴로 줄 간격, 키 결정: Ctrl+D 끔·Insert 겹쳐쓰기),
       자료형을 키워드와 따로(`SqlSpanKind.DataType`). 저장하면 열린 편집기가 바로 따름. 테스트 `SqlEditorSettingsTests`, 헤드리스 `S_SettingsPage_AppliesToEditor`.
-- [ ] 3. `SqlEditor` 전용 컨트롤로 교체 — TextBox 1:1 흉내가 아닌 의도 단위 API, 직접 그린 줄 번호 삭제, 컨트롤 기술서 갱신.
-- [ ] 4. 강조 색칠 연결 — `SqlEditor`에 `SqlEditorHighlighting`을 붙이고 탭 대상 DB가 바뀌면 규칙을 바꾼다, 실측 재측정.
+- [x] 3. `SqlEditor` 전용 컨트롤로 교체 — TextBox 1:1 흉내가 아닌 의도 단위 API, 직접 그린 줄 번호 삭제, 컨트롤 기술서 갱신.
+      → 2026-10-22 `Ui/SqlEditor.cs`(AvalonEdit을 품음), SQL 탭·편집 메뉴·찾기·파일·임시 저장을 옮김, 직접 그린 줄 번호와 PoC 창(도구 메뉴) 삭제,
+      컨트롤 기술서 `sql-editor`. 회귀 확인표(계획서 6절)는 헤드리스 `SqlEditorRegressionTests`(R1~R7, Oracle 실행 포함).
+- [x] 4. 강조 색칠 연결 — `SqlEditor`에 `SqlEditorHighlighting`을 붙이고 탭 대상 DB가 바뀌면 규칙을 바꾼다, 실측 재측정. → 3단계와 함께(2026-10-22).
 - [ ] (별도) 테이블 이름 강조 — 메타데이터 대조 방식, 1~4 이후 검토.
 
 ## 성능 모니터 (DBA가 실제로 쓰려면)

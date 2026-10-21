@@ -64,13 +64,9 @@ namespace MyPlugin
     /// </summary>
     internal sealed partial class SqlWorkspace : Grid
     {
-        private const double EditorFontSize = 13;
-        // 편집기와 줄 번호 칸의 줄 높이를 고정해 맞춘다(한글처럼 대체 글꼴로 그리는 줄도 같은 높이가 된다)
-        private const double EditorLineHeight = 19;
         private const string FirstTabText = "-- 커서가 있는 문장(빈 줄이나 ;로 구분)이나 선택한 부분을 Ctrl+Enter로 실행합니다.\n"
             + "-- PL/SQL 블록(BEGIN·DECLARE·CREATE PROCEDURE 등)은 끝에 / 만 있는 줄을 두세요(블록 안의 빈 줄·;로는 끝나지 않음).\n";
 
-        private static readonly Thickness EditorPadding = new Thickness(6, 4, 6, 4);
 
         private readonly IDbHost _host;
         private readonly List<SqlTabState> _tabs = new List<SqlTabState>();
@@ -83,7 +79,6 @@ namespace MyPlugin
         private int _nextTabNumber = 1;
         private WorkspacePane _pane = WorkspacePane.Grid;
         private bool _fillingTarget;
-        private int _gutterLines = -1;
         private string _stateSignature;
         private bool _stateTimerFailed;
 
@@ -108,10 +103,8 @@ namespace MyPlugin
         private Button _cancel;
 
         private Grid _editorHost;
-        private TextBlock _gutterText;
-        private TranslateTransform _gutterShift;
-        // 줄 번호 첫 글자 상자의 위쪽(TextBlock 안 좌표). 처음 배치 뒤 잰다.
-        private double _gutterGlyphTop = double.NaN;
+        // 설정 "SQL 편집기" 탭의 값(줄 간격·강조 모양·대상·긴 줄 기준) — 저장하면 Changed로 바뀐다
+        private SqlEditorSettings _editorSettings;
 
         private PaneTab _gridTab;
         private PaneTab _messagesTab;
@@ -134,6 +127,7 @@ namespace MyPlugin
             if (host == null)
                 throw new ArgumentNullException(nameof(host));
             _host = host;
+            _editorSettings = host.EditorSettings ?? new SqlEditorSettings();
             Theme.Background(this, Theme.PanelBackground);
 
             RowDefinitions.Add(new RowDefinition { Height = new GridLength(42, GridUnitType.Star), MinHeight = 90 });
@@ -177,7 +171,7 @@ namespace MyPlugin
             if (!RestoreDrafts())
             {
                 var first = CreateTab(InitialTarget(), FirstTabText);
-                first.Editor.CaretIndex = first.Editor.Text.Length;
+                first.Editor.CaretOffset = first.Editor.TextLength;
                 ActivateTab(first, false);
             }
             SelectPane(WorkspacePane.Grid);
@@ -465,45 +459,10 @@ namespace MyPlugin
 
         private FrameworkElement BuildEditor()
         {
-            var grid = new Grid();
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-            // 편집기와 같은 글꼴·크기·줄 높이여야 글자 상자를 맞췄을 때 기준선도 맞는다
-            _gutterText = new TextBlock
-            {
-                Text = "1",
-                FontFamily = Theme.Mono,
-                FontSize = EditorFontSize,
-                TextAlignment = TextAlignment.Right,
-                LineHeight = EditorLineHeight,
-                LineStackingStrategy = LineStackingStrategy.BlockLineHeight
-            };
-            Theme.Foreground(_gutterText, Theme.DisabledText);
-            _gutterShift = new TranslateTransform();
-            _gutterText.RenderTransform = _gutterShift;
-            // 칸보다 긴 줄 번호를 Grid·Border에 바로 넣으면 레이아웃 잘림(로컬 좌표)이 생겨 RenderTransform으로 올려도 아래 번호가 안 보인다.
-            // Canvas 자식은 잘림 없이 자기 크기로 배치되므로 Canvas에 넣고, 잘라 내기는 바깥 Border(ClipToBounds)가 한다.
-            var numbers = new Canvas { HorizontalAlignment = HorizontalAlignment.Right };
-            numbers.SetBinding(FrameworkElement.WidthProperty, new Binding(nameof(FrameworkElement.ActualWidth)) { Source = _gutterText });
-            numbers.Children.Add(_gutterText);
-            var gutter = new Border
-            {
-                Child = numbers,
-                MinWidth = 36,
-                Padding = new Thickness(6, 0, 6, 0),
-                BorderThickness = new Thickness(0, 0, 1, 0),
-                ClipToBounds = true
-            };
-            gutter.SetResourceReference(Border.BackgroundProperty, Theme.SurfaceBackground);
-            gutter.SetResourceReference(Border.BorderBrushProperty, Theme.Border);
-            grid.Children.Add(gutter);
-
+            // 탭마다 SqlEditor 하나(보이는 것은 지금 탭). 줄 번호는 편집기가 그린다
             _editorHost = new Grid();
-            Grid.SetColumn(_editorHost, 1);
             _editorHost.Children.Add(BuildEditorFind());
-            grid.Children.Add(_editorHost);
-            return grid;
+            return _editorHost;
         }
 
         private GridSplitter BuildSplitter()
@@ -636,40 +595,17 @@ namespace MyPlugin
             return border;
         }
 
-        private TextBox CreateEditor(string text)
+        private SqlEditor CreateEditor(string dbId, string text)
         {
-            var editor = new TextBox
+            var editor = new SqlEditor(WorkspaceLogic.NormalizeNewlines(text ?? "", Environment.NewLine), LexOf(dbId), _editorSettings)
             {
-                AcceptsReturn = true,
-                AcceptsTab = true,
-                TextWrapping = TextWrapping.NoWrap,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                FontFamily = Theme.Mono,
-                FontSize = EditorFontSize,
-                BorderThickness = new Thickness(0),
-                Padding = EditorPadding,
-                // Folderss의 암시적 TextBox 스타일은 VerticalContentAlignment=Center다(한 줄 입력칸용). 그대로 두면 짧은 글이 편집기
-                // 한가운데에 뜨고, 처음 잰 첫 줄 위치로 맞추는 줄 번호도 글이 늘면 어긋난다 — 위·왼쪽 정렬을 직접 정한다.
-                VerticalContentAlignment = VerticalAlignment.Top,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                IsInactiveSelectionHighlightEnabled = true,
-                Visibility = Visibility.Collapsed,
-                Text = WorkspaceLogic.NormalizeNewlines(text ?? "", Environment.NewLine)
+                Visibility = Visibility.Collapsed
             };
-            SpellCheck.SetIsEnabled(editor, false);
-            editor.SetValue(TextBlock.LineHeightProperty, EditorLineHeight);
-            editor.SetValue(TextBlock.LineStackingStrategyProperty, LineStackingStrategy.BlockLineHeight);
-            Theme.Background(editor, Theme.PanelBackground);
-            Theme.Foreground(editor);
-            editor.SetResourceReference(TextBoxBase.CaretBrushProperty, Theme.PrimaryText);
-            AutomationProperties.SetName(editor, "SQL 편집기");
             editor.TextChanged += Editor_TextChanged;
             // 탐색기에서 파일을 끌어다 놓으면 그 파일 탭으로 연다(이미 연 파일은 그 탭으로) — 열린 뒤에는 Ctrl+S로 그 파일에 저장
             ShellUi.EnableFileDrop(editor, files => OpenPaths(files));
             editor.SelectionChanged += Editor_SelectionChanged;
             editor.PreviewKeyDown += Editor_PreviewKeyDown;
-            editor.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(Editor_ScrollChanged));
             return editor;
         }
 
@@ -688,7 +624,7 @@ namespace MyPlugin
         {
             var number = WorkspaceLogic.NextTabNumber(_tabs.Select(t => t.Title), _nextTabNumber);
             _nextTabNumber = number + 1;
-            var tab = new SqlTabState(WorkspaceLogic.TabTitle(number), dbId, CreateEditor(text))
+            var tab = new SqlTabState(WorkspaceLogic.TabTitle(number), dbId, CreateEditor(dbId, text))
             {
                 Status = WorkspaceLogic.ReadyStatus()
             };
@@ -711,7 +647,7 @@ namespace MyPlugin
             var target = NewTabTarget();
             var profile = Profile(target);
             var tab = CreateTab(target, WorkspaceLogic.NewTabText(profile != null ? profile.Name : null));
-            tab.Editor.CaretIndex = tab.Editor.Text.Length;
+            tab.Editor.CaretOffset = tab.Editor.TextLength;
             ActivateTab(tab, true);
         }
 
@@ -730,8 +666,8 @@ namespace MyPlugin
                 tab.PendingPane = null;
                 SelectPane(pane);
             }
-            UpdateGutter(tab, true);
-            PositionGutter(tab, tab.Editor.VerticalOffset);
+            // 대상 접속의 DBMS가 바뀌었을 수 있다(접속 관리) — 같은 규칙이면 아무 일도 없다
+            tab.Editor.Rules = LexOf(tab.DbId);
             UpdateCursorInfo(tab);
             RenderTabs();
             RenderTarget();
@@ -1042,6 +978,8 @@ namespace MyPlugin
             if (ReleaseCursor(tab))
                 AddMessage(tab.ResultDbId, "대상 DB를 바꿔 '" + tab.Title + "' 탭의 열린 커서를 닫았습니다.", MessageKind.Info);
             tab.DbId = dbId;
+            // 같은 글이 DB마다 다르게 나뉘고 키워드도 다르다 — 그 DB 규칙으로 다시 칠한다
+            tab.Editor.Rules = LexOf(dbId);
             ScheduleDraftSave();
             // 이전 대상의 연결·바쁨 안내는 더 맞지 않는다
             tab.Status = tab.Cursor != null ? FetchStatusOf(tab) : WorkspaceLogic.ReadyStatus();
@@ -1060,6 +998,7 @@ namespace MyPlugin
                 return false;
             ReleaseCursor(tab);
             tab.DbId = null;
+            tab.Editor.Rules = LexOf(null);
             if (tab.Status != null && tab.Status.Action != WorkspaceLogic.StatusAction.None && tab.Status.Action != WorkspaceLogic.StatusAction.FetchNext)
                 tab.Status = WorkspaceLogic.ReadyStatus();
             AddMessage(null, WorkspaceLogic.TargetRemovedMessage(tab.Title), MessageKind.Error);
@@ -1068,7 +1007,7 @@ namespace MyPlugin
 
         // ================= 편집기 =================
 
-        private void Editor_TextChanged(object sender, TextChangedEventArgs e)
+        private void Editor_TextChanged(object sender, EventArgs e)
         {
             Safe(() =>
             {
@@ -1077,30 +1016,16 @@ namespace MyPlugin
                 var changed = _tabs.FirstOrDefault(t => ReferenceEquals(t.Editor, sender));
                 if (changed != null && changed.FilePath != null)
                     UpdateDirty(changed, false);
-                var tab = _active;
-                if (tab == null || !ReferenceEquals(sender, tab.Editor))
-                    return;
-                UpdateGutter(tab, false);
             });
         }
 
-        private void Editor_SelectionChanged(object sender, RoutedEventArgs e)
+        private void Editor_SelectionChanged(object sender, EventArgs e)
         {
             Safe(() =>
             {
                 var tab = _active;
                 if (tab != null && ReferenceEquals(sender, tab.Editor))
                     UpdateCursorInfo(tab);
-            });
-        }
-
-        private void Editor_ScrollChanged(object sender, ScrollChangedEventArgs e)
-        {
-            Safe(() =>
-            {
-                var tab = _active;
-                if (tab != null && ReferenceEquals(sender, tab.Editor))
-                    PositionGutter(tab, e.VerticalOffset);
             });
         }
 
@@ -1229,7 +1154,7 @@ namespace MyPlugin
                 tab.SavedText = fresh != null ? tab.Editor.Text : null;
                 tab.ShownDirty = tab.Dirty;
             }
-            tab.Editor.CaretIndex = Math.Max(0, Math.Min(draft.Caret, tab.Editor.Text.Length));
+            tab.Editor.CaretOffset = draft.Caret;
             return tab;
         }
 
@@ -1265,7 +1190,7 @@ namespace MyPlugin
                 {
                     DbId = tab.DbId,
                     Text = text,
-                    Caret = tab.Editor.CaretIndex,
+                    Caret = tab.Editor.CaretOffset,
                     FilePath = tab.FilePath,
                     FileEncoding = tab.FilePath != null ? tab.FileEncoding.ToString() : null,
                     Newline = tab.FileNewline,
@@ -1516,8 +1441,8 @@ namespace MyPlugin
         /// <summary>메뉴·아이콘이 따르는 상태가 바뀜(탭 바꿈·실행 시작과 끝·저장하지 않은 변경 표시).</summary>
         public event EventHandler CommandStateChanged;
 
-        /// <summary>지금 탭의 편집기(편집 메뉴의 잘라내기·복사·되돌리기 대상).</summary>
-        public TextBox ActiveEditor
+        /// <summary>지금 탭의 편집기(편집 메뉴의 잘라내기·복사·되돌리기 대상은 <see cref="SqlEditor.CommandTarget"/>).</summary>
+        public SqlEditor ActiveEditor
         {
             get { return _active != null ? _active.Editor : null; }
         }
@@ -1627,7 +1552,7 @@ namespace MyPlugin
             if (editor == null || editor.IsReadOnly)
                 return;
             ApplyEdit(editor, EditorLogic.ToggleLineComment(editor.Text, editor.SelectionStart, editor.SelectionLength));
-            editor.Focus();
+            editor.FocusEditor();
         }
 
         /// <summary>선택한 글을 대문자(Ctrl+Shift+U)·소문자(Ctrl+Shift+L)로.</summary>
@@ -1637,20 +1562,18 @@ namespace MyPlugin
             if (editor == null || editor.IsReadOnly || editor.SelectionLength == 0)
                 return;
             var start = editor.SelectionStart;
+            var length = editor.SelectionLength;
             var replaced = EditorLogic.ChangeCase(editor.SelectedText, upper);
-            editor.SelectedText = replaced;
+            editor.Replace(start, length, replaced);
             editor.Select(start, replaced.Length);
-            editor.Focus();
+            editor.FocusEditor();
         }
 
-        private static void ApplyEdit(TextBox editor, TextEdit edit)
+        private static void ApplyEdit(SqlEditor editor, TextEdit edit)
         {
+            // 바꾸기 한 번이 되돌리기 한 번이다
             if (edit.Length > 0 || edit.Replacement.Length > 0)
-            {
-                // SelectedText로 바꿔야 되돌리기 한 번에 돌아간다
-                editor.Select(edit.Start, edit.Length);
-                editor.SelectedText = edit.Replacement;
-            }
+                editor.Replace(edit.Start, edit.Length, edit.Replacement);
             editor.Select(edit.SelectStart, edit.SelectLength);
         }
 
@@ -1682,13 +1605,13 @@ namespace MyPlugin
             var reuse = IsPristine(_active);
             var tab = reuse ? _active : CreateTab(NewTabTarget(), text);
             if (reuse)
-                tab.Editor.Text = text;
+                tab.Editor.Load(text);
             tab.FilePath = FullPath(path);
             tab.FileEncoding = content.Encoding;
             tab.FileNewline = content.Newline;
             tab.SavedText = tab.Editor.Text;
             tab.ShownDirty = false;
-            tab.Editor.CaretIndex = 0;
+            tab.Editor.CaretOffset = 0;
             tab.Editor.ScrollToHome();
             ActivateTab(tab, true);
             RememberFile(tab.FilePath);
@@ -1856,46 +1779,9 @@ namespace MyPlugin
             }
         }
 
-        private void UpdateGutter(SqlTabState tab, bool force)
-        {
-            var lines = WorkspaceLogic.CountLines(tab.Editor.Text);
-            if (!force && lines == _gutterLines)
-                return;
-            _gutterLines = lines;
-            _gutterText.Text = WorkspaceLogic.LineNumbers(lines);
-        }
-
-        /// <summary>
-        /// 줄 번호를 편집기 첫 줄 위치와 세로 스크롤에 맞춘다. 편집기의 첫 글자 상자(캐럿 사각형)와 줄 번호의 첫 글자 상자를 맞춘다 —
-        /// 글자 상자는 줄 상자(LineHeight)보다 아래에 있어서, 줄 번호의 줄 상자 위쪽을 편집기 글자 상자에 맞추면 그만큼(약 4px) 아래로 밀린다.
-        /// 두 쪽 모두 처음 배치 뒤에 잰다. 재기 전에는 줄 상자 위쪽끼리(편집기 여백) 맞춘다.
-        /// </summary>
-        private void PositionGutter(SqlTabState tab, double verticalOffset)
-        {
-            var editor = tab.Editor;
-            if (double.IsNaN(tab.FirstLineTop) && editor.IsLoaded)
-            {
-                var rect = editor.GetRectFromCharacterIndex(0);
-                if (!rect.IsEmpty)
-                    tab.FirstLineTop = rect.Top + editor.VerticalOffset;
-            }
-            if (double.IsNaN(_gutterGlyphTop) && _gutterText.IsLoaded && _gutterText.IsArrangeValid)
-            {
-                var run = _gutterText.Inlines.FirstInline as Run;
-                var rect = run != null ? run.ContentStart.GetCharacterRect(LogicalDirection.Forward) : Rect.Empty;
-                if (!rect.IsEmpty)
-                    _gutterGlyphTop = rect.Top;
-            }
-            var top = double.IsNaN(tab.FirstLineTop) || double.IsNaN(_gutterGlyphTop)
-                ? editor.Padding.Top + editor.BorderThickness.Top
-                : tab.FirstLineTop - _gutterGlyphTop;
-            _gutterShift.Y = top - verticalOffset;
-        }
-
         private void UpdateCursorInfo(SqlTabState tab)
         {
-            var editor = tab.Editor;
-            _cursorInfo.Text = WorkspaceLogic.CursorInfo(editor.Text, editor.CaretIndex, editor.SelectionStart, editor.SelectionLength);
+            _cursorInfo.Text = tab.Editor.CursorInfo;
         }
 
         /// <param name="afterInput">트리 더블클릭처럼 지금 입력 처리가 끝난 뒤 그쪽이 포커스를 다시 가져갈 수 있으면 true.</param>
@@ -1904,7 +1790,7 @@ namespace MyPlugin
             var editor = _active != null ? _active.Editor : null;
             if (editor == null)
                 return;
-            if (!afterInput && editor.IsVisible && editor.Focus())
+            if (!afterInput && editor.IsVisible && editor.FocusEditor())
                 return;
             // 창을 막 열었거나 탭을 막 바꿔 아직 배치 전이면 배치가 끝난 뒤 옮긴다
             Dispatcher.BeginInvoke(afterInput ? DispatcherPriority.Input : DispatcherPriority.Loaded, new Action(() =>
@@ -1912,7 +1798,7 @@ namespace MyPlugin
                 try
                 {
                     if (_active != null && _active.Editor == editor)
-                        editor.Focus();
+                        editor.FocusEditor();
                 }
                 catch (Exception)
                 {
@@ -1938,15 +1824,11 @@ namespace MyPlugin
         private void InsertAtTop(SqlTabState tab, string text)
         {
             var editor = tab.Editor;
-            editor.Select(0, 0);
-            editor.SelectedText = WorkspaceLogic.NormalizeNewlines(text, Environment.NewLine);
+            editor.Replace(0, 0, WorkspaceLogic.NormalizeNewlines(text, Environment.NewLine));
             editor.Select(0, 0);
             editor.ScrollToHome();
             if (tab == _active)
-            {
-                UpdateGutter(tab, false);
                 UpdateCursorInfo(tab);
-            }
             FocusActiveEditor(true);
         }
 
@@ -2099,7 +1981,7 @@ namespace MyPlugin
         /// 선택이 없으면 커서가 있는 문장 하나. 여러 문장은 <see cref="SqlScript.SplitForRun"/>으로 나눈다(문장 안의 빈 줄 허용).
         /// rules는 그 탭 대상 DB의 구문 규칙(PostgreSQL $$, SQL Server GO 등).
         /// </summary>
-        private static List<SqlStatement> StatementsToRun(TextBox editor, bool wholeScript, SqlLexRules rules)
+        private static List<SqlStatement> StatementsToRun(SqlEditor editor, bool wholeScript, SqlLexRules rules)
         {
             if (wholeScript)
                 return SqlScript.SplitForRun(editor.Text, rules);
@@ -2111,7 +1993,7 @@ namespace MyPlugin
                 var one = SqlScript.Parse(editor.SelectedText, rules);
                 return one == null ? new List<SqlStatement>() : new List<SqlStatement> { one };
             }
-            var atCaret = SqlScript.AtCaret(editor.Text, editor.CaretIndex, rules);
+            var atCaret = SqlScript.AtCaret(editor.Text, editor.CaretOffset, rules);
             return atCaret == null ? new List<SqlStatement>() : new List<SqlStatement> { atCaret };
         }
 
@@ -2964,8 +2846,9 @@ namespace MyPlugin
                 _stateTimer.Start();
                 if (AnyRunning)
                     _elapsedTimer.Start();
-                if (_active != null)
-                    PositionGutter(_active, _active.Editor.VerticalOffset);
+                // 설정 창에서 SQL 편집기 설정을 저장하면 열린 탭 모두 바로 따른다(정적 이벤트라 내릴 때 뗀다)
+                SqlEditorSettings.Changed -= OnEditorSettingsChanged;
+                SqlEditorSettings.Changed += OnEditorSettingsChanged;
             });
         }
 
@@ -2974,10 +2857,21 @@ namespace MyPlugin
             // 멈추지 않으면 Dispatcher가 타이머를 통해 닫힌 창의 화면을 계속 붙잡는다
             _stateTimer.Stop();
             _elapsedTimer.Stop();
+            SqlEditorSettings.Changed -= OnEditorSettingsChanged;
             // 창을 닫음: 마지막 내용을 저장하고, 다음에 여는 창이 넘겨받을 수 있게 열린 창 목록에서 뺀다
             Safe(() => SaveDrafts());
             lock (LiveDraftOwners)
                 LiveDraftOwners.Remove(_draftOwner);
+        }
+
+        private void OnEditorSettingsChanged(object sender, SqlEditorSettings settings)
+        {
+            Safe(() =>
+            {
+                _editorSettings = settings ?? new SqlEditorSettings();
+                foreach (var tab in _tabs)
+                    tab.Editor.ApplySettings(_editorSettings);
+            });
         }
 
         // ================= 커서 정리 =================
@@ -3050,13 +2944,6 @@ namespace MyPlugin
         private OracleConnectionProfile Profile(string dbId)
         {
             return string.IsNullOrEmpty(dbId) ? null : _host.FindProfile(dbId);
-        }
-
-        /// <summary>[시험판] AvalonEdit PoC 창: 지금 탭의 글과 대상 DB 규칙으로 연다(본 탭은 그대로).</summary>
-        public void ShowEditorPoc()
-        {
-            Safe(() => AvalonEditPocWindow.Show(Window.GetWindow(this), _active != null ? _active.Editor.Text : null,
-                LexOf(_active != null ? _active.DbId : null), _host.EditorSettings, text => CopyText(text, "PoC 실측 결과를 복사했습니다(계획서 7절 표 형식).")));
         }
 
         /// <summary>그 DB의 문장 나누기·구문 강조 규칙. 대상이 없거나 접속이 지워졌으면 Oracle 규칙(지금까지와 같음).</summary>

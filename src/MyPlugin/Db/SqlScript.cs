@@ -80,6 +80,31 @@ namespace MyPlugin
         public List<string> Types { get; } = new List<string>();
     }
 
+    /// <summary>구문 강조 구간의 종류.</summary>
+    public enum SqlSpanKind
+    {
+        /// <summary>줄 주석(--)·블록 주석(/* */, 힌트 /*+ */ 포함)</summary>
+        Comment,
+        /// <summary>문자열 '…'·N'…'·q'[…]'·nq'[…]'</summary>
+        String
+    }
+
+    /// <summary>구문 강조 구간: 글에서의 위치(UTF-16 인덱스 — string.Substring과 같다)와 길이.</summary>
+    public readonly struct SqlSpan
+    {
+        public SqlSpan(SqlSpanKind kind, int start, int length)
+        {
+            Kind = kind;
+            Start = start;
+            Length = length;
+        }
+
+        public SqlSpanKind Kind { get; }
+        public int Start { get; }
+        public int Length { get; }
+        public int End { get { return Start + Length; } }
+    }
+
     /// <summary>
     /// SQL 편집기 텍스트를 문장으로 나누고 종류를 판정한다(순수 로직, 테스트 대상).
     /// 구분 규칙(SQL Developer와 비슷하게):
@@ -97,20 +122,25 @@ namespace MyPlugin
         private const string UpdateWithoutWhere = "WHERE 절이 없습니다. 테이블의 모든 행이 바뀝니다.";
         private const string DeleteWithoutWhere = "WHERE 절이 없습니다. 테이블의 모든 행이 삭제됩니다.";
         private const string Irreversible = "되돌릴 수 없는 문장입니다. DDL은 바로 커밋되어 롤백할 수 없습니다.";
-        private const string GuessedBlockEnd = "블록 끝을 알리는 '/' 줄이 없어 빈 줄에서 블록이 끝난 것으로 봤습니다. "
-            + "블록이 잘리거나 아래 문장이 섞이지 않았는지 확인하세요(블록 끝에 '/'만 있는 줄을 두면 묻지 않습니다).";
-
-        /// <summary>스크립트 전체를 문장 목록으로. 순서는 원문 순서.</summary>
-        public static List<SqlStatement> Split(string script)
+        private static string GuessedBlockEnd(SqlLexRules rules)
         {
+            var line = rules.BlockEndLine ?? "/";
+            return "블록 끝을 알리는 '" + line + "' 줄이 없어 빈 줄에서 블록이 끝난 것으로 봤습니다. "
+                + "블록이 잘리거나 아래 문장이 섞이지 않았는지 확인하세요(블록 끝에 '" + line + "'만 있는 줄을 두면 묻지 않습니다).";
+        }
+
+        /// <summary>스크립트 전체를 문장 목록으로. 순서는 원문 순서. rules는 DBMS별 구문 규칙(null이면 <see cref="SqlLexRules.Oracle"/>).</summary>
+        public static List<SqlStatement> Split(string script, SqlLexRules rules = null)
+        {
+            rules = rules ?? SqlLexRules.Oracle;
             var result = new List<SqlStatement>();
             if (string.IsNullOrEmpty(script))
                 return result;
-            var tokens = Tokenize(script);
+            var tokens = Tokenize(script, rules);
             var i = SkipSeparators(script, tokens, 0);
             while (i < tokens.Count)
             {
-                var block = IsBlockHeader(script, tokens, i);
+                var block = IsBlockHeader(script, tokens, i, rules);
                 var end = i;
                 while (end < tokens.Count && !EndsStatement(script, tokens[end], block))
                     end++;
@@ -133,10 +163,10 @@ namespace MyPlugin
                     terminatorEnd = tokens[end].End;
                     semicolon = tokens[end].Type == TokenType.Symbol;
                 }
-                var statement = Build(script, tokens, i, end, terminatorEnd, block, semicolon);
+                var statement = Build(script, tokens, i, end, terminatorEnd, block, semicolon, rules);
                 // CREATE 블록을 잘못 자르거나 합치면 멀쩡한 객체가 INVALID로 바뀐다 — 짐작한 끝은 실행 전에 확인받는다
                 if (guessedEnd && statement.Kind == SqlKind.Ddl && statement.Danger == null)
-                    statement.Danger = GuessedBlockEnd;
+                    statement.Danger = GuessedBlockEnd(rules);
                 result.Add(statement);
                 i = SkipSeparators(script, tokens, end + 1);
             }
@@ -144,12 +174,32 @@ namespace MyPlugin
         }
 
         /// <summary>
+        /// 구문 강조용 주석·문자열 구간(앞에서 뒤로, 겹치지 않음). 문장 나누기(<see cref="Split"/>)와 같은 토큰 규칙이라
+        /// 실행할 때 문장을 나누는 기준과 화면에 칠하는 기준이 같다(같은 rules를 줄 것). 따옴표 식별자("…"·[…])·숫자·키워드는 구간이 아니다.
+        /// 줄 주석은 줄 끝 공백을 넣지 않고, 닫히지 않은 문자열·주석은 글 끝까지다. null·빈 글은 빈 목록.
+        /// </summary>
+        public static List<SqlSpan> HighlightSpans(string script, SqlLexRules rules = null)
+        {
+            var spans = new List<SqlSpan>();
+            if (string.IsNullOrEmpty(script))
+                return spans;
+            foreach (var t in Tokenize(script, rules ?? SqlLexRules.Oracle))
+            {
+                if (t.IsComment)
+                    spans.Add(new SqlSpan(SqlSpanKind.Comment, t.Start, t.End - t.Start));
+                else if (t.Type == TokenType.Literal)
+                    spans.Add(new SqlSpan(SqlSpanKind.String, t.Start, t.End - t.Start));
+            }
+            return spans;
+        }
+
+        /// <summary>
         /// 커서 위치의 문장. 커서가 어떤 문장 범위(Start ≤ caret ≤ Start+Length) 안이면 그 문장,
         /// 문장 사이(공백·주석만 있는 곳)면 커서 뒤 가장 가까운 문장, 뒤에 없으면 앞 문장. 문장이 없으면 null.
         /// </summary>
-        public static SqlStatement AtCaret(string script, int caret)
+        public static SqlStatement AtCaret(string script, int caret, SqlLexRules rules = null)
         {
-            var statements = Split(script);
+            var statements = Split(script, rules);
             if (statements.Count == 0)
                 return null;
             foreach (var statement in statements)
@@ -171,17 +221,18 @@ namespace MyPlugin
         /// 그래서 문장 안에 빈 줄을 둔 스크립트도 ';'로 끝내면 그대로 실행된다. ';'·'/' 줄은 언제나 문장을 끝낸다.
         /// 합친 문장은 <see cref="Parse"/>로 다시 분석하고 Start·Length는 원문 기준이다.
         /// </summary>
-        public static List<SqlStatement> SplitForRun(string script)
+        public static List<SqlStatement> SplitForRun(string script, SqlLexRules rules = null)
         {
+            rules = rules ?? SqlLexRules.Oracle;
             var result = new List<SqlStatement>();
-            foreach (var part in Split(script))
+            foreach (var part in Split(script, rules))
             {
                 var previous = result.Count > 0 ? result[result.Count - 1] : null;
-                if (previous != null && EndedAtBlankLine(script, previous) && !StartsStatement(part))
+                if (previous != null && EndedAtBlankLine(script, previous, rules) && !StartsStatement(part))
                 {
                     var start = previous.Start;
                     var end = part.Start + part.Length;
-                    var merged = Parse(script.Substring(start, end - start));
+                    var merged = Parse(script.Substring(start, end - start), rules);
                     if (merged != null)
                     {
                         merged.Start += start;
@@ -195,8 +246,8 @@ namespace MyPlugin
             return result;
         }
 
-        // 빈 줄(또는 스크립트 끝)에서 끝난 일반 문장인지: ';'·'/' 줄로 끝났거나 PL/SQL 블록이면 아니다
-        private static bool EndedAtBlankLine(string script, SqlStatement statement)
+        // 빈 줄(또는 스크립트 끝)에서 끝난 일반 문장인지: ';'·구분 줄('/'·GO)로 끝났거나 블록이면 아니다
+        private static bool EndedAtBlankLine(string script, SqlStatement statement, SqlLexRules rules)
         {
             if (statement.IsPlSqlBlock)
                 return false;
@@ -204,7 +255,8 @@ namespace MyPlugin
             if (raw.EndsWith(";", StringComparison.Ordinal))
                 return false;
             var lastBreak = raw.LastIndexOf('\n');
-            return raw.Substring(lastBreak + 1).Trim() != "/";
+            return rules.BlockEndLine == null
+                || !string.Equals(raw.Substring(lastBreak + 1).Trim(), rules.BlockEndLine, StringComparison.OrdinalIgnoreCase);
         }
 
         // 새 문장으로 시작하는 조각인지. ALTER SESSION·LOCK·EXPLAIN 말고 종류가 Other인 조각(FROM·WHERE·SET·AND …)은 앞 문장에 이어진다.
@@ -228,15 +280,16 @@ namespace MyPlugin
         /// 가운데의 ';'·빈 줄로는 나누지 않고 끝의 '/' 줄과(PL/SQL 블록이 아니면) 끝의 ';' 하나만 뗀다.
         /// Length는 텍스트 처음부터 문장 끝(뗀 구분자 포함)까지.
         /// </summary>
-        public static SqlStatement Parse(string text)
+        public static SqlStatement Parse(string text, SqlLexRules rules = null)
         {
+            rules = rules ?? SqlLexRules.Oracle;
             if (string.IsNullOrEmpty(text))
                 return null;
-            var tokens = Tokenize(text);
+            var tokens = Tokenize(text, rules);
             var first = SkipSeparators(text, tokens, 0);
             if (first >= tokens.Count)
                 return null;
-            var block = IsBlockHeader(text, tokens, first);
+            var block = IsBlockHeader(text, tokens, first, rules);
             var limit = tokens.Count;
             var terminatorEnd = -1;
             var last = LastSignificant(tokens, first, limit);
@@ -253,7 +306,7 @@ namespace MyPlugin
                     terminatorEnd = tokens[last].End;
                 limit = last;
             }
-            var statement = Build(text, tokens, first, limit, terminatorEnd, block, semicolon);
+            var statement = Build(text, tokens, first, limit, terminatorEnd, block, semicolon, rules);
             statement.Length += statement.Start;
             statement.Start = 0;
             return statement;
@@ -269,7 +322,7 @@ namespace MyPlugin
         {
             if (string.IsNullOrEmpty(sql))
                 return null;
-            return CompileTargetOf(sql, Tokenize(sql).FindAll(t => !t.IsComment && !t.IsMarker));
+            return CompileTargetOf(sql, Tokenize(sql, SqlLexRules.Oracle).FindAll(t => !t.IsComment && !t.IsMarker));
         }
 
         // sig: 주석·표시 토큰을 뺀 문장 토큰(sig[0]이 첫 낱말)
@@ -361,7 +414,7 @@ namespace MyPlugin
         // ---- 문장 만들기 ----
 
         // tokens[first, limit)가 문장 내용(끝 구분자 제외). terminatorEnd는 문장 범위에 넣을 구분자의 끝(없으면 -1).
-        private static SqlStatement Build(string s, List<Token> tokens, int first, int limit, int terminatorEnd, bool block, bool strippedSemicolon)
+        private static SqlStatement Build(string s, List<Token> tokens, int first, int limit, int terminatorEnd, bool block, bool strippedSemicolon, SqlLexRules rules)
         {
             var significant = new List<Token>();
             var contentEnd = tokens[first].End;
@@ -384,12 +437,12 @@ namespace MyPlugin
                 IsPlSqlBlock = block,
                 StrippedSemicolon = strippedSemicolon
             };
-            Analyze(statement, s, significant);
+            Analyze(statement, s, significant, rules);
             return statement;
         }
 
         // sig: 문장 내용에서 주석을 뺀 토큰
-        private static void Analyze(SqlStatement statement, string s, List<Token> sig)
+        private static void Analyze(SqlStatement statement, string s, List<Token> sig, SqlLexRules rules)
         {
             var v = 0;
             while (v < sig.Count && IsSymbol(s, sig[v], '('))
@@ -401,7 +454,7 @@ namespace MyPlugin
             statement.TransactionAction = TransactionActionOf(verb, next, s, sig, v);
             statement.ForUpdate = statement.Kind == SqlKind.Query && HasTopLevel(s, sig, "FOR", "UPDATE");
             statement.Danger = DangerOf(verb, next, s, sig);
-            if (v == 0 && (verb == "EXEC" || verb == "EXECUTE"))
+            if (rules.ExecAsPlSqlBlock && v == 0 && (verb == "EXEC" || verb == "EXECUTE"))
                 statement.Text = ExecAsBlock(s, sig, statement.Text);
         }
 
@@ -543,8 +596,10 @@ namespace MyPlugin
         // ---- 문장 경계 ----
 
         // 첫 키워드(주석·빈 줄은 건너뜀)로 '/' 줄까지 이어지는 PL/SQL 블록인지 판단한다.
-        private static bool IsBlockHeader(string s, List<Token> tokens, int first)
+        private static bool IsBlockHeader(string s, List<Token> tokens, int first, SqlLexRules rules)
         {
+            if (!rules.Blocks)
+                return false;
             var words = new List<string>();
             for (var i = first; i < tokens.Count && words.Count < 7; i++)
             {
@@ -556,12 +611,20 @@ namespace MyPlugin
                 words.Add(Upper(s, t));
             }
             var w0 = WordAt(words, 0);
+            // SQL Server: BEGIN TRAN[SACTION]·BEGIN DISTRIBUTED는 트랜잭션 문장이다(BEGIN … END 블록이 아님)
+            if (w0 == "BEGIN" && rules.BeginTranIsStatement)
+            {
+                var w1 = WordAt(words, 1);
+                if (w1 == "TRAN" || w1 == "TRANSACTION" || w1 == "DISTRIBUTED")
+                    return false;
+            }
             if (w0 == "DECLARE" || w0 == "BEGIN")
                 return true;
             if (w0 != "CREATE")
                 return false;
             var k = 1;
-            if (WordAt(words, k) == "OR" && WordAt(words, k + 1) == "REPLACE")
+            // CREATE OR REPLACE(Oracle) · CREATE OR ALTER(SQL Server)
+            if (WordAt(words, k) == "OR" && (WordAt(words, k + 1) == "REPLACE" || WordAt(words, k + 1) == "ALTER"))
                 k += 2;
             if (WordAt(words, k) == "EDITIONABLE" || WordAt(words, k) == "NONEDITIONABLE")
                 k++;
@@ -758,7 +821,7 @@ namespace MyPlugin
             /// <summary>키워드·식별자(글자로 시작, 글자·숫자·_·$·#)</summary>
             Word,
             Number,
-            /// <summary>'…', N'…', q'[…]', nq'[…]'</summary>
+            /// <summary>'…', N'…', q'[…]', nq'[…]', E'…', $$…$$</summary>
             Literal,
             QuotedIdentifier,
             LineComment,
@@ -767,7 +830,7 @@ namespace MyPlugin
             Symbol,
             /// <summary>문자열·주석 밖의 공백만 있는 줄(길이 0 표시)</summary>
             BlankLine,
-            /// <summary>문자열·주석 밖의 '/'만 있는 줄의 '/'</summary>
+            /// <summary>문자열·주석 밖의 구분 줄(<see cref="SqlLexRules.BlockEndLine"/> — Oracle '/', SQL Server GO)</summary>
             SlashLine
         }
 
@@ -788,11 +851,13 @@ namespace MyPlugin
         }
 
         /// <summary>
-        /// 한 번 훑어 토큰으로 나눈다. 공백은 버리고, 문자열·주석 밖의 빈 줄과 '/'만 있는 줄은 표시 토큰으로 남긴다.
-        /// 줄바꿈은 CRLF·LF·CR. 닫히지 않은 문자열·주석·따옴표 식별자는 끝까지로 본다.
+        /// 한 번 훑어 토큰으로 나눈다. 공백은 버리고, 문자열·주석 밖의 빈 줄과 구분 줄('/'·GO)은 표시 토큰으로 남긴다.
+        /// 줄바꿈은 CRLF·LF·CR. 닫히지 않은 문자열·주석·따옴표 식별자는 끝까지로 본다. DBMS별 문법은 rules가 켠다.
         /// </summary>
-        private static List<Token> Tokenize(string s)
+        private static List<Token> Tokenize(string s, SqlLexRules rules)
         {
+            var slashLine = rules.BlockEndLine == "/";
+            var goLine = rules.BlockEndLine == "GO";
             var tokens = new List<Token>();
             var n = s.Length;
             var pos = 0;
@@ -828,14 +893,39 @@ namespace MyPlugin
                 }
                 else if (c == '/' && next == '*')
                 {
-                    var close = s.IndexOf("*/", pos + 2, StringComparison.Ordinal);
-                    pos = close < 0 ? n : close + 2;
+                    if (rules.NestedComments)
+                    {
+                        pos = NestedCommentEnd(s, pos + 2);
+                    }
+                    else
+                    {
+                        var close = s.IndexOf("*/", pos + 2, StringComparison.Ordinal);
+                        pos = close < 0 ? n : close + 2;
+                    }
                     type = TokenType.BlockComment;
                 }
-                else if (c == '/' && !lineHasContent && IsBlankUntilLineEnd(s, pos + 1))
+                else if (slashLine && c == '/' && !lineHasContent && IsBlankUntilLineEnd(s, pos + 1))
                 {
                     pos++;
                     type = TokenType.SlashLine;
+                }
+                else if (goLine && !lineHasContent && (c == 'G' || c == 'g') && (next == 'O' || next == 'o')
+                    && !(pos + 2 < n && IsWordPart(s[pos + 2])) && IsBlankUntilLineEnd(s, pos + 2))
+                {
+                    pos += 2;
+                    type = TokenType.SlashLine;
+                }
+                else if (rules.BracketIdentifier && c == '[')
+                {
+                    pos = BracketEnd(s, pos + 1);
+                    type = TokenType.QuotedIdentifier;
+                }
+                else if (rules.DollarQuote && c == '$' && DollarTagEnd(s, pos) > 0)
+                {
+                    var tagEnd = DollarTagEnd(s, pos);
+                    var close = s.IndexOf(s.Substring(pos, tagEnd - pos), tagEnd, StringComparison.Ordinal);
+                    pos = close < 0 ? n : close + (tagEnd - pos);
+                    type = TokenType.Literal;
                 }
                 else if (c == '\'')
                 {
@@ -858,7 +948,7 @@ namespace MyPlugin
                     if (pos < n && s[pos] == '\'')
                     {
                         var length = pos - start;
-                        if (IsQPrefix(s, start, length) && pos + 1 < n && !char.IsWhiteSpace(s[pos + 1]))
+                        if (rules.QQuote && IsQPrefix(s, start, length) && pos + 1 < n && !char.IsWhiteSpace(s[pos + 1]))
                         {
                             pos = QuoteEnd(s, pos + 1);
                             type = TokenType.Literal;
@@ -866,6 +956,11 @@ namespace MyPlugin
                         else if (length == 1 && (c == 'n' || c == 'N'))
                         {
                             pos = StringEnd(s, pos + 1);
+                            type = TokenType.Literal;
+                        }
+                        else if (rules.EscapeString && length == 1 && (c == 'e' || c == 'E'))
+                        {
+                            pos = EscapeStringEnd(s, pos + 1);
                             type = TokenType.Literal;
                         }
                     }
@@ -920,6 +1015,87 @@ namespace MyPlugin
                 pos++;
             }
             return s.Length;
+        }
+
+        // pos: E' 다음. \는 다음 글자를 그대로(\'·\\), ''도 따옴표 한 글자(PostgreSQL).
+        private static int EscapeStringEnd(string s, int pos)
+        {
+            while (pos < s.Length)
+            {
+                if (s[pos] == '\\')
+                {
+                    pos += 2;
+                    continue;
+                }
+                if (s[pos] == '\'')
+                {
+                    if (pos + 1 < s.Length && s[pos + 1] == '\'')
+                    {
+                        pos += 2;
+                        continue;
+                    }
+                    return pos + 1;
+                }
+                pos++;
+            }
+            return s.Length;
+        }
+
+        // pos: /* 다음. 안의 /*마다 한 겹 더(PostgreSQL). 닫히지 않으면 끝까지.
+        private static int NestedCommentEnd(string s, int pos)
+        {
+            var depth = 1;
+            while (pos + 1 < s.Length)
+            {
+                if (s[pos] == '/' && s[pos + 1] == '*')
+                {
+                    depth++;
+                    pos += 2;
+                }
+                else if (s[pos] == '*' && s[pos + 1] == '/')
+                {
+                    pos += 2;
+                    if (--depth == 0)
+                        return pos;
+                }
+                else
+                {
+                    pos++;
+                }
+            }
+            return s.Length;
+        }
+
+        // pos: [ 다음. ]]는 ] 한 글자(SQL Server). 닫히지 않으면 끝까지.
+        private static int BracketEnd(string s, int pos)
+        {
+            while (pos < s.Length)
+            {
+                if (s[pos] == ']')
+                {
+                    if (pos + 1 < s.Length && s[pos + 1] == ']')
+                    {
+                        pos += 2;
+                        continue;
+                    }
+                    return pos + 1;
+                }
+                pos++;
+            }
+            return s.Length;
+        }
+
+        // pos: '$'. 여는 달러 따옴표($$ 또는 $태그$ — 태그는 글자·_로 시작, 글자·숫자·_)면 그 끝(닫는 $ 다음), 아니면 -1($1 위치 매개변수 등).
+        private static int DollarTagEnd(string s, int pos)
+        {
+            var i = pos + 1;
+            if (i < s.Length && s[i] == '$')
+                return i + 1;
+            if (i >= s.Length || !(char.IsLetter(s[i]) || s[i] == '_'))
+                return -1;
+            while (i < s.Length && (char.IsLetterOrDigit(s[i]) || s[i] == '_'))
+                i++;
+            return i < s.Length && s[i] == '$' ? i + 1 : -1;
         }
 
         // pos: q' 다음의 여는 구분자. [ { ( < 는 짝 문자로, 그 밖은 같은 문자로 닫고 바로 뒤에 '가 와야 끝난다.

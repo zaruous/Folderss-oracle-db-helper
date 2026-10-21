@@ -27,6 +27,9 @@ namespace MyPlugin
 
         ISqlDialect Dialect { get; }
 
+        /// <summary>문장 나누기·구문 강조 규칙(SQL 탭이 그 탭 대상 DB의 것을 쓴다).</summary>
+        SqlLexRules Lex { get; }
+
         IMetadataProvider Metadata { get; }
 
         /// <summary>성능 모니터 섹션(기본 정보·저장 공간·로그·잠금·세션 …). 지원하지 않으면 <see cref="NoMonitor.Instance"/>.</summary>

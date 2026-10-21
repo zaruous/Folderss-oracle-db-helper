@@ -132,6 +132,37 @@ namespace MyPlugin.Tests
         }
 
         [PgFact]
+        public async Task Script_SplitWithPostgresRules_RunsDollarBodiesAndTransactions()
+        {
+            // SQL 탭과 같은 경로: 공급자 규칙(Lex)으로 나눠 차례로 실행. 만드는 객체는 세션 임시 스키마(pg_temp)뿐 — 연결을 닫으면 없어진다
+            const string script = "CREATE FUNCTION pg_temp.add1(x int) RETURNS int LANGUAGE plpgsql AS $$\n"
+                + "BEGIN\n  -- 본문 안의 ; 와 주석\n  RETURN x + 1;\nEND;\n$$;\n"
+                + "DO $body$ BEGIN PERFORM pg_temp.add1(1); END $body$;\n"
+                + "BEGIN;\n"
+                + "SELECT pg_temp.add1(41) AS v, E'it\\'s' AS s, $q$a;b$q$ AS d /* 바깥 /* 안쪽 */ 주석 */;\n"
+                + "COMMIT;";
+            using (var session = await OpenAsync())
+            {
+                var statements = SqlScript.SplitForRun(script, session.Provider.Lex);
+                _output.WriteLine(string.Join("\n---\n", statements.Select(st => st.Text)));
+                Assert.Equal(5, statements.Count);
+                ExecuteResult select = null;
+                foreach (var statement in statements)
+                {
+                    var result = await session.ExecuteAsync(statement, 10);
+                    if (statement.Kind == SqlKind.Query)
+                        select = result;
+                }
+                Assert.NotNull(select);
+                Assert.Equal(new[] { "42", "it's", "a;b" }, select.Rows.Single());
+                // 강조 구간: 함수 본문 $$…$$, $body$…$body$, E'…', $q$…$q$는 문자열, 중첩 주석은 하나
+                var spans = SqlScript.HighlightSpans(script, session.Provider.Lex);
+                Assert.Equal(4, spans.Count(sp => sp.Kind == SqlSpanKind.String));
+                Assert.Single(spans, sp => sp.Kind == SqlSpanKind.Comment);
+            }
+        }
+
+        [PgFact]
         public async Task Execute_Select_Cursor_And_QueryTable_Probe()
         {
             using (var session = await OpenAsync())

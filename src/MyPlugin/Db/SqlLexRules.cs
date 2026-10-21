@@ -14,7 +14,8 @@ namespace MyPlugin
             QQuote = true,
             Blocks = true,
             BlockEndLine = "/",
-            ExecAsPlSqlBlock = true
+            ExecAsPlSqlBlock = true,
+            Keywords = SqlKeywords.Of(SqlKeywords.Common, SqlKeywords.Oracle)
         };
 
         /// <summary>
@@ -26,7 +27,8 @@ namespace MyPlugin
             Name = "PostgreSQL",
             DollarQuote = true,
             EscapeString = true,
-            NestedComments = true
+            NestedComments = true,
+            Keywords = SqlKeywords.Of(SqlKeywords.Common, SqlKeywords.Postgres)
         };
 
         /// <summary>
@@ -39,7 +41,8 @@ namespace MyPlugin
             BracketIdentifier = true,
             Blocks = true,
             BlockEndLine = "GO",
-            BeginTranIsStatement = true
+            BeginTranIsStatement = true,
+            Keywords = SqlKeywords.Of(SqlKeywords.Common, SqlKeywords.SqlServer)
         };
 
         private SqlLexRules() { }
@@ -72,5 +75,8 @@ namespace MyPlugin
 
         /// <summary>EXEC p(…) → BEGIN p(…); END;(SQL*Plus처럼, Oracle).</summary>
         public bool ExecAsPlSqlBlock { get; private set; }
+
+        /// <summary>구문 강조 키워드: 공통 SQL(문장·절·조건·DDL·트랜잭션·블록·자료형) + 이 DBMS 것(Oracle MINUS·VARCHAR2, PostgreSQL LIMIT·RETURNING, SQL Server TOP·GO …).</summary>
+        public SqlKeywords Keywords { get; private set; }
     }
 }

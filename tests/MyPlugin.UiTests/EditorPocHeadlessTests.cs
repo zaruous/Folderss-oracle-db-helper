@@ -59,19 +59,17 @@ namespace MyPlugin.UiTests
                 await Idle(ui);
                 var lines = ui.Run(() => { dynamic ed = editor; return (int)ed.TextArea.TextView.VisualLines.Count; });
                 Assert.True(lines > 10, "그려진 줄이 " + lines + "개뿐입니다.");
-                // 첫 줄(-- 줄 주석 한글)은 전부 주석색, 둘째 줄 앞(SELECT)은 주석색이 아니다
+                // 첫 줄(-- 줄 주석 한글)은 주석색, 둘째 줄 SELECT는 키워드색, 'a -- 문자열 안'은 문자열색
+                var d1 = PocD1(plugin);
                 var colors = ui.Run(() =>
                 {
-                    dynamic ed = editor;
-                    var comment = (Brush)Field(Colorizer(editor), "Comment");
-                    var first = new List<object>();
-                    foreach (var element in ed.TextArea.TextView.VisualLines[0].Elements)
-                        first.Add(element.TextRunProperties.ForegroundBrush);
-                    object second = ed.TextArea.TextView.VisualLines[1].Elements[0].TextRunProperties.ForegroundBrush;
-                    return (first.All(b => ReferenceEquals(b, comment)), ReferenceEquals(second, comment), first.Count);
+                    var palette = Palette(plugin);
+                    return (ForegroundAt(editor, 0) == palette.Comment, ForegroundAt(editor, d1.IndexOf("SELECT", StringComparison.Ordinal)) == palette.Keyword,
+                        ForegroundAt(editor, d1.IndexOf("'a --", StringComparison.Ordinal)) == palette.String);
                 });
-                Assert.True(colors.Item1, "첫 줄 주석이 주석색으로 칠해지지 않았습니다(요소 " + colors.Item3 + "개).");
-                Assert.False(colors.Item2, "둘째 줄 SELECT가 주석색입니다.");
+                Assert.True(colors.Item1, "첫 줄 주석이 주석색이 아닙니다.");
+                Assert.True(colors.Item2, "둘째 줄 SELECT가 키워드색이 아닙니다.");
+                Assert.True(colors.Item3, "문자열이 문자열색이 아닙니다.");
                 var load = ui.Run(() => MeasureText(poc).Split('\n')[0]);
                 _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, "poc-d1")));
 
@@ -82,7 +80,7 @@ namespace MyPlugin.UiTests
 
                 Report(plugin, "A 플러그인 로드",
                     "PluginLoadContext에서 " + assembly.GetName().Name + " " + assembly.GetName().Version + " 로드(" + Path.GetFileName(Path.GetDirectoryName(assembly.Location)) + "\\…), "
-                    + "기본 템플릿 적용, 그려진 줄 " + lines + "개, 주석 색칠 확인, UI 예외 0", "✓");
+                    + "기본 템플릿 적용, 그려진 줄 " + lines + "개, 주석·문자열·키워드 색칠 확인, UI 예외 0", "✓");
                 Report(plugin, "A PoC 창 자체 측정", load + " / " + d3, "");
             }
             finally
@@ -92,39 +90,170 @@ namespace MyPlugin.UiTests
             Assert.Empty(ui.TakeErrors());
         }
 
-        // ================= B. 성능 =================
+        // ================= 키워드 색 (DBMS별) =================
+
+        /// <summary>확인할 곳: needle의 nth번째 위치 첫 글자가 kind 색인지("Plain"이면 보통 글자색).</summary>
+        private sealed class ColorCheck
+        {
+            public ColorCheck(string needle, string kind, int nth = 0, int skip = 0)
+            {
+                Needle = needle;
+                Kind = kind;
+                Nth = nth;
+                Skip = skip;
+            }
+
+            public string Needle { get; }
+            public string Kind { get; }
+            public int Nth { get; }
+            /// <summary>needle 안에서 확인할 글자 위치(예: "t.date"의 date → 2).</summary>
+            public int Skip { get; }
+        }
 
         [UiFact]
-        public async Task B_Performance_AgainstTextBox()
+        public async Task K_Keywords_ColoredByRules()
         {
             var ui = UiThread.Instance;
             var plugin = PluginUnderTest.Load(ui);
             var (main, poc, editor) = await OpenPoc(ui, plugin);
-            // 셋을 같은 크기 창에서 같은 데이터로: PoC 편집기(글이 바뀔 때마다 전체 다시 칠함), 강조 없는 AvalonEdit(편집기 자체 비용), 지금 SQL 탭 TextBox
+            const string oracle = "-- 주문 조회 (SELECT는 주석 안)\n"
+                + "SELECT o.order_id, o.status AS \"Select\", t.date, :from\n"
+                + "  FROM orders o\n"
+                + "  JOIN customers c ON c.id = o.customer_id\n"
+                + " WHERE o.status = 'SELECT FROM'\n"
+                + "   AND o.amount BETWEEN 10 AND 100\n"
+                + "   AND c.grade IS NOT NULL\n"
+                + " GROUP BY o.order_id\n"
+                + " ORDER BY o.order_id DESC;\n"
+                + "CREATE TABLE t_order (\n"
+                + "  id   NUMBER(10) PRIMARY KEY,\n"
+                + "  name VARCHAR2(100) NOT NULL\n"
+                + ");\n"
+                + "SELECT TOP 1 x FROM a MINUS SELECT x FROM b;\n";
+            const string postgres = "SELECT id FROM t WHERE name ILIKE 'a%' ORDER BY id LIMIT 10;\n"
+                + "INSERT INTO t (id) VALUES (1) RETURNING id;\n"
+                + "CREATE FUNCTION f() RETURNS int LANGUAGE plpgsql AS $$ BEGIN RETURN 1; END $$;\n"
+                + "SELECT x FROM a MINUS SELECT x FROM b;\n";
+            const string sqlServer = "SELECT TOP 10 [select], @from FROM dbo.t WHERE id = @id;\n"
+                + "GO\n"
+                + "DECLARE @x NVARCHAR(10) = N'from';\n"
+                + "CREATE TABLE s (id INT IDENTITY(1,1) PRIMARY KEY, at DATETIME2);\n";
+            var cases = new[]
+            {
+                ("Oracle", oracle, new[]
+                {
+                    new ColorCheck("-- 주문", "Comment"), new ColorCheck("SELECT o.", "Keyword"), new ColorCheck("AS \"", "Keyword"), new ColorCheck("\"Select\"", "Plain", skip: 1),
+                    new ColorCheck("t.date", "Plain", skip: 2), new ColorCheck(":from", "Plain", skip: 1), new ColorCheck("FROM orders", "Keyword"), new ColorCheck("orders o", "Plain"),
+                    new ColorCheck("JOIN", "Keyword"), new ColorCheck("ON c", "Keyword"), new ColorCheck("WHERE", "Keyword"), new ColorCheck("'SELECT FROM'", "String", skip: 1),
+                    new ColorCheck("AND o.amount", "Keyword"), new ColorCheck("BETWEEN", "Keyword"), new ColorCheck("IS NOT", "Keyword"), new ColorCheck("NOT NULL", "Keyword"),
+                    new ColorCheck("NULL\n", "Keyword"), new ColorCheck("GROUP", "Keyword"), new ColorCheck("ORDER", "Keyword"), new ColorCheck("DESC", "Keyword"),
+                    new ColorCheck("CREATE", "Keyword"), new ColorCheck("TABLE", "Keyword"), new ColorCheck("NUMBER", "Keyword"), new ColorCheck("PRIMARY", "Keyword"),
+                    new ColorCheck("KEY", "Keyword"), new ColorCheck("VARCHAR2", "Keyword"), new ColorCheck("t_order", "Plain"), new ColorCheck("MINUS", "Keyword"),
+                    new ColorCheck("TOP", "Plain")
+                }),
+                ("PostgreSQL", postgres, new[]
+                {
+                    new ColorCheck("ILIKE", "Keyword"), new ColorCheck("LIMIT", "Keyword"), new ColorCheck("RETURNING", "Keyword"), new ColorCheck("LANGUAGE", "Keyword"),
+                    new ColorCheck("plpgsql", "Plain"), new ColorCheck("BEGIN", "String"), new ColorCheck("'a%'", "String"), new ColorCheck("MINUS", "Plain")
+                }),
+                ("SQL Server", sqlServer, new[]
+                {
+                    new ColorCheck("TOP", "Keyword"), new ColorCheck("[select]", "Plain", skip: 1), new ColorCheck("@from", "Plain", skip: 1), new ColorCheck("FROM dbo", "Keyword"),
+                    new ColorCheck("GO", "Keyword"), new ColorCheck("DECLARE", "Keyword"), new ColorCheck("NVARCHAR", "Keyword"), new ColorCheck("N'from'", "String"),
+                    new ColorCheck("IDENTITY", "Keyword"), new ColorCheck("DATETIME2", "Keyword")
+                })
+            };
+            try
+            {
+                var rows = new List<string>();
+                var wrong = new List<string>();
+                foreach (var (rules, text, checks) in cases)
+                {
+                    ui.Run(() => Ui.Choose(Ui.ById<ComboBox>(poc, "PocRules"), rules));
+                    ui.Run(() => SetEditorText(editor, text));
+                    await Idle(ui);
+                    var results = ui.Run(() =>
+                    {
+                        var palette = Palette(plugin);
+                        var plain = ColorOf(((Control)editor).Foreground);
+                        return checks.Select(c =>
+                        {
+                            var at = Nth(text, c.Needle, c.Nth) + c.Skip;
+                            var color = ForegroundAt(editor, at);
+                            var expected = c.Kind == "Comment" ? palette.Comment : c.Kind == "String" ? palette.String : c.Kind == "Keyword" ? palette.Keyword : plain;
+                            return (c, color == expected);
+                        }).ToList();
+                    });
+                    foreach (var (c, ok) in results)
+                    {
+                        if (!ok)
+                            wrong.Add(rules + " '" + c.Needle + "' → " + c.Kind + " 아님");
+                    }
+                    _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, "poc-keywords-" + rules.Replace(" ", ""))));
+                    rows.Add(rules + " " + results.Count(r => r.Item2) + "/" + results.Count);
+                }
+                // 밝은 테마에서도 한 장
+                ui.Run(() => { UiThread.ApplyTheme("Light"); Ui.Choose(Ui.ById<ComboBox>(poc, "PocRules"), "Oracle"); SetEditorText(editor, oracle); });
+                await Idle(ui);
+                _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, "poc-keywords-Oracle-Light")));
+                Report(plugin, "키워드 색 (SELECT·FROM·JOIN·WHERE 조건·GROUP/ORDER BY·CREATE TABLE·자료형, DBMS별 목록, 문자열·주석·식별자·t.date·:from·@from·[select]는 아님)",
+                    string.Join(" · ", rows) + (wrong.Count == 0 ? "" : " — 틀림: " + string.Join(", ", wrong)), Judge(wrong.Count == 0));
+                Assert.Empty(wrong);
+            }
+            finally
+            {
+                ui.Run(() => { UiThread.ApplyTheme("Black"); poc.Close(); main.Close(); });
+            }
+            Assert.Empty(ui.TakeErrors());
+        }
+
+        // ================= B. 성능 =================
+
+        [UiFact]
+        public async Task B_Performance_IncrementalFullTextBox()
+        {
+            var ui = UiThread.Instance;
+            var plugin = PluginUnderTest.Load(ui);
+            var (main, poc, editor) = await OpenPoc(ui, plugin);
+            // 같은 크기 창에서 같은 데이터로: 강조를 붙인 AvalonEdit(SqlEditorHighlighting — 4단계가 쓸 것, PoC 창의 측정 글 갱신 없이; 증분 / 전체 다시 계산),
+            // 강조 없는 AvalonEdit(편집기 자체 비용), 지금 SQL 탭 TextBox
+            var litWindow = ui.Run(() => BareEditorWindow(editor));
+            var lit = ui.Run(() => (FrameworkElement)litWindow.Content);
+            dynamic highlighting = ui.Run(() => AttachHighlighting(plugin, lit));
             var bareWindow = ui.Run(() => BareEditorWindow(editor));
             var bare = ui.Run(() => (FrameworkElement)bareWindow.Content);
             var baseline = ui.Run(() => BaselineWindow(editor));
             var box = ui.Run(() => (TextBox)baseline.Content);
-            var targets = new[] { AvalonTarget("AvalonEdit+강조", editor), AvalonTarget("AvalonEdit(강조 없음)", bare), TextBoxTarget(box) };
+            var incremental = AvalonTarget("증분", lit, () => highlighting.Incremental = true);
+            var full = AvalonTarget("전체", lit, () => highlighting.Incremental = false);
+            var targets = new[] { incremental, full, AvalonTarget("강조 없음", bare, null), TextBoxTarget(box) };
+            var datasets = new[]
+            {
+                ("D2 실무형 1만 줄", PocD2(plugin, 10000)),
+                ("D3-1 1만 줄", PocD3(plugin, 10000)),
+                ("D3-2 5만 줄", PocD3(plugin, 50000)),
+                ("D3-3 10만 줄", PocD3(plugin, 100000)),
+                ("D4-3 전부 주석 10만 줄", PocD43(plugin, 100000)),
+                ("D4-1 한 줄 1MB", PocD41(plugin, 1 << 20))
+            };
+            var editorSpans = EditorSpans(plugin);
             try
             {
-                foreach (var size in new[] { ("D3-1", 10000), ("D3-2", 50000), ("D3-3", 100000) })
+                foreach (var (name, text) in datasets)
                 {
-                    var text = PocD3(plugin, size.Item2);
-                    var mb = (text.Length * 2 / 1024.0 / 1024.0).ToString("F1", CultureInfo.InvariantCulture) + "MB";
+                    var size = name + " (" + Lines(text).ToString("N0", CultureInfo.InvariantCulture) + "줄 · " + (text.Length * 2 / 1024.0 / 1024.0).ToString("F1", CultureInfo.InvariantCulture) + "MB)";
                     var load = targets.ToDictionary(t => t, t => new List<double>());
                     for (var i = 0; i < 3; i++)
                     {
                         foreach (var t in targets)
                         {
-                            ui.Run(() => t.SetText(""));
+                            ui.Run(() => { t.Select?.Invoke(); t.SetText(""); });
                             await Idle(ui);
                             load[t].Add(await TimeUntilIdle(ui, () => t.SetText(text)));
                         }
                     }
-                    Report(plugin, "B 넣기→첫 화면 " + size.Item1 + " (" + size.Item2.ToString("N0", CultureInfo.InvariantCulture) + "줄 · " + mb + ", 3회 중앙값)",
-                        string.Join(" · ", targets.Select(t => t.Name + " " + Ms(Median(load[t])))),
-                        Judge(Median(load[targets[0]]) <= Median(load[targets[2]]) * 1.2 || Median(load[targets[0]]) < 200));
+                    Report(plugin, "B 넣기→첫 화면 " + size + " (3회 중앙값)", string.Join(" · ", targets.Select(t => t.Name + " " + Ms(Median(load[t])))),
+                        Judge(Median(load[incremental]) <= Median(load[targets[3]]) * 1.2 || Median(load[incremental]) < 200));
 
                     // 키 입력: 가운데·끝에서 한 글자씩 10번, 입력부터 (다시 칠하고) 그려서 한가해질 때까지
                     foreach (var atEnd in new[] { false, true })
@@ -132,6 +261,8 @@ namespace MyPlugin.UiTests
                         var typing = targets.ToDictionary(t => t, t => new List<double>());
                         foreach (var t in targets)
                         {
+                            ui.Run(() => { t.Select?.Invoke(); t.SetText(text); });
+                            await Idle(ui);
                             ui.Run(() => t.CaretAt(atEnd));
                             await Idle(ui);
                             var before = ui.Run(t.Length);
@@ -139,43 +270,54 @@ namespace MyPlugin.UiTests
                                 typing[t].Add(await TimeUntilIdle(ui, () => TypeText(t.Input(), "x")));
                             Assert.Equal(10, ui.Run(t.Length) - before);
                         }
-                        Report(plugin, "B 키 입력 지연 " + size.Item1 + " " + (atEnd ? "끝" : "가운데") + " (10회 중앙값 · 최대)",
+                        Report(plugin, "B 키 입력 " + name + " " + (atEnd ? "끝" : "가운데") + " (10회 중앙값 · 최대)",
                             string.Join(" / ", targets.Select(t => t.Name + " " + Ms(Median(typing[t])) + " · " + Ms(typing[t].Max()))),
-                            Judge(Median(typing[targets[0]]) <= 16));
+                            Judge(Median(typing[incremental]) <= 16));
                     }
 
-                    // 강조 구간 계산 단독(순수 함수, 5회 중앙값) — Linux 참고값과 같은 잣대
-                    var spans = new List<double>();
-                    var highlight = HighlightSpans(plugin);
+                    // 강조 구간 계산 단독(주석·문자열·키워드, 순수 함수, 5회 중앙값)
+                    var alone = new List<double>();
+                    var count = 0;
                     for (var i = 0; i < 5; i++)
                     {
                         var watch = Stopwatch.StartNew();
-                        highlight(text);
-                        spans.Add(watch.Elapsed.TotalMilliseconds);
+                        count = editorSpans(text);
+                        alone.Add(watch.Elapsed.TotalMilliseconds);
                     }
-                    Report(plugin, "B 강조 구간 계산 단독 " + size.Item1 + " (5회 중앙값)", Ms(Median(spans)), Judge(Median(spans) <= 16));
+                    Report(plugin, "B 강조 구간 전체 계산 단독 " + name + " (5회 중앙값)", Ms(Median(alone)) + " · 구간 " + count.ToString("N0", CultureInfo.InvariantCulture) + "개", "참고");
                 }
 
-                // D4-2: 10만 줄 맨 앞에 /* 넣기 → 문서 전체가 주석, 빼기 → 원래대로 (각 3회)
+                // 문서 뒤쪽 색이 뒤집히는 고치기(10만 줄): 맨 앞 /* 넣기·빼기(D4-2 — 첫 */까지), 가운데 SELECT 줄 앞 ' 넣기·빼기(뒤 문자열 짝이 어긋남)
                 var big = PocD3(plugin, 100000);
-                foreach (var t in targets)
-                    ui.Run(() => t.SetText(big));
-                await Idle(ui);
-                var insert = new List<double>();
-                var remove = new List<double>();
-                for (var i = 0; i < 3; i++)
+                var middle = big.IndexOf("\r\nSELECT a, b, c", big.Length / 2, StringComparison.Ordinal) + 2;
+                foreach (var t in new[] { incremental, full })
                 {
-                    insert.Add(await TimeUntilIdle(ui, () => { dynamic ed = editor; ed.Document.Insert(0, "/*"); }));
-                    remove.Add(await TimeUntilIdle(ui, () => { dynamic ed = editor; ed.Document.Remove(0, 2); }));
+                    ui.Run(() => { t.Select(); t.SetText(big); });
+                    await Idle(ui);
+                    var comment = new List<double>();
+                    var quote = new List<double>();
+                    var scanned = new List<string>();
+                    for (var i = 0; i < 3; i++)
+                    {
+                        comment.Add(await TimeUntilIdle(ui, () => { dynamic ed = lit; ed.Document.Insert(0, "/*"); }));
+                        scanned.Add(ui.Run(() => "/* 넣기 " + Scanned(highlighting)));
+                        comment.Add(await TimeUntilIdle(ui, () => { dynamic ed = lit; ed.Document.Remove(0, 2); }));
+                        quote.Add(await TimeUntilIdle(ui, () => { dynamic ed = lit; ed.Document.Insert(middle, "'"); }));
+                        scanned.Add(ui.Run(() => "' 넣기 " + Scanned(highlighting)));
+                        quote.Add(await TimeUntilIdle(ui, () => { dynamic ed = lit; ed.Document.Remove(middle, 1); }));
+                    }
+                    Report(plugin, "B 색이 뒤집히는 고치기 D3-3 " + t.Name + " (넣기·빼기 3회씩 중앙값)",
+                        "맨 앞 /*: " + Ms(Median(comment)) + " · 가운데 ': " + Ms(Median(quote)) + " (" + scanned[0] + " · " + scanned[1] + ")",
+                        Judge(Math.Max(Median(comment), Median(quote)) <= 1000));
                 }
-                Report(plugin, "B 전체 다시 칠하기 D4-2 (D3-3 맨 앞 /* 넣기·빼기, 3회 중앙값)", "넣기 " + Ms(Median(insert)) + " · 빼기 " + Ms(Median(remove)),
-                    Judge(Math.Max(Median(insert), Median(remove)) <= 1000));
 
                 // 스크롤: 10만 줄 끝으로 한 번에(3회), 가운데부터 한 화면씩 30번
                 var scrolls = new List<string>();
                 var pocPage = 0.0;
-                foreach (var t in targets)
+                foreach (var t in new[] { incremental, targets[2], targets[3] })
                 {
+                    ui.Run(() => { t.Select?.Invoke(); t.SetText(big); });
+                    await Idle(ui);
                     var end = new List<double>();
                     for (var i = 0; i < 3; i++)
                     {
@@ -184,7 +326,7 @@ namespace MyPlugin.UiTests
                         end.Add(await TimeUntilIdle(ui, t.ScrollToEnd));
                     }
                     var page = await PageScroll(ui, t.Scroll, t.ScrollTo);
-                    if (t == targets[0])
+                    if (t == incremental)
                         pocPage = Median(page);
                     scrolls.Add(t.Name + " 끝으로 " + Ms(Median(end)) + " · 한 화면 " + Ms(Median(page)) + " (최대 " + Ms(page.Max()) + ")");
                 }
@@ -218,18 +360,34 @@ namespace MyPlugin.UiTests
             }
             finally
             {
-                ui.Run(() => { baseline.Close(); bareWindow.Close(); poc.Close(); main.Close(); });
+                ui.Run(() => { baseline.Close(); bareWindow.Close(); litWindow.Close(); poc.Close(); main.Close(); });
             }
             Assert.Empty(ui.TakeErrors());
+        }
+
+        /// <summary>SqlEditorHighlighting.Attach(편집기, Oracle 규칙) — UI 스레드에서 부른다.</summary>
+        private static object AttachHighlighting(PluginUnderTest plugin, FrameworkElement editor)
+        {
+            var oracle = plugin.Assembly.GetType("MyPlugin.SqlLexRules", true).GetField("Oracle").GetValue(null);
+            return plugin.Assembly.GetType("MyPlugin.SqlEditorHighlighting", true).GetMethod("Attach").Invoke(null, new[] { editor, oracle });
+        }
+
+        /// <summary>마지막 강조 계산: 시간 · 읽은 글자 · 다시 칠한 범위. UI 스레드에서 부른다.</summary>
+        private static string Scanned(dynamic highlighting)
+        {
+            var last = highlighting.Last;
+            return Ms((double)last.Milliseconds) + "·읽음 " + ((int)last.Scanned).ToString("N0", CultureInfo.InvariantCulture) + "자·칠함 "
+                + ((int)last.Range).ToString("N0", CultureInfo.InvariantCulture) + "자";
         }
 
         /// <summary>성능 비교 대상 하나(동작은 UI 스레드에서 부른다).</summary>
         private sealed class Target
         {
             public string Name;
+            public Action Select;               // 이 대상으로 재기 전에(PoC 강조 방식 고르기). 없으면 null
             public Action<string> SetText;      // 글을 넣고 맨 위로
             public Func<int> Length;
-            public Action<bool> CaretAt;        // true면 끝, false면 가운데 줄 앞 — 그 줄이 보이게
+            public Action<bool> CaretAt;        // true면 끝, false면 가운데(가운데 줄 앞, 한 줄이면 그 줄 가운데) — 그 곳이 보이게
             public Func<UIElement> Input;       // 글자 입력을 받는 요소
             public Action ScrollToHome;
             public Action ScrollToEnd;
@@ -237,19 +395,22 @@ namespace MyPlugin.UiTests
             public Action<double> ScrollTo;
         }
 
-        private static Target AvalonTarget(string name, FrameworkElement editor)
+        private static Target AvalonTarget(string name, FrameworkElement editor, Action select)
         {
             dynamic ed = editor;
             return new Target
             {
                 Name = name,
+                Select = select,
                 SetText = text => { ed.Document.Text = text; ed.ScrollToHome(); },
                 Length = () => (int)ed.Document.TextLength,
                 CaretAt = atEnd =>
                 {
-                    int offset = atEnd ? ed.Document.TextLength : ed.Document.GetLineByNumber(Math.Max(1, (int)ed.Document.LineCount / 2)).Offset;
+                    int lines = ed.Document.LineCount;
+                    int offset = atEnd ? ed.Document.TextLength
+                        : lines <= 2 ? ed.Document.TextLength / 2 : ed.Document.GetLineByNumber(lines / 2).Offset;
                     ed.TextArea.Caret.Offset = offset;
-                    ed.ScrollToLine(ed.Document.GetLineByOffset(offset).LineNumber);
+                    ed.TextArea.Caret.BringCaretToView();
                 },
                 Input = () => (UIElement)ed.TextArea,
                 ScrollToHome = () => ed.ScrollToHome(),
@@ -268,8 +429,12 @@ namespace MyPlugin.UiTests
                 Length = () => box.Text.Length,
                 CaretAt = atEnd =>
                 {
-                    box.CaretIndex = atEnd ? box.Text.Length : box.GetCharacterIndexFromLineIndex(Math.Max(0, box.LineCount / 2));
+                    box.CaretIndex = atEnd ? box.Text.Length
+                        : box.LineCount <= 2 ? box.Text.Length / 2 : box.GetCharacterIndexFromLineIndex(box.LineCount / 2);
+                    var rect = box.GetRectFromCharacterIndex(box.CaretIndex);
                     box.ScrollToLine(box.GetLineIndexFromCharacterIndex(box.CaretIndex));
+                    if (!rect.IsEmpty)
+                        box.ScrollToHorizontalOffset(Math.Max(0, box.HorizontalOffset + rect.X - box.ViewportWidth / 2));
                 },
                 Input = () => box,
                 ScrollToHome = box.ScrollToHome,
@@ -277,6 +442,17 @@ namespace MyPlugin.UiTests
                 Scroll = () => (box.VerticalOffset, box.ViewportHeight, box.ExtentHeight),
                 ScrollTo = box.ScrollToVerticalOffset
             };
+        }
+
+        private static int Lines(string text)
+        {
+            var count = 1;
+            foreach (var c in text)
+            {
+                if (c == '\n')
+                    count++;
+            }
+            return text.EndsWith("\n", StringComparison.Ordinal) ? count - 1 : count;
         }
 
         // ================= D. 키 =================
@@ -403,22 +579,19 @@ namespace MyPlugin.UiTests
                 {
                     ui.Run(() => UiThread.ApplyTheme(theme));
                     await Idle(ui);
-                    // 테마만 바꾸고 글은 그대로일 때 바로 따라오는지(바탕은 리소스 참조, 주석색은 다시 계산할 때만 읽는다)
+                    // 테마만 바꾸고 글은 그대로일 때 바로 따라오는지: 바탕은 리소스 참조, 강조색은 바탕이 바뀌면 다시 칠한다 — 그려진 줄의 색으로 본다
                     var follows = ui.Run(() =>
                     {
-                        var panel = Resource("PanelBackground");
-                        var secondary = Resource("SecondaryText");
-                        var comment = ColorOf((Brush)Field(Colorizer(editor), "Comment"));
-                        return (ColorOf(((Control)editor).Background) == panel, comment == secondary);
+                        var palette = Palette(plugin);
+                        return (ColorOf(((Control)editor).Background) == Resource("PanelBackground"), ForegroundAt(editor, 0) == palette.Comment
+                            && ForegroundAt(editor, d1.IndexOf("SELECT", StringComparison.Ordinal)) == palette.Keyword);
                     });
                     if (!follows.Item2)
                         stale.Add(theme);
 
-                    // 다시 넣어 새 테마 색으로 칠하고 둘째 줄을 선택해 캡처
+                    // 둘째 줄을 선택해 캡처
                     ui.Run(() =>
                     {
-                        SetEditorText(editor, "");
-                        SetEditorText(editor, d1);
                         dynamic ed = editor;
                         ed.Select(ed.Document.GetLineByNumber(2).Offset, ed.Document.GetLineByNumber(2).Length);
                     });
@@ -427,26 +600,29 @@ namespace MyPlugin.UiTests
                     {
                         dynamic ed = editor;
                         var background = Resource("PanelBackground");
-                        var colorizer = Colorizer(editor);
+                        var text = Resource("PrimaryText");
+                        var comment = ForegroundAt(editor, 0).Value;
                         var selection = Over(ColorOf((Brush)ed.TextArea.SelectionBrush), background);
                         var selectionPixels = CountPixels((FrameworkElement)ed.TextArea, selection);
                         return new[]
                         {
-                            Contrast(Resource("PrimaryText"), background),
-                            Contrast(ColorOf((Brush)Field(colorizer, "Comment")), background),
-                            Contrast(ColorOf((Brush)Field(colorizer, "String")), background),
+                            Contrast(text, background),
+                            Contrast(comment, background),
+                            Contrast(ForegroundAt(editor, d1.IndexOf("'a --", StringComparison.Ordinal)).Value, background),
+                            Contrast(ForegroundAt(editor, d1.IndexOf("SELECT", StringComparison.Ordinal)).Value, background),
                             Contrast(ColorOf((Brush)ed.LineNumbersForeground), background),
-                            Contrast(Resource("PrimaryText"), selection),
-                            selectionPixels,
-                            (double)ed.TextArea.TextView.DefaultLineHeight
+                            Contrast(text, selection),
+                            Contrast(comment, text),
+                            selectionPixels
                         };
                     });
                     _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, "poc-theme-" + theme)));
-                    low += measured.Take(5).Count(v => v < 4.5);
+                    low += measured.Take(6).Count(v => v < 4.5);
                     rows.Add("| " + theme + " | " + Ratio(measured[0]) + " | " + Ratio(measured[1]) + " | " + Ratio(measured[2]) + " | " + Ratio(measured[3]) + " | "
-                        + Ratio(measured[4]) + " | " + (measured[5] > 0 ? "보임" : "**안 보임**") + " | " + (follows.Item1 ? "즉시" : "**안 바뀜**") + " / " + (follows.Item2 ? "즉시" : "**다시 칠할 때**") + " |");
+                        + Ratio(measured[4]) + " | " + Ratio(measured[5]) + " | " + measured[6].ToString("F1", CultureInfo.InvariantCulture) + (measured[6] < 2 ? " ✗" : "") + " | "
+                        + (measured[7] > 0 ? "보임" : "**안 보임**") + " | " + (follows.Item1 ? "즉시" : "**안 바뀜**") + " / " + (follows.Item2 ? "즉시" : "**다시 칠할 때**") + " |");
                 }
-                var table = "| 테마 | 글자 | 주석 | 문자열 | 줄 번호 | 선택 위 글자 | 포커스 없는 선택 | 테마 변경: 바탕 / 주석색 |\n|---|---|---|---|---|---|---|---|\n" + string.Join("\n", rows);
+                var table = "| 테마 | 글자 | 주석 | 문자열 | 키워드 | 줄 번호 | 선택 위 글자 | 주석:본문 구분 | 포커스 없는 선택 | 테마 변경: 바탕 / 강조색 |\n|---|---|---|---|---|---|---|---|---|---|\n" + string.Join("\n", rows);
                 File.WriteAllText(Path.Combine(plugin.ShotFolder, "poc-themes.md"), "바탕(PanelBackground) 대비 명암비(WCAG, 목표 4.5:1)\n\n" + table + "\n");
                 foreach (var row in rows)
                     _out.WriteLine("[테마] " + row);
@@ -464,14 +640,149 @@ namespace MyPlugin.UiTests
                 var textBoxLine = (double)plugin.Assembly.GetType("MyPlugin.SqlWorkspace", true).GetField("EditorLineHeight", BindingFlags.NonPublic | BindingFlags.Static).GetRawConstantValue();
 
                 Report(plugin, "E 테마 7종 명암비·선택·즉시 반영 (표: shots/poc-themes.md, 캡처 poc-theme-*.png)",
-                    "4.5:1 미만 칸 " + low + "개. 테마만 바꿨을 때 주석색이 바로 안 바뀌는 테마 " + stale.Count + "개(" + string.Join("·", stale) + ") — PoC는 다시 계산할 때만 색을 읽음",
-                    low == 0 && stale.Count == 0 ? "✓" : "4단계에서 고칠 것");
+                    "4.5:1 미만 칸 " + low + "개(글자·주석·문자열·키워드·줄 번호·선택 위 글자). 테마만 바꿨을 때 강조색이 바로 안 바뀌는 테마 " + stale.Count + "개"
+                    + (stale.Count == 0 ? "" : "(" + string.Join("·", stale) + ")"),
+                    Judge(low == 0 && stale.Count == 0));
                 Report(plugin, "E 줄 간격·글꼴 크기", "AvalonEdit 기본 줄 높이 글꼴 13: " + Px(lineHeight) + " · 16: " + Px(at16) + " / TextBox 지금 19px 고정(" + Px(textBoxLine) + ")",
                     "3단계에서 맞출지 결정");
             }
             finally
             {
                 ui.Run(() => { UiThread.ApplyTheme("Black"); poc.Close(); main.Close(); });
+            }
+            Assert.Empty(ui.TakeErrors());
+        }
+
+        // ================= 기능 둘러보기 캡처 (보고서용) =================
+
+        /// <summary>
+        /// 플러그인 단독 호스트에서 사람이 쓰는 순서대로 화면을 띄워 캡처한다(shots/tour-*.png, 보고서용): DB Helper 창 → 도구 메뉴 →
+        /// AvalonEdit PoC 창의 데이터·DBMS 규칙·강조 방식·테마별 모습. 각 장면에서 그려진 색이 기대대로인지도 몇 군데 확인한다.
+        /// </summary>
+        [UiFact]
+        public async Task T_FeatureTour_Captures()
+        {
+            var ui = UiThread.Instance;
+            var plugin = PluginUnderTest.Load(ui);
+            var main = ui.Run(() => plugin.OpenView());
+            Window poc = null;
+            var shots = new List<string>();
+            Action<string> snap = name => shots.Add(ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, name)));
+            try
+            {
+                await Idle(ui);
+                shots.Add(ui.Run(() => Ui.Snap(main, plugin.ShotFolder, "tour-01-main")));
+                // 도구 메뉴를 펼친 모습(팝업은 창 밖이라 팝업 내용만 따로)
+                var menuShot = ui.Run(() =>
+                {
+                    var tools = Ui.Find<Menu>(main).Items.OfType<MenuItem>().First(m => Ui.HeaderText(m).StartsWith("도구", StringComparison.Ordinal));
+                    tools.IsSubmenuOpen = true;
+                    return tools;
+                });
+                await Idle(ui);
+                var menuPath = ui.Run(() =>
+                {
+                    var popup = menuShot.Template.FindName("PART_Popup", menuShot) as System.Windows.Controls.Primitives.Popup;
+                    var child = popup == null ? null : popup.Child as FrameworkElement;
+                    // 숨은 데스크톱에서는 팝업 창이 배치되지 않을 수 있어 직접 잰다
+                    if (child != null && child.ActualWidth < 1)
+                    {
+                        child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                        child.Arrange(new Rect(child.DesiredSize));
+                    }
+                    var path = child == null || child.DesiredSize.Width < 1 ? null : Ui.SnapElement(child, (Brush)Application.Current.FindResource("SurfaceBackground"), plugin.ShotFolder, "tour-02-tools-menu");
+                    menuShot.IsSubmenuOpen = false;
+                    return path;
+                });
+                if (menuPath != null)
+                    shots.Add(menuPath);
+
+                ui.Run(() => Ui.Menu(main, "도구", "AvalonEdit PoC"));
+                poc = await ui.WaitFor(() => Ui.Window("AvalonEdit PoC"), Wait, "AvalonEdit PoC 창");
+                var editor = await ui.WaitFor(() => Ui.Find<FrameworkElement>(poc, e => e.GetType().FullName == EditorType), Wait, "AvalonEdit 편집기");
+                await Idle(ui);
+
+                // D1 경계 사례: 규칙 셋으로 같은 글이 다르게 칠해진다
+                ui.Run(() => Ui.Click(Ui.Button(poc, "D1 경계 사례")));
+                await ui.WaitUntil(() => MeasureText(poc).StartsWith("D1:", StringComparison.Ordinal), Wait, "D1");
+                await Idle(ui);
+                snap("tour-03-d1-oracle");
+                foreach (var rules in new[] { "PostgreSQL", "SQL Server" })
+                {
+                    ui.Run(() => Ui.Choose(Ui.ById<ComboBox>(poc, "PocRules"), rules));
+                    await Idle(ui);
+                    snap("tour-04-d1-" + rules.Replace(" ", "").ToLowerInvariant());
+                }
+
+                // D2 실무형(조회·조건·조인·집계, 테이블 정의, DML, PL/SQL 배치) — Oracle, 어두운·밝은 테마
+                ui.Run(() => Ui.Choose(Ui.ById<ComboBox>(poc, "PocRules"), "Oracle"));
+                ui.Run(() => Ui.Click(Ui.Button(poc, "D2 실무형 1천 줄")));
+                await ui.WaitUntil(() => MeasureText(poc).StartsWith("D2", StringComparison.Ordinal), Wait, "D2");
+                await Idle(ui);
+                snap("tour-05-d2-black");
+                var d2Ok = ui.Run(() =>
+                {
+                    var palette = Palette(plugin);
+                    dynamic ed = editor;
+                    string text = ed.Document.Text;
+                    return ForegroundAt(editor, text.IndexOf("SELECT", StringComparison.Ordinal)) == palette.Keyword
+                        && ForegroundAt(editor, text.IndexOf("-- =====", StringComparison.Ordinal)) == palette.Comment
+                        && ForegroundAt(editor, text.IndexOf("'PAID'", StringComparison.Ordinal)) == palette.String;
+                });
+                Assert.True(d2Ok, "D2 첫 화면의 키워드·주석·문자열 색이 기대와 다릅니다.");
+                foreach (var theme in AllThemes.Where(t => t != "Black"))
+                {
+                    ui.Run(() => UiThread.ApplyTheme(theme));
+                    await Idle(ui);
+                    snap("tour-06-d2-" + theme.ToLowerInvariant());
+                }
+                ui.Run(() => UiThread.ApplyTheme("Black"));
+                await Idle(ui);
+
+                // 10만 줄에서 가운데에 몇 글자 쳐 본 뒤 창 아래 측정 글: 증분 / 전체 다시 계산
+                ui.Run(() => Ui.Click(Ui.Button(poc, "D3-3 10만 줄")));
+                await ui.WaitUntil(() => MeasureText(poc).StartsWith("D3-3", StringComparison.Ordinal), Wait, "D3-3");
+                foreach (var mode in new[] { "증분 강조", "전체 다시 계산(비교용)" })
+                {
+                    ui.Run(() =>
+                    {
+                        Ui.Choose(Ui.ById<ComboBox>(poc, "PocMode"), mode);
+                        dynamic ed = editor;
+                        var line = ed.Document.GetLineByNumber((int)ed.Document.LineCount / 2);
+                        ed.TextArea.Caret.Offset = (int)line.Offset;
+                        ed.ScrollToLine((int)line.LineNumber);
+                    });
+                    await Idle(ui);
+                    foreach (var word in new[] { "SELECT", " ", "x", " ", "FROM", " ", "t", ";", "\n" })
+                    {
+                        await TimeUntilIdle(ui, () => { dynamic ed = editor; TypeText((UIElement)ed.TextArea, word); });
+                    }
+                    snap(mode.StartsWith("증분", StringComparison.Ordinal) ? "tour-07-incremental" : "tour-08-full");
+                }
+                ui.Run(() => Ui.Choose(Ui.ById<ComboBox>(poc, "PocMode"), "증분 강조"));
+
+                // D4-2: 맨 앞에 /* 를 넣으면 첫 */까지 주석이 된다
+                ui.Run(() => Ui.Click(Ui.Button(poc, "D4-2 맨 앞 /* 넣기·빼기")));
+                await Idle(ui);
+                ui.Run(() => { dynamic ed = editor; ed.ScrollToHome(); });
+                await Idle(ui);
+                snap("tour-09-d42-leading-comment");
+                ui.Run(() => Ui.Click(Ui.Button(poc, "D4-2 맨 앞 /* 넣기·빼기")));
+                await Idle(ui);
+
+                File.WriteAllLines(Path.Combine(plugin.ShotFolder, "tour-shots.txt"), shots.Select(Path.GetFileName));
+                foreach (var shot in shots)
+                    _out.WriteLine("캡처: " + shot);
+            }
+            finally
+            {
+                ui.Run(() =>
+                {
+                    UiThread.ApplyTheme("Black");
+                    if (poc != null)
+                        poc.Close();
+                    main.Close();
+                });
             }
             Assert.Empty(ui.TakeErrors());
         }
@@ -828,44 +1139,83 @@ namespace MyPlugin.UiTests
 
         // ================= 플러그인 안 (리플렉션) =================
 
-        private static object Colorizer(FrameworkElement editor)
-        {
-            dynamic ed = editor;
-            foreach (object transformer in ed.TextArea.TextView.LineTransformers)
-            {
-                if (transformer.GetType().Name == "SpanColorizer")
-                    return transformer;
-            }
-            throw new InvalidOperationException("PoC 색칠기(SpanColorizer)가 없습니다.");
-        }
-
-        private static object Field(object target, string name)
-        {
-            return target.GetType().GetField(name).GetValue(target);
-        }
-
         private static Type PocData(PluginUnderTest plugin)
         {
             return plugin.Assembly.GetType("MyPlugin.AvalonEditPocWindow+PocData", true);
         }
 
-        /// <summary>PoC 창의 D3 생성기(계획서 5절 구성 — 버튼과 같은 글).</summary>
-        private static string PocD3(PluginUnderTest plugin, int lines)
+        private static string PocData(PluginUnderTest plugin, string method, int value)
         {
-            return (string)PocData(plugin).GetMethod("D3").Invoke(null, new object[] { lines });
+            return (string)PocData(plugin).GetMethod(method).Invoke(null, new object[] { value });
         }
+
+        /// <summary>PoC 창의 시험 데이터 생성기(계획서 5절 구성 — 버튼과 같은 글): D2 실무형, D3 크기별, D4-1 한 줄, D4-3 전부 주석.</summary>
+        private static string PocD2(PluginUnderTest plugin, int lines) { return PocData(plugin, "D2", lines); }
+
+        private static string PocD3(PluginUnderTest plugin, int lines) { return PocData(plugin, "D3", lines); }
+
+        private static string PocD41(PluginUnderTest plugin, int chars) { return PocData(plugin, "D41", chars); }
+
+        private static string PocD43(PluginUnderTest plugin, int lines) { return PocData(plugin, "D43", lines); }
 
         private static string PocD1(PluginUnderTest plugin)
         {
             return (string)PocData(plugin).GetField("D1").GetValue(null);
         }
 
-        /// <summary>SqlScript.HighlightSpans(text, Oracle 규칙).</summary>
-        private static Action<string> HighlightSpans(PluginUnderTest plugin)
+        /// <summary>SqlScript.EditorSpans(text, Oracle 규칙) — 구간 수를 돌려준다.</summary>
+        private static Func<string, int> EditorSpans(PluginUnderTest plugin)
         {
             var oracle = plugin.Assembly.GetType("MyPlugin.SqlLexRules", true).GetField("Oracle").GetValue(null);
-            var method = plugin.Assembly.GetType("MyPlugin.SqlScript", true).GetMethod("HighlightSpans");
-            return text => method.Invoke(null, new[] { text, oracle });
+            var method = plugin.Assembly.GetType("MyPlugin.SqlScript", true).GetMethod("EditorSpans");
+            return text => ((System.Collections.ICollection)method.Invoke(null, new[] { text, oracle, (object)0 })).Count;
+        }
+
+        /// <summary>지금 테마에서 PoC가 쓸 강조색(SqlHighlightLogic.Palette — 플러그인과 같은 계산). UI 스레드에서 부른다.</summary>
+        private static (Color Comment, Color String, Color Keyword) Palette(PluginUnderTest plugin)
+        {
+            var method = plugin.Assembly.GetType("MyPlugin.SqlHighlightLogic", true).GetMethod("Palette");
+            var result = method.Invoke(null, new object[] { Rgb(Resource("PanelBackground")), Rgb(Resource("PrimaryText")), Rgb(Resource("SecondaryText")), Rgb(Resource("AccentBrush")) });
+            Func<string, Color> item = name =>
+            {
+                var rgb = (int)result.GetType().GetField(name).GetValue(result);
+                return System.Windows.Media.Color.FromRgb((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
+            };
+            return (item("Item1"), item("Item2"), item("Item3"));
+        }
+
+        private static int Rgb(Color color)
+        {
+            return (color.R << 16) | (color.G << 8) | color.B;
+        }
+
+        /// <summary>편집기가 그 위치 글자를 그리는 색(그 줄의 VisualLine 요소에서). UI 스레드에서 부른다.</summary>
+        private static Color? ForegroundAt(FrameworkElement editor, int offset)
+        {
+            dynamic ed = editor;
+            var line = ed.Document.GetLineByOffset(offset);
+            var visual = ed.TextArea.TextView.GetOrConstructVisualLine(line);
+            int relative = offset - (int)visual.FirstDocumentLine.Offset;
+            foreach (var element in visual.Elements)
+            {
+                int start = element.RelativeTextOffset;
+                int length = element.DocumentLength;
+                if (relative >= start && relative < start + length)
+                    return ((SolidColorBrush)element.TextRunProperties.ForegroundBrush).Color;
+            }
+            return null;
+        }
+
+        private static int Nth(string text, string needle, int nth)
+        {
+            var at = -1;
+            for (var i = 0; i <= nth; i++)
+            {
+                at = text.IndexOf(needle, at + 1, StringComparison.Ordinal);
+                if (at < 0)
+                    throw new InvalidOperationException("글에 '" + needle + "'가 " + (nth + 1) + "번 없습니다.");
+            }
+            return at;
         }
 
         // ================= 색 =================

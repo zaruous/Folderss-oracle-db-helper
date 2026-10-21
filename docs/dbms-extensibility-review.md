@@ -225,3 +225,15 @@ Ui ── 중립 모델만 안다(ConnectionProfile, SchemaInfo, DbObjectInfo, C
 - 화면: 접속 관리에 [DBMS] 콤보(라벨·기본 포트 전환, 접속 테스트는 공급자 연결), 연결 흐름이 `DbSession.Create`·`provider.Metadata.CurrentSchema()`, 트리·검색이 `session.Provider.Metadata`, F4·테이블 정의서는 `SupportsTableInfo`로 가드.
 - 테스트: `DbProvidersTests`(등록·호환·연결 문자열·PG SQL·읽기), `PostgresIT`(PG_IT_DSN·PG_IT_USER·PG_IT_PW가 있을 때 실제 서버로 연결·트리·검색·SELECT 커서·GCM 조회 — 사내 mesdb로 통과 확인).
 - 남은 것(3단계): `DbSession`의 Oracle 분기 14곳, `ValueFormatter`, `SqlScript` 방언, 이름 바꾸기(`OracleConnectionProfile → ConnectionProfile`). PostgreSQL의 테이블 정보·테이블 정의서는 1단계(메타데이터 공급자에 `TableInfo`·`TableSpec` 조회 추가)에서.
+
+## 9. `SqlScript` 방언 적용 기록 (2026-10-20, PR #23 · v1.10.0)
+
+8절 "남은 것(3단계)"의 `SqlScript` 방언은 규칙 표로 했다. 나머지(`DbSession`의 Oracle 분기, `ValueFormatter`, 이름 바꾸기)는 그대로 남아 있다.
+
+- 스캐너는 하나, DBMS마다 다른 문법은 규칙(`SqlLexRules`, 데이터)으로 켠다. 공급자가 `IDbProvider.Lex`로 내놓는다.
+  - Oracle: 그대로(`q'…'`, `/` 줄, PL/SQL 블록, EXEC → BEGIN … END;).
+  - PostgreSQL: `$$…$$`·`$태그$…$태그$`, `E'…'`, 중첩 블록 주석, 블록 없음(`BEGIN;`은 트랜잭션), `/` 줄은 구분자가 아님.
+  - SQL Server: `GO` 줄 배치 구분, `[식별자]`, `BEGIN TRAN`은 문장, `CREATE OR ALTER`도 블록.
+- `SqlScript.Split`·`SplitForRun`·`Parse`·`AtCaret`·`HighlightSpans`가 규칙을 받는다(null이면 Oracle — 기존 호출 그대로). SQL 탭은 탭 대상 DB 규칙으로 실행·강조한다.
+- 같은 규칙에 DBMS별 키워드·자료형(`SqlKeywords`)을 더해 SQL 편집기 구문 강조가 쓴다(PR #25·#26 — [`sql-editor-avalonedit-plan.md`](sql-editor-avalonedit-plan.md)).
+- 테스트: `SqlLexRulesTests`, PostgresIT 스크립트 실행.

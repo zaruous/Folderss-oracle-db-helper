@@ -11,12 +11,12 @@
       (다른 경로로 행 값을 바꾸면 잘린 표시 글이 LOB에 저장될 수 있음). 테스트로 묶을 것.
       → 편집 창과 같은 `EditBlockReason`으로 `UpdateBlockReason`·`InsertBlockReason`을 두고, 고칠 수 없는 칸이 바뀌었으면
       저장 전체를 거부(열 이름 넣은 메시지, Update/InsertStatement는 예외). 그대로면 SET에서 빠짐. INSERT는 잘린 값만 거부(LOB 열은 원래대로 뺌).
-      PR: · 버전:
+      PR: #19 · 버전: 1.9.0
 - [x] 편집 팝업 변경 관리 — 원래 값과 다른 칸 강조, 툴팁 "원래 값: …", 칸별 ↶ 되돌리기·[모두 되돌리기],
       이미 고친 행을 다시 열어도 원래 값(`ResultGridRow.Original`) 기준으로 비교.
-      → `RowEditChanges`(Ui/RowEditChangeLogic.cs). 새 행은 창을 열 때 값이 기준("처음 값"). PR: · 버전:
+      → `RowEditChanges`(Ui/RowEditChangeLogic.cs). 새 행은 창을 열 때 값이 기준("처음 값"). PR: #19 · 버전: 1.9.0
 - [x] 편집 팝업 닫기 확인 — 바꾼 칸이 있는데 [취소]·Esc면 "버리고 닫을까요?"(기본 [계속 편집]).
-      X·Alt+F4도 같다. 비교는 창을 열 때 값 기준(`RowEditChanges.HasChanges`), [확인]이면 묻지 않음. PR:  · 버전:
+      X·Alt+F4도 같다. 비교는 창을 열 때 값 기준(`RowEditChanges.HasChanges`), [확인]이면 묻지 않음. PR: #19 · 버전: 1.9.0
 - [ ] 그리드에서 바뀐 칸만 강조 — 행은 지금처럼 주황, 바뀐 칸은 더 진하게(찾기 강조와 같은 방식).
 - [ ] 복제 시 LOB 처리 — 지금은 LOB 열이 INSERT에서 빠져 NULL(원본 내용 손실, NOT NULL이면 오류).
       서버에서 그대로 복사(`INSERT … SELECT 원본 LOB FROM t WHERE 키 = :원본키`)하거나 최소한 복제 창에 경고.
@@ -29,30 +29,37 @@
       (PostgreSQL ctid는 UPDATE마다 바뀌어 제외, SQL Server는 행 주소 없음).
       → 기본 키 → NOT NULL 고유 키(열 수·이름순) → Oracle 보통 테이블 ROWID(`RowEditLogic.ChooseKey`).
       ROWID는 빠른 조회 SELECT 끝에 붙여 가져와 그리드에 보이기 전에 뗌, WHERE `ROWID = :rid`. 그 밖 DBMS는 편집 불가 그대로.
-      PR: · 버전:
+      PR: #19 · 버전: 1.9.0
 
 ## SQL 편집기 구문 강조 (AvalonEdit)
 
 계획·실측 항목·테스트 데이터: [`docs/sql-editor-avalonedit-plan.md`](../sql-editor-avalonedit-plan.md). 범위는 SQL 작업 영역 편집기만.
 
 - [x] 1. PoC 실측(Windows) — 플러그인 로드, 성능, 한글 IME, 단축키 충돌, 테마 7종. 막는 문제가 있으면 여기서 중단.
-      → 시험판 창은 main에 들어감(PR #24). 헤드리스 A·B·D·E 실측(2026-10-21, `EditorPocHeadlessTests`): 막는 문제 없음.
-      C 한글 IME: 사용자가 Folderss에서 써 보고 특별한 문제 없다고 함(2026-10-22) — 아래 항목은 하나씩 따로 보지 않았고, 쓰면서 문제가 보이면 따로 고친다. 키·줄 간격·키워드 범위는 2026-10-21 결정(계획서 8절) — 2-3에 반영.
+      → 시험판 창은 main에 들어감(PR #24). 헤드리스 A·B·D·E 실측(2026-10-21, `EditorPocHeadlessTests` — 지금 `SqlEditorHeadlessTests`): 막는 문제 없음.
+      C 한글 IME: 사용자가 Folderss에서 써 보고 특별한 문제 없다고 함(2026-10-22) — 아래 항목은 하나씩 따로 보지 않았고, 쓰면서 문제가 보이면 따로 고친다. 키·줄 간격·키워드 범위는 2026-10-21 결정(계획서 8절) — 2-3에 반영. PR: #24·#25 · 버전: 1.10.0
 - [x] 2. 주석·문자열 구간 계산 — `SqlScript.HighlightSpans`(문장 나누기와 같은 토큰 규칙), D1 경계 사례 테스트 `SqlHighlightTests`.
-      단독 시간(Linux 참고값): 1만 줄 6.6ms · 5만 줄 37ms · 10만 줄 53ms → 1만 줄 넘으면 4단계에서 지연·증분 계산 필요.
+      단독 시간(Linux 참고값): 1만 줄 6.6ms · 5만 줄 37ms · 10만 줄 53ms → 1만 줄 넘으면 4단계에서 지연·증분 계산 필요(2-2 증분 강조로 해결). PR: #23 · 버전: 1.10.0
 - [x] 2-1. DBMS별 구문 규칙 `SqlLexRules`(문장 나누기·강조 공통) — Oracle(그대로), PostgreSQL($$·E''·중첩 주석, 블록 없음),
-      SQL Server(GO 줄·[식별자]·BEGIN TRAN). SQL 탭은 대상 DB 규칙으로 실행. 테스트 `SqlLexRulesTests`, PostgresIT 스크립트 실행.
+      SQL Server(GO 줄·[식별자]·BEGIN TRAN). SQL 탭은 대상 DB 규칙으로 실행. 테스트 `SqlLexRulesTests`, PostgresIT 스크립트 실행. PR: #23 · 버전: 1.10.0
 - [x] 2-2. 키워드·증분 강조(2026-10-21 요청: SELECT·FROM·조건·테이블 구문 등 키워드 색) — `SqlScript.EditorSpans`·DBMS별 `SqlKeywords`,
       바뀐 곳 근처만 다시 계산하는 `SqlHighlighter`, 편집기에 붙이는 `SqlEditorHighlighting`(4단계가 그대로 씀), 테마별 색 `SqlHighlightLogic`.
-      PoC 창에 넣어 헤드리스로 확인: 키워드 47곳·테마 7종 대비 4.5:1·키 입력 3~12ms(전체 다시 계산은 9~73ms). 테스트 `SqlKeywordTests`·`SqlHighlighterTests`·`SqlHighlightLogicTests`.
+      PoC 창에 넣어 헤드리스로 확인: 키워드 47곳·테마 7종 대비 4.5:1·키 입력 3~12ms(전체 다시 계산은 9~73ms). 테스트 `SqlKeywordTests`·`SqlHighlighterTests`·`SqlHighlightLogicTests`. PR: #25 · 버전: 1.10.0
 - [x] 2-3. 설정 "SQL 편집기" 탭(2026-10-21 요청: 줄 간격 같은 선택 설정, 키워드·강조 스타일과 대상 관리, 긴 줄 기준 기본 2만 자·변경 가능) —
       `SqlEditorSettingsPage`·`SqlEditorSettings`(키 sqlEditor.settings, JSON)·`SqlEditorSetup`(합성 글꼴로 줄 간격, 키 결정: Ctrl+D 끔·Insert 겹쳐쓰기),
-      자료형을 키워드와 따로(`SqlSpanKind.DataType`). 저장하면 열린 편집기가 바로 따름. 테스트 `SqlEditorSettingsTests`, 헤드리스 `S_SettingsPage_AppliesToEditor`.
+      자료형을 키워드와 따로(`SqlSpanKind.DataType`). 저장하면 열린 편집기가 바로 따름. 테스트 `SqlEditorSettingsTests`, 헤드리스 `S_SettingsPage_AppliesToEditor`. PR: #25 · 버전: 1.10.0
 - [x] 3. `SqlEditor` 전용 컨트롤로 교체 — TextBox 1:1 흉내가 아닌 의도 단위 API, 직접 그린 줄 번호 삭제, 컨트롤 기술서 갱신.
       → 2026-10-22 `Ui/SqlEditor.cs`(AvalonEdit을 품음), SQL 탭·편집 메뉴·찾기·파일·임시 저장을 옮김, 직접 그린 줄 번호와 PoC 창(도구 메뉴) 삭제,
-      컨트롤 기술서 `sql-editor`. 회귀 확인표(계획서 6절)는 헤드리스 `SqlEditorRegressionTests`(R1~R7, Oracle 실행 포함).
-- [x] 4. 강조 색칠 연결 — `SqlEditor`에 `SqlEditorHighlighting`을 붙이고 탭 대상 DB가 바뀌면 규칙을 바꾼다, 실측 재측정. → 3단계와 함께(2026-10-22).
+      컨트롤 기술서 `sql-editor`. 회귀 확인표(계획서 6절)는 헤드리스 `SqlEditorRegressionTests`(R1~R7, Oracle 실행 포함). PR: #26 · 버전: 1.10.0
+- [x] 4. 강조 색칠 연결 — `SqlEditor`에 `SqlEditorHighlighting`을 붙이고 탭 대상 DB가 바뀌면 규칙을 바꾼다, 실측 재측정. → 3단계와 함께(2026-10-22). PR: #26 · 버전: 1.10.0
 - [ ] (별도) 테이블 이름 강조 — 메타데이터 대조 방식, 1~4 이후 검토.
+
+## 개발·시험 도구
+
+- [x] 미리보기 — Folderss에 설치하지 않고 플러그인 창만 사용자 화면에 띄워 써 보기(2026-10-22 요청).
+      → `scripts/preview.ps1` + `tools/PluginPreview`(Folderss와 같은 로드 컨텍스트, 테마는 Folderss 설정을 따름, 플러그인 설정 탭은 [플러그인 설정…],
+      데이터는 `%TEMP%\folderss-preview`). PR: #28 · 버전: 1.10.0
+- [ ] 헤드리스 화면 시험을 CI(Windows 러너)에서 — 숨은 데스크톱이 러너 세션에서 만들어지는지부터. [`next-steps.md`](next-steps.md) 4.
 
 ## 성능 모니터 (DBA가 실제로 쓰려면)
 
@@ -68,7 +75,7 @@
       오른쪽 메뉴 [세션 종료…](ALTER SYSTEM KILL SESSION · pg_terminate_backend · KILL)는 위험한 문장 확인 대화상자 + 읽기 전용 접속 차단.
       → 잠금 연쇄(누가 누구를 막는지)를 트리로 보이는 것은 아직 아님. PR: #20 · 버전: 1.9.0
       → 잠금 연쇄 트리 설계: [`docs/monitor-dba-design.md`](../monitor-dba-design.md) 3장(근원 블로커·유발 대기·최소 대기 3초·근원 종료, GV$·RAC 종료).
-      → 잠금 연쇄 트리 Oracle 구현(8-1): [잠금] 섹션 기본 보기, [표로 보기], [근원 세션 종료…]. 11.2 XE·19.9와 Folderss 안에서 실측. PR: #21.
+      → 잠금 연쇄 트리 Oracle 구현(8-1): [잠금] 섹션 기본 보기, [표로 보기], [근원 세션 종료…]. 11.2 XE·19.9와 Folderss 안에서 실측. PR: #21 · 버전: 1.10.0.
       남은 것: PostgreSQL·SQL Server 트리(8-5), RAC 실측.
 - [x] 3. 느린 SQL — Top SQL 섹션(Oracle V$SQLAREA, PostgreSQL pg_stat_statements(확장 유무 확인), SQL Server sys.dm_exec_query_stats)과
       대기 이벤트 요약(V$SESSION_WAIT 집계 · pg_stat_activity wait_event 집계 · sys.dm_os_wait_stats).
@@ -91,7 +98,7 @@
       PostgreSQL `<insufficient privilege>` 값을 권한 안내로 바꾸기.
 - [ ] 8. 전체 DB 한 화면 — 등록한 DB마다 타일(가장 심각한 상태 색과 그 이유 한 줄, 활성 세션·미니 추이, 공간(최대 기준)·FRA·마지막 백업), 심각도 정렬·고정,
       누르면 그 DB의 성능 모니터. Oracle 먼저, 지표는 긴 형식(METRIC·ITEM·VALUE)으로 이력 설계와 같은 이름. 설계: [`docs/monitor-dba-design.md`](../monitor-dba-design.md) 5장.
-      → Oracle 구현(8-2): 도구 > 전체 DB 상태…, 타일 상태 9가지, 고정·빼기, [잠금 트리 열기]. Folderss 안에서 7개 접속으로 실측. PR: #21.
+      → Oracle 구현(8-2): 도구 > 전체 DB 상태…, 타일 상태 9가지, 고정·빼기, [잠금 트리 열기]. Folderss 안에서 7개 접속으로 실측. PR: #21 · 버전: 1.10.0.
       남은 것: 타일 임계값 덮어쓰기(SQLite 저장소는 8-3에서 생김 — 화면만), PostgreSQL·SQL Server 지표(8-5).
 - [ ] 9. 일일 점검 리포트 — 점검 항목(가용성·공간·백업·로그·객체·작업·보안)을 여러 DB에 한 번에 돌려 정상·주의·위험·건너뜀으로 판정하고 엑셀로(정의서 양식 엔진 재사용).
       Oracle 기본 묶음 먼저. 11g 경고 로그 권한·오래된 통계의 휴지통 ORA-20001 같은 함정은 설계 6장. 설계: [`docs/monitor-dba-design.md`](../monitor-dba-design.md) 6장.
@@ -99,6 +106,6 @@
       공통 기반(공급자 인터페이스 확장·세션 키·대기 분류·지표·임계값)과 구현 순서·결정 사항은 같은 문서 2·7장.
       → Oracle 구현(8-3a·b·c, 2026-10-20): 도구 > 일일 점검…(전체 DB 상태의 [일일 점검…]), 기본 항목 17개, history.db(SQLite — 플러그인 로드 컨텍스트에서
       e_sqlite3 로드 확인)에 상태·값·행 수 기록과 직전 대비, 기본·내 엑셀 양식, [항목 관리…](켬·끔·문턱·사용자 항목·시험 실행·JSON 내보내기/가져오기),
-      설정 탭 "성능 모니터"(기록·보관 기간·이력 지우기). XE 11.2에 대고 헤드리스 화면 시험으로 확인. PR: #21.
+      설정 탭 "성능 모니터"(기록·보관 기간·이력 지우기). XE 11.2에 대고 헤드리스 화면 시험으로 확인. PR: #21 · 버전: 1.10.0.
       남은 것: DB별 덮어쓰기 화면, Data Guard 지연 항목(스탠바이 실측 환경), 예약 실행, PostgreSQL·SQL Server 묶음(8-5), 19c 실측.
       바로 이어서 할 일과 시험 환경: [`next-steps.md`](next-steps.md).

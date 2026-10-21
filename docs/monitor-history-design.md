@@ -197,4 +197,7 @@ IMonitorProvider
 | 5-5 | 3단 서버 이력(Query Store · AWR) | 꺼져 있으면 필요 조건 안내, AWR은 팩 설정이 없으면 조회 SQL을 보내지 않음 |
 | 5-6 | (계약 변경 시) OS 알림 | Folderss 계약·본체·예제 플러그인 빌드 |
 
+진행(2026-10-22): 5-3의 ① PoC(플러그인 로드 컨텍스트에서 `e_sqlite3` 로드)와 SQLite 저장소 `history.db`·설정 탭 "성능 모니터"(기록·보관 기간·이력 지우기)는
+일일 점검(DBA 설계 [`monitor-dba-design.md`](monitor-dba-design.md) 8-3a, PR #21 · v1.10.0)에서 먼저 만들었다. 지표 이력(스키마 2 — `snapshot`·`metric`)과 5-1·5-2·5-4~5-6은 아직.
+
 순서: 5-1 → 5-2 → 5-3 → 5-4. 5-5는 남은 결정 2(AWR), 5-6은 남은 결정 1(계약 변경)에 달렸다. SQL Server Query Store 읽기(5-5의 절반)는 라이선스 문제가 없어 결정과 무관하게 할 수 있다.

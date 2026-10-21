@@ -1,7 +1,10 @@
-# 다음 작업 (DBA 도구 — PR #21 이어서)
+# 다음 작업
 
-> 2026-10-20 기준. 8-1 잠금 트리 · 8-2 전체 DB 상태 · 8-3 일일 점검(a 저장소 · b 실행·판정·엑셀 · c 사용자 항목)까지 끝났다.
-> 설계는 [`docs/monitor-dba-design.md`](../monitor-dba-design.md), 큰 목록은 [`TODO.md`](TODO.md) 9장. 이 문서는 바로 이어서 할 일과 그 준비물만 적는다.
+> 2026-10-22 기준(v1.10.0 릴리스). 들어간 것: 성능 모니터 DBA 도구 8-1 잠금 트리 · 8-2 전체 DB 상태 · 8-3 일일 점검(PR #21),
+> 끊긴 연결에서 실행하면 다시 연결 확인(PR #22), SQL 편집기 AvalonEdit — DBMS별 문법·키워드·증분 강조·설정 "SQL 편집기" 탭(PR #23~#26),
+> 미리보기 `scripts/preview.ps1`(PR #28).
+> 설계는 [`docs/monitor-dba-design.md`](../monitor-dba-design.md)·[`docs/sql-editor-avalonedit-plan.md`](../sql-editor-avalonedit-plan.md), 큰 목록은 [`TODO.md`](TODO.md).
+> 이 문서는 바로 이어서 할 일과 그 준비물만 적는다.
 
 ## 1. 8-4 활성 세션 이력 (라이선스 없는 Top Activity) — 다음 큰 단계
 
@@ -32,10 +35,14 @@
 
 ## 4. 헤드리스 화면 시험 호스트 보강
 
-- 지금 시험: 전체 DB 상태 1개, 일일 점검 3개(`tests/MyPlugin.UiTests`). 성능 모니터 창·잠금 트리(8-1)는 아직 Folderss 본체 안에서 확인한 기록뿐 — 헤드리스 시험으로 옮긴다.
+- 지금 시험(`tests/MyPlugin.UiTests`, 18개): 전체 DB 상태 1개, 일일 점검 3개, SQL 탭 편집기 7개(로드·탭 대상별 키워드 색·성능·키·테마 7종·설정·둘러보기 캡처)와
+  회귀 확인 R1~R7(탭 전환 상태 유지·되돌리기 한 번·찾기·파일 줄 끝/BOM·임시 저장·편집 메뉴·Oracle 실행/F4).
+  성능 모니터 창·잠금 트리(8-1)는 아직 Folderss 본체 안에서 확인한 기록뿐 — 헤드리스 시험으로 옮긴다.
+- 사람이 직접 써 볼 때는 미리보기 `pwsh scripts/preview.ps1`(Folderss 없이 플러그인 창만 사용자 화면에, 데이터는 따로).
 - CI: GitHub Actions의 Windows 러너에서 `scripts/ui-test.ps1`(Oracle 없이 돌 수 있는 시험만)을 돌릴 수 있는지 — 숨은 데스크톱이 러너 세션에서 만들어지는지부터 확인.
 - 알아 둔 것: 자동화 Invoke는 디스패처에 맡겨져 **나중에** 돈다(누른 직후 결과를 보지 말고 `WaitUntil`). 모달을 여는 버튼은 `UiThread.Post`.
   UI 자동화 클라이언트는 숨은 데스크톱의 창을 못 봐서 파일 대화상자는 Win32(`NativeDialogs`)로 채운다. 체크 상자는 `Ui.ClickToggle`(Toggle 패턴은 Click을 내지 않음).
+  창을 닫아도 `Unloaded`(SQL 임시 저장)는 나중에 온다 — 다음 시험이 공유 데이터(sql-drafts)를 지우기 전에 한가해질 때까지 기다린다(`OpenSqlTab`).
 
 ## 5. 시험 환경 다시 만들기
 
@@ -56,7 +63,13 @@ $env:FMON_UI_ORACLE = "localhost:1521/xe"   # 계정 기본값 fmon_dba / Fmon_2
 pwsh scripts/ui-test.ps1
 ```
 
-## 6. PR #21
+## 6. SQL 편집기 (AvalonEdit) 남은 것
 
-- 초안(draft). 8-4까지 이 PR에 쌓을지, 8-1~8-3만 먼저 합칠지 정한다 — 8-3까지로도 DBA가 매일 쓸 기능(잠금 트리 · 전체 DB · 일일 점검)이 갖춰졌다.
-- 합치기 전: 플러그인 버전(`plugin.json` 1.9.0 → 1.10.0), 릴리스 노트, Folderss 본체 안에서 일일 점검 한 번 확인(헤드리스와 같은지).
+- 한글 IME(계획서 4절 C): 사용자가 써 보고 특별한 문제 없다고 함(2026-10-22). 항목별 확인은 쓰면서, 문제가 보이면 따로 고친다.
+- (별도) 테이블 이름 강조 — 메타데이터 대조 방식. TODO "SQL 편집기 구문 강조".
+- 기능 보고서 [`docs/reports/2026-10-21-sql-editor-highlight`](../reports/2026-10-21-sql-editor-highlight/index.html)는 2-3단계(PoC 창) 기준 기록이다. 3·4단계 실측은 계획서 7절.
+
+## 7. 릴리스
+
+- v1.10.0(2026-10-22): `plugin.json` 1.10.0 → `v1.10.0` 태그. 태그를 올리면 Actions가 GitHub 릴리스를 만들고 zip을 붙인다(릴리스 노트는 PR 목록으로 자동).
+- 다음 릴리스 전: `plugin.json` 버전을 먼저 올리고 같은 이름으로 태그(README "릴리스"), Folderss 본체 안에서 일일 점검 한 번 확인(헤드리스와 같은지 — v1.10.0 전에는 못 함).

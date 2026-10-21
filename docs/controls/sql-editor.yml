@@ -39,7 +39,7 @@ theme:
     keys: [PanelBackground, PrimaryText, SecondaryText, AccentBrush]
 limits:
   - 2만 자(설정) 넘는 줄은 칠하지 않는다. 한 줄 1MB는 AvalonEdit도 입력이 2~4초(편집기 자체 한계 — 예전 TextBox도 비슷).
-  - 한글 IME(조합·한자 변환·조합 중 단축키)는 헤드리스로 볼 수 없어 사람이 확인해야 한다.
+  - 한글 IME(조합·한자 변환·조합 중 단축키)는 헤드리스로 볼 수 없어 사람이 확인한다 — 2026-10-22 사용자가 써 보고 특별한 문제 없음(항목별 정밀 확인은 쓰면서).
 verification:
   - 2026-10-22 헤드리스 SqlEditorHeadlessTests(A 로드·K 탭 대상별 키워드 색·B 성능·D 키·E 테마 7종·S 설정·T 둘러보기)와
     회귀 확인표 R1~R7(탭 전환 상태 유지, 되돌리기 한 번, 찾기·스크롤, 파일 열기·저장 줄 끝·BOM, 임시 저장 되살리기, 편집 메뉴·위치 표시, Oracle 실행·F4).

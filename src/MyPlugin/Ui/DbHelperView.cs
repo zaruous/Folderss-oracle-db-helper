@@ -271,9 +271,9 @@ namespace MyPlugin
             get { return SqlFileLogic.ParseRecent(SafeSetting(SqlFileLogic.RecentSettingKey)); }
         }
 
-        public TextBox ActiveEditor
+        public IInputElement ActiveEditor
         {
-            get { return _workspace != null ? _workspace.ActiveEditor : null; }
+            get { return _workspace != null && _workspace.ActiveEditor != null ? _workspace.ActiveEditor.CommandTarget : null; }
         }
 
         public void NewTab()
@@ -355,11 +355,6 @@ namespace MyPlugin
         void IShellCommands.ShowChecks()
         {
             ShowChecks();
-        }
-
-        void IShellCommands.ShowEditorPoc()
-        {
-            _workspace.ShowEditorPoc();
         }
 
         /// <summary>

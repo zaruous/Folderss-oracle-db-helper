@@ -207,9 +207,14 @@ namespace MyPlugin
         {
             int line, column;
             CaretLineColumn(text, caret, out line, out column);
+            return CursorInfo(line, column, SelectedCharCount(text, selectionStart, selectionLength));
+        }
+
+        /// <summary>편집기가 아는 줄·열(1부터)과 선택 글자 수(CRLF는 한 글자)로 — 문서 전체를 훑지 않는다.</summary>
+        public static string CursorInfo(int line, int column, int selected)
+        {
             // 줄·열에는 천 단위 쉼표를 넣지 않는다("줄 1,234, 열 5"는 읽기 어렵다)
             var info = "줄 " + line.ToString(Inv) + ", 열 " + column.ToString(Inv);
-            var selected = SelectedCharCount(text, selectionStart, selectionLength);
             if (selected > 0)
                 info += " · 선택 " + selected.ToString("N0", Inv) + "자";
             return info;

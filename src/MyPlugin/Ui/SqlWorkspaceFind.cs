@@ -27,7 +27,7 @@ namespace MyPlugin
             {
                 var editor = _active != null ? _active.Editor : null;
                 if (editor != null)
-                    editor.Focus();
+                    editor.FocusEditor();
             });
             return _editorFind.View;
         }
@@ -115,21 +115,7 @@ namespace MyPlugin
             if (index < 0)
                 return;
             editor.Select(starts[index], term.Length);
-            ScrollEditorTo(editor, starts[index]);
-        }
-
-        // 그 글자가 보이게: 세로는 줄 단위, 가로는 글자 상자 위치로
-        private static void ScrollEditorTo(TextBox editor, int charIndex)
-        {
-            var line = editor.GetLineIndexFromCharacterIndex(charIndex);
-            if (line >= 0 && (line < editor.GetFirstVisibleLineIndex() || line > editor.GetLastVisibleLineIndex() - 1))
-                editor.ScrollToLine(line);
-            editor.UpdateLayout();
-            var rect = editor.GetRectFromCharacterIndex(charIndex);
-            if (rect.IsEmpty || editor.ViewportWidth <= 0)
-                return;
-            if (rect.Left < 0 || rect.Left > editor.ViewportWidth - 40)
-                editor.ScrollToHorizontalOffset(Math.Max(0, editor.HorizontalOffset + rect.Left - editor.ViewportWidth / 3));
+            editor.ScrollIntoView(starts[index]);
         }
 
         /// <summary>

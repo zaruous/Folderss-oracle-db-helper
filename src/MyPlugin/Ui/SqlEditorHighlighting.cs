@@ -45,6 +45,7 @@ namespace MyPlugin
         private SqlLexRules _highlightRules;
         private SqlEditorSettings _settings;
         private bool _incremental = true;
+        private bool _watchTheme;
         private SqlHighlighter _highlighter;
         private List<SqlSpan> _full = new List<SqlSpan>();
 
@@ -58,19 +59,26 @@ namespace MyPlugin
             _colorizer = new SpanColorizer(() => _incremental ? _highlighter.Spans : (IReadOnlyList<SqlSpan>)_full, _settings);
         }
 
-        public static SqlEditorHighlighting Attach(TextEditor editor, SqlLexRules rules, SqlEditorSettings settings = null)
+        /// <param name="watchTheme">
+        /// true면 편집기 바탕(테마 리소스 참조)이 바뀔 때 스스로 다시 칠한다 — 정적 감시라 다 쓰면 <see cref="Detach"/>해야 놓인다.
+        /// false면 품은 쪽이 테마가 바뀔 때 <see cref="ThemeChanged"/>를 부른다(SqlEditor).
+        /// </param>
+        public static SqlEditorHighlighting Attach(TextEditor editor, SqlLexRules rules, SqlEditorSettings settings = null, bool watchTheme = true)
         {
             var highlighting = new SqlEditorHighlighting(editor, rules, settings);
             editor.TextArea.TextView.LineTransformers.Add(highlighting._colorizer);
             editor.Document.Changed += highlighting.OnDocumentChanged;
-            BackgroundProperty.AddValueChanged(editor, highlighting.OnThemeChanged);
+            highlighting._watchTheme = watchTheme;
+            if (watchTheme)
+                BackgroundProperty.AddValueChanged(editor, highlighting.OnThemeChanged);
             highlighting.Rehighlight("붙임");
             return highlighting;
         }
 
         public void Detach()
         {
-            BackgroundProperty.RemoveValueChanged(_editor, OnThemeChanged);
+            if (_watchTheme)
+                BackgroundProperty.RemoveValueChanged(_editor, OnThemeChanged);
             _editor.Document.Changed -= OnDocumentChanged;
             _editor.TextArea.TextView.LineTransformers.Remove(_colorizer);
             _editor.TextArea.TextView.Redraw();
@@ -209,6 +217,12 @@ namespace MyPlugin
         }
 
         private void OnThemeChanged(object sender, EventArgs e)
+        {
+            ThemeChanged();
+        }
+
+        /// <summary>테마가 바뀌었다 — 색을 다시 정해 전부 다시 칠한다.</summary>
+        public void ThemeChanged()
         {
             _colorizer.ForgetPalette();
             _editor.TextArea.TextView.Redraw();

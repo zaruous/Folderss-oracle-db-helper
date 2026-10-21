@@ -9,7 +9,9 @@ using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -21,19 +23,20 @@ using Xunit.Abstractions;
 namespace MyPlugin.UiTests
 {
     /// <summary>
-    /// SQL 편집기 AvalonEdit 전환 1단계 PoC 실측(docs/sql-editor-avalonedit-plan.md 4절)을 헤드리스로: 도구 > AvalonEdit PoC 창에서
-    /// A 플러그인 로드 · B 성능(지금 SQL 탭과 같은 설정의 TextBox와 같은 데이터로 비교) · D 키 처리(TextBox와 비교) · E 테마 7종을 잰다.
-    /// C(한글 IME)는 사람이 확인한다. 막는 문제(A 로드·그리기·색칠 실패)만 실패로 보고, 수치는 계획서 7절 표 줄로 shots/poc-measure.md에 남긴다.
+    /// SQL 탭 편집기(SqlEditor — AvalonEdit, docs/sql-editor-avalonedit-plan.md 3단계)를 플러그인 단독 호스트에서 헤드리스로 시험한다:
+    /// A 로드·색칠, K DBMS별 키워드 색(탭 대상을 바꿔 가며), B 성능(증분·전체 다시 계산·강조 없음·지금 SQL 탭·옛 TextBox), D 키(옛 TextBox와 비교),
+    /// E 테마 7종, S 설정 "SQL 편집기" 탭, T 기능 둘러보기 캡처. 회귀 확인표(6절)는 SqlEditorRegressionTests(같은 클래스의 다른 파일).
+    /// 막는 문제만 실패로 보고, 수치는 계획서 7절 표 줄로 shots/poc-measure.md에 남긴다.
     /// 숨은 데스크톱은 소프트웨어 렌더링이라 시간은 GPU로 그리는 실제 Folderss보다 느린 쪽(상한)이다.
     /// </summary>
-    public class EditorPocHeadlessTests
+    public partial class SqlEditorHeadlessTests
     {
         private static readonly TimeSpan Wait = TimeSpan.FromSeconds(120);
         private static readonly string[] AllThemes = { "Black", "Catppuccin", "Dracula", "GitHub", "Light", "Nord", "Solarized" };
         private const string EditorType = "ICSharpCode.AvalonEdit.TextEditor";
         private readonly ITestOutputHelper _out;
 
-        public EditorPocHeadlessTests(ITestOutputHelper output)
+        public SqlEditorHeadlessTests(ITestOutputHelper output)
         {
             _out = output;
         }
@@ -41,11 +44,11 @@ namespace MyPlugin.UiTests
         // ================= A. 플러그인 로드 =================
 
         [UiFact]
-        public async Task A_LoadsInPluginContext_DrawsAndColors()
+        public async Task A_SqlTabEditor_LoadsAndColors()
         {
             var ui = UiThread.Instance;
             var plugin = PluginUnderTest.Load(ui);
-            var (main, poc, editor) = await OpenPoc(ui, plugin);
+            var (main, editor) = await OpenSqlTab(ui, plugin);
             try
             {
                 var assembly = ui.Run(() => editor.GetType().Assembly);
@@ -53,14 +56,25 @@ namespace MyPlugin.UiTests
                 Assert.StartsWith(plugin.PluginDirectory, assembly.Location, StringComparison.OrdinalIgnoreCase);
                 // 기본 스타일(AvalonEdit Themes/generic.xaml, pack URI)을 못 찾으면 템플릿이 없어 아무것도 그려지지 않는다
                 Assert.NotNull(ui.Run(() => ((Control)editor).Template));
+                // SQL 탭 편집기는 SqlEditor가 품은 AvalonEdit — 줄 번호는 편집기 것, 도구 메뉴에 시험판 PoC 항목은 없다
+                var shape = ui.Run(() =>
+                {
+                    dynamic ed = editor;
+                    var wrapper = VisualTreeHelper.GetParent(editor) as FrameworkElement;
+                    var tools = Ui.Find<Menu>(main).Items.OfType<MenuItem>().First(m => Ui.HeaderText(m).StartsWith("도구", StringComparison.Ordinal));
+                    return ((bool)ed.ShowLineNumbers, wrapper == null ? "" : wrapper.GetType().Name,
+                        tools.Items.OfType<MenuItem>().Select(Ui.HeaderText).ToList());
+                });
+                Assert.True(shape.Item1);
+                Assert.Equal("SqlEditor", shape.Item2);
+                Assert.DoesNotContain(shape.Item3, h => h.Contains("PoC"));
 
-                ui.Run(() => Ui.Click(Ui.Button(poc, "D1 경계 사례")));
-                await ui.WaitUntil(() => MeasureText(poc).StartsWith("D1:", StringComparison.Ordinal), Wait, "D1 넣기 측정");
+                var d1 = SqlSamples.D1;
+                ui.Run(() => SetEditorText(editor, d1));
                 await Idle(ui);
                 var lines = ui.Run(() => { dynamic ed = editor; return (int)ed.TextArea.TextView.VisualLines.Count; });
                 Assert.True(lines > 10, "그려진 줄이 " + lines + "개뿐입니다.");
                 // 첫 줄(-- 줄 주석 한글)은 주석색, 둘째 줄 SELECT는 키워드색, 'a -- 문자열 안'은 문자열색
-                var d1 = PocD1(plugin);
                 var colors = ui.Run(() =>
                 {
                     var palette = Palette(plugin);
@@ -70,27 +84,20 @@ namespace MyPlugin.UiTests
                 Assert.True(colors.Item1, "첫 줄 주석이 주석색이 아닙니다.");
                 Assert.True(colors.Item2, "둘째 줄 SELECT가 키워드색이 아닙니다.");
                 Assert.True(colors.Item3, "문자열이 문자열색이 아닙니다.");
-                var load = ui.Run(() => MeasureText(poc).Split('\n')[0]);
-                _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, "poc-d1")));
+                _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(main, plugin.ShotFolder, "sqltab-d1")));
 
-                // PoC 창의 자체 측정(버튼 → 창 아래 글)도 도는지
-                ui.Run(() => Ui.Click(Ui.Button(poc, "D3-1 1만 줄")));
-                await ui.WaitUntil(() => MeasureText(poc).StartsWith("D3-1", StringComparison.Ordinal), Wait, "D3-1 넣기 측정");
-                var d3 = ui.Run(() => MeasureText(poc).Split('\n')[0]);
-
-                Report(plugin, "A 플러그인 로드",
-                    "PluginLoadContext에서 " + assembly.GetName().Name + " " + assembly.GetName().Version + " 로드(" + Path.GetFileName(Path.GetDirectoryName(assembly.Location)) + "\\…), "
-                    + "기본 템플릿 적용, 그려진 줄 " + lines + "개, 주석·문자열·키워드 색칠 확인, UI 예외 0", "✓");
-                Report(plugin, "A PoC 창 자체 측정", load + " / " + d3, "");
+                Report(plugin, "A SQL 탭 편집기 로드",
+                    "SQL 탭 편집기 = SqlEditor(AvalonEdit " + assembly.GetName().Version + ", PluginLoadContext), 기본 템플릿 적용, 내장 줄 번호, 그려진 줄 " + lines
+                    + "개, 주석·문자열·키워드 색칠, 도구 메뉴에 PoC 항목 없음, UI 예외 0", "✓");
             }
             finally
             {
-                ui.Run(() => { poc.Close(); main.Close(); });
+                ui.Run(() => main.Close());
             }
             Assert.Empty(ui.TakeErrors());
         }
 
-        // ================= 키워드 색 (DBMS별) =================
+        // ================= 키워드 색 (DBMS별 — 탭 대상 DB를 바꿔 가며) =================
 
         /// <summary>확인할 곳: needle의 nth번째 위치 첫 글자가 kind 색인지("Plain"이면 보통 글자색).</summary>
         private sealed class ColorCheck
@@ -110,12 +117,23 @@ namespace MyPlugin.UiTests
             public int Skip { get; }
         }
 
+        /// <summary>세 DBMS 접속(가짜 주소 — 연결하지 않음). 탭 대상을 바꾸면 그 DBMS 규칙으로 다시 칠한다.</summary>
+        private static SeedConnection[] ThreeDbms()
+        {
+            return new[]
+            {
+                SeedConnection.Oracle("ORA 시험", "localhost:1599/xe", "u", null),
+                new SeedConnection { Name = "PG 시험", Provider = "postgres", Port = 55431, Service = "postgres", User = "u" },
+                new SeedConnection { Name = "MS 시험", Provider = "mssql", Port = 14331, Service = "master", User = "u" }
+            };
+        }
+
         [UiFact]
-        public async Task K_Keywords_ColoredByRules()
+        public async Task K_Keywords_ColoredByTabTarget()
         {
             var ui = UiThread.Instance;
             var plugin = PluginUnderTest.Load(ui);
-            var (main, poc, editor) = await OpenPoc(ui, plugin);
+            var (main, editor) = await OpenSqlTab(ui, plugin, ThreeDbms());
             const string oracle = "-- 주문 조회 (SELECT는 주석 안)\n"
                 + "SELECT o.order_id, o.status AS \"Select\", t.date, :from\n"
                 + "  FROM orders o\n"
@@ -140,7 +158,7 @@ namespace MyPlugin.UiTests
                 + "CREATE TABLE s (id INT IDENTITY(1,1) PRIMARY KEY, at DATETIME2);\n";
             var cases = new[]
             {
-                ("Oracle", oracle, new[]
+                ("ORA 시험", "Oracle", oracle, new[]
                 {
                     new ColorCheck("-- 주문", "Comment"), new ColorCheck("SELECT o.", "Keyword"), new ColorCheck("AS \"", "Keyword"), new ColorCheck("\"Select\"", "Plain", skip: 1),
                     new ColorCheck("t.date", "Plain", skip: 2), new ColorCheck(":from", "Plain", skip: 1), new ColorCheck("FROM orders", "Keyword"), new ColorCheck("orders o", "Plain"),
@@ -151,12 +169,12 @@ namespace MyPlugin.UiTests
                     new ColorCheck("KEY", "Keyword"), new ColorCheck("VARCHAR2", "Keyword"), new ColorCheck("t_order", "Plain"), new ColorCheck("MINUS", "Keyword"),
                     new ColorCheck("TOP", "Plain")
                 }),
-                ("PostgreSQL", postgres, new[]
+                ("PG 시험", "PostgreSQL", postgres, new[]
                 {
                     new ColorCheck("ILIKE", "Keyword"), new ColorCheck("LIMIT", "Keyword"), new ColorCheck("RETURNING", "Keyword"), new ColorCheck("LANGUAGE", "Keyword"),
                     new ColorCheck("plpgsql", "Plain"), new ColorCheck("BEGIN", "String"), new ColorCheck("'a%'", "String"), new ColorCheck("MINUS", "Plain")
                 }),
-                ("SQL Server", sqlServer, new[]
+                ("MS 시험", "SQL Server", sqlServer, new[]
                 {
                     new ColorCheck("TOP", "Keyword"), new ColorCheck("[select]", "Plain", skip: 1), new ColorCheck("@from", "Plain", skip: 1), new ColorCheck("FROM dbo", "Keyword"),
                     new ColorCheck("GO", "Keyword"), new ColorCheck("DECLARE", "Keyword"), new ColorCheck("NVARCHAR", "Keyword"), new ColorCheck("N'from'", "String"),
@@ -167,10 +185,11 @@ namespace MyPlugin.UiTests
             {
                 var rows = new List<string>();
                 var wrong = new List<string>();
-                foreach (var (rules, text, checks) in cases)
+                foreach (var (target, rules, text, checks) in cases)
                 {
-                    ui.Run(() => Ui.Choose(Ui.ById<ComboBox>(poc, "PocRules"), rules));
+                    // 같은 글을 먼저 넣고 대상을 바꿔도 그 DB 규칙으로 다시 칠해야 한다
                     ui.Run(() => SetEditorText(editor, text));
+                    ui.Run(() => ChooseTarget(main, target));
                     await Idle(ui);
                     var results = ui.Run(() =>
                     {
@@ -189,20 +208,20 @@ namespace MyPlugin.UiTests
                         if (!ok)
                             wrong.Add(rules + " '" + c.Needle + "' → " + c.Kind + " 아님");
                     }
-                    _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, "poc-keywords-" + rules.Replace(" ", ""))));
+                    _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(main, plugin.ShotFolder, "sqltab-keywords-" + rules.Replace(" ", ""))));
                     rows.Add(rules + " " + results.Count(r => r.Item2) + "/" + results.Count);
                 }
-                // 밝은 테마에서도 한 장
-                ui.Run(() => { UiThread.ApplyTheme("Light"); Ui.Choose(Ui.ById<ComboBox>(poc, "PocRules"), "Oracle"); SetEditorText(editor, oracle); });
+                // 밝은 테마에서도 한 장(Oracle 대상)
+                ui.Run(() => { UiThread.ApplyTheme("Light"); ChooseTarget(main, "ORA 시험"); SetEditorText(editor, oracle); });
                 await Idle(ui);
-                _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, "poc-keywords-Oracle-Light")));
-                Report(plugin, "키워드 색 (SELECT·FROM·JOIN·WHERE 조건·GROUP/ORDER BY·CREATE TABLE·자료형, DBMS별 목록, 문자열·주석·식별자·t.date·:from·@from·[select]는 아님)",
+                _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(main, plugin.ShotFolder, "sqltab-keywords-Oracle-Light")));
+                Report(plugin, "키워드 색 — SQL 탭, 탭 대상 DB를 바꿔 가며 (SELECT·FROM·JOIN·WHERE 조건·GROUP/ORDER BY·CREATE TABLE·자료형, 문자열·주석·식별자·t.date·:from·@from·[select]는 아님)",
                     string.Join(" · ", rows) + (wrong.Count == 0 ? "" : " — 틀림: " + string.Join(", ", wrong)), Judge(wrong.Count == 0));
                 Assert.Empty(wrong);
             }
             finally
             {
-                ui.Run(() => { UiThread.ApplyTheme("Black"); poc.Close(); main.Close(); });
+                ui.Run(() => { UiThread.ApplyTheme("Black"); main.Close(); });
             }
             Assert.Empty(ui.TakeErrors());
         }
@@ -214,7 +233,7 @@ namespace MyPlugin.UiTests
         {
             var ui = UiThread.Instance;
             var plugin = PluginUnderTest.Load(ui);
-            var (main, poc, editor) = await OpenPoc(ui, plugin);
+            var (main, editor) = await OpenSqlTab(ui, plugin);
             // 같은 크기 창에서 같은 데이터로: 강조를 붙인 AvalonEdit(SqlEditorHighlighting — 4단계가 쓸 것, PoC 창의 측정 글 갱신 없이; 증분 / 전체 다시 계산),
             // 강조 없는 AvalonEdit(편집기 자체 비용), 지금 SQL 탭 TextBox
             var litWindow = ui.Run(() => BareEditorWindow(editor));
@@ -227,14 +246,16 @@ namespace MyPlugin.UiTests
             var incremental = AvalonTarget("증분", lit, () => highlighting.Incremental = true);
             var full = AvalonTarget("전체", lit, () => highlighting.Incremental = false);
             var targets = new[] { incremental, full, AvalonTarget("강조 없음", bare, null), TextBoxTarget(box) };
+            // 실제 SQL 탭 편집기(탭 처리기 — 임시 저장 예약·위치 표시 — 포함). 한 줄 1MB는 키마다 초 단위라 뺀다
+            var sqlTab = AvalonTarget("SQL 탭", editor, null);
             var datasets = new[]
             {
-                ("D2 실무형 1만 줄", PocD2(plugin, 10000)),
-                ("D3-1 1만 줄", PocD3(plugin, 10000)),
-                ("D3-2 5만 줄", PocD3(plugin, 50000)),
-                ("D3-3 10만 줄", PocD3(plugin, 100000)),
-                ("D4-3 전부 주석 10만 줄", PocD43(plugin, 100000)),
-                ("D4-1 한 줄 1MB", PocD41(plugin, 1 << 20))
+                ("D2 실무형 1만 줄", SqlSamples.D2(10000)),
+                ("D3-1 1만 줄", SqlSamples.D3(10000)),
+                ("D3-2 5만 줄", SqlSamples.D3(50000)),
+                ("D3-3 10만 줄", SqlSamples.D3(100000)),
+                ("D4-3 전부 주석 10만 줄", SqlSamples.D43(100000)),
+                ("D4-1 한 줄 1MB", SqlSamples.D41(1 << 20))
             };
             var editorSpans = EditorSpans(plugin);
             try
@@ -242,24 +263,25 @@ namespace MyPlugin.UiTests
                 foreach (var (name, text) in datasets)
                 {
                     var size = name + " (" + Lines(text).ToString("N0", CultureInfo.InvariantCulture) + "줄 · " + (text.Length * 2 / 1024.0 / 1024.0).ToString("F1", CultureInfo.InvariantCulture) + "MB)";
-                    var load = targets.ToDictionary(t => t, t => new List<double>());
+                    var list = name.StartsWith("D4-1", StringComparison.Ordinal) ? targets : targets.Concat(new[] { sqlTab }).ToArray();
+                    var load = list.ToDictionary(t => t, t => new List<double>());
                     for (var i = 0; i < 3; i++)
                     {
-                        foreach (var t in targets)
+                        foreach (var t in list)
                         {
                             ui.Run(() => { t.Select?.Invoke(); t.SetText(""); });
                             await Idle(ui);
                             load[t].Add(await TimeUntilIdle(ui, () => t.SetText(text)));
                         }
                     }
-                    Report(plugin, "B 넣기→첫 화면 " + size + " (3회 중앙값)", string.Join(" · ", targets.Select(t => t.Name + " " + Ms(Median(load[t])))),
+                    Report(plugin, "B 넣기→첫 화면 " + size + " (3회 중앙값)", string.Join(" · ", list.Select(t => t.Name + " " + Ms(Median(load[t])))),
                         Judge(Median(load[incremental]) <= Median(load[targets[3]]) * 1.2 || Median(load[incremental]) < 200));
 
                     // 키 입력: 가운데·끝에서 한 글자씩 10번, 입력부터 (다시 칠하고) 그려서 한가해질 때까지
                     foreach (var atEnd in new[] { false, true })
                     {
-                        var typing = targets.ToDictionary(t => t, t => new List<double>());
-                        foreach (var t in targets)
+                        var typing = list.ToDictionary(t => t, t => new List<double>());
+                        foreach (var t in list)
                         {
                             ui.Run(() => { t.Select?.Invoke(); t.SetText(text); });
                             await Idle(ui);
@@ -271,7 +293,7 @@ namespace MyPlugin.UiTests
                             Assert.Equal(10, ui.Run(t.Length) - before);
                         }
                         Report(plugin, "B 키 입력 " + name + " " + (atEnd ? "끝" : "가운데") + " (10회 중앙값 · 최대)",
-                            string.Join(" / ", targets.Select(t => t.Name + " " + Ms(Median(typing[t])) + " · " + Ms(typing[t].Max()))),
+                            string.Join(" / ", list.Select(t => t.Name + " " + Ms(Median(typing[t])) + " · " + Ms(typing[t].Max()))),
                             Judge(Median(typing[incremental]) <= 16));
                     }
 
@@ -288,7 +310,7 @@ namespace MyPlugin.UiTests
                 }
 
                 // 문서 뒤쪽 색이 뒤집히는 고치기(10만 줄): 맨 앞 /* 넣기·빼기(D4-2 — 첫 */까지), 가운데 SELECT 줄 앞 ' 넣기·빼기(뒤 문자열 짝이 어긋남)
-                var big = PocD3(plugin, 100000);
+                var big = SqlSamples.D3(100000);
                 var middle = big.IndexOf("\r\nSELECT a, b, c", big.Length / 2, StringComparison.Ordinal) + 2;
                 foreach (var t in new[] { incremental, full })
                 {
@@ -333,9 +355,9 @@ namespace MyPlugin.UiTests
                 Report(plugin, "B 스크롤 D3-3 (끝으로 3회 중앙값, 한 화면씩 30회 중앙값)", string.Join(" / ", scrolls), Judge(pocPage <= 16));
 
                 // D5: 탭 20개(1천 줄씩, 한 번씩 보이기) 메모리
-                foreach (var t in targets)
+                foreach (var t in targets.Concat(new[] { sqlTab }))
                     ui.Run(() => t.SetText(""));
-                var tab = PocD3(plugin, 1000);
+                var tab = SqlSamples.D3(1000);
                 var editorType = editor.GetType();
                 Func<FrameworkElement> newAvalon = () =>
                 {
@@ -360,7 +382,7 @@ namespace MyPlugin.UiTests
             }
             finally
             {
-                ui.Run(() => { baseline.Close(); bareWindow.Close(); litWindow.Close(); poc.Close(); main.Close(); });
+                ui.Run(() => { baseline.Close(); bareWindow.Close(); litWindow.Close(); main.Close(); });
             }
             Assert.Empty(ui.TakeErrors());
         }
@@ -369,7 +391,7 @@ namespace MyPlugin.UiTests
         private static object AttachHighlighting(PluginUnderTest plugin, FrameworkElement editor)
         {
             var oracle = plugin.Assembly.GetType("MyPlugin.SqlLexRules", true).GetField("Oracle").GetValue(null);
-            return plugin.Assembly.GetType("MyPlugin.SqlEditorHighlighting", true).GetMethod("Attach").Invoke(null, new[] { editor, oracle, null });
+            return plugin.Assembly.GetType("MyPlugin.SqlEditorHighlighting", true).GetMethod("Attach").Invoke(null, new[] { editor, oracle, null, (object)true });
         }
 
         /// <summary>마지막 강조 계산: 시간 · 읽은 글자 · 다시 칠한 범위. UI 스레드에서 부른다.</summary>
@@ -462,7 +484,7 @@ namespace MyPlugin.UiTests
         {
             var ui = UiThread.Instance;
             var plugin = PluginUnderTest.Load(ui);
-            var (main, poc, editor) = await OpenPoc(ui, plugin);
+            var (main, editor) = await OpenSqlTab(ui, plugin);
             var baseline = ui.Run(() => BaselineWindow(editor));
             var box = ui.Run(() => (TextBox)baseline.Content);
             try
@@ -477,17 +499,8 @@ namespace MyPlugin.UiTests
                 });
                 Assert.Equal(ModifierKeys.Control | ModifierKeys.Shift, modifiers);
 
-                // SQL 탭 편집기 키(F4·F3·Ctrl+F …)는 SqlWorkspace가 편집기의 PreviewKeyDown에서 먼저 잡는다. AvalonEdit을 품은 컨트롤에서도
-                // 그 처리기에 먼저 오는지(편집기가 터널 단계에서 먹지 않는지) 본다
-                KeyCase active = null;
-                var reachedBox = new List<string>();
-                var reachedEditor = new List<string>();
-                ui.Run(() =>
-                {
-                    box.PreviewKeyDown += (s, e) => { if (!e.Handled && active != null && active.SqlTab && e.Key == active.Key) reachedBox.Add(active.Name); };
-                    ((UIElement)editor).PreviewKeyDown += (s, e) => { if (!e.Handled && active != null && active.SqlTab && e.Key == active.Key) reachedEditor.Add(active.Name); };
-                });
-
+                // SQL 탭 편집기 키(F4·F3·Ctrl+F·Ctrl+Enter·Ctrl+/·Ctrl+Shift+U·L)는 SQL 탭(SqlWorkspace)이 SqlEditor의 PreviewKeyDown에서 먼저 처리한다
+                // — 대상 DB가 없어 실행·테이블 정보는 상태줄 안내만, 찾기는 찾기 막대, 주석·대소문자는 글을 바꾼다
                 const string start = "SELECT a,\r\n  b FROM t;\r\n-- c\r\n";
                 var cases = new List<KeyCase>
                 {
@@ -522,42 +535,42 @@ namespace MyPlugin.UiTests
                 };
 
                 var rows = new List<string>();
+                var notHandled = new List<string>();
                 var differences = 0;
                 foreach (var c in cases)
                 {
-                    active = c;
                     var boxResult = ui.Run(() => RunKey(box, box, c, start));
                     var editorResult = ui.Run(() => { dynamic ed = editor; return RunKey((UIElement)ed.TextArea, editor, c, start); });
-                    active = null;
                     var same = boxResult == editorResult;
+                    if (c.SqlTab && !editorResult.StartsWith("처리", StringComparison.Ordinal))
+                        notHandled.Add(c.Name);
                     if (!same && !c.SqlTab)
                         differences++;
                     // 키 결정(계획서 8절): Ctrl+D는 끄고 Insert는 겹쳐쓰기 전환 — 지금 TextBox와 같아야 한다(SqlEditorSetup.ApplyBehavior)
                     if (c.Name == "Ctrl+D" || c.Name.StartsWith("Insert", StringComparison.Ordinal))
                         Assert.True(same, c.Name + ": TextBox " + boxResult + " / AvalonEdit " + editorResult);
-                    // SQL 탭 키는 SqlWorkspace 처리기가 먼저 처리하므로 편집기 자체 동작(이 표의 값)은 참고용
-                    rows.Add("| " + c.Name + " | " + boxResult + " | " + editorResult + " | " + (c.SqlTab ? "SQL 탭이 먼저 처리(참고)" : same ? "같음" : "**다름**") + " |");
+                    // SQL 탭 키: 옛 TextBox 칸은 SQL 탭 처리기 없이 TextBox만 누른 값(참고), 편집기 칸은 지금 SQL 탭에서 누른 값
+                    rows.Add("| " + c.Name + " | " + boxResult + " | " + editorResult + " | " + (c.SqlTab ? "SQL 탭이 처리" : same ? "같음" : "**다름**") + " |");
                 }
                 var sqlTabKeys = cases.Where(c => c.SqlTab).Select(c => c.Name).ToList();
-                var lostToEditor = sqlTabKeys.Where(k => !reachedEditor.Contains(k)).ToList();
-                Assert.Equal(sqlTabKeys, reachedBox);
+                Assert.Empty(notHandled);
                 var cutCopyWholeLine = ui.Run(() => { dynamic ed = editor; return (bool)ed.Options.CutCopyWholeLine; });
 
-                var table = "| 키 | TextBox (지금 SQL 탭 설정) | AvalonEdit | 비교 |\n|---|---|---|---|\n" + string.Join("\n", rows);
+                var table = "| 키 | 옛 TextBox (SQL 탭 설정) | 지금 SQL 탭 (SqlEditor) | 비교 |\n|---|---|---|---|\n" + string.Join("\n", rows);
                 File.WriteAllText(Path.Combine(plugin.ShotFolder, "poc-keys.md"), table + "\n");
                 foreach (var row in rows)
                     _out.WriteLine("[키] " + row);
-                Report(plugin, "D SQL 탭 편집기 키가 편집기 PreviewKeyDown 처리기에 먼저 오는지 (F4·F3·Shift+F3·Ctrl+F·Ctrl+Enter·Ctrl+/·Ctrl+Shift+U·L)",
-                    lostToEditor.Count == 0 ? sqlTabKeys.Count + "개 모두 옴(편집기가 터널 단계에서 먹지 않음)" : "편집기가 먼저 먹음: " + string.Join(", ", lostToEditor), Judge(lostToEditor.Count == 0));
+                Report(plugin, "D SQL 탭 편집기 키 (F4·F3·Shift+F3·Ctrl+F·Ctrl+Enter·Ctrl+/·Ctrl+Shift+U·L)",
+                    sqlTabKeys.Count + "개 모두 SQL 탭이 먼저 처리(AvalonEdit 기본 동작보다 먼저)", Judge(notHandled.Count == 0));
                 Report(plugin, "D 기본 편집 키 동작 비교 (" + cases.Count(c => !c.SqlTab) + "가지, 표: shots/poc-keys.md)",
                     "다른 것 " + differences + "가지. Ctrl+X/C/V는 시험이 클립보드를 건드리지 않게 빼고 설정만 읽음: CutCopyWholeLine=" + cutCopyWholeLine
-                    + (cutCopyWholeLine ? "(선택 없이 Ctrl+C·X면 줄 전체 — TextBox는 아무것도 안 함)" : ""), "키마다 결정 필요");
+                    + (cutCopyWholeLine ? "(선택 없이 Ctrl+C·X면 줄 전체 — TextBox는 아무것도 안 함)" : ""), "결정대로(계획서 8절)");
                 Report(plugin, "D Folderss 본체 전역 단축키", "해당 없음 — 플러그인은 본체가 띄운 별도 창(PluginManager.ShowPluginWindow)이라 본체 Window_PreviewKeyDown을 지나지 않음. "
                     + "플러그인 창 단축키(Ctrl+N·O·S·Shift+S·W, F5)는 DbHelperView의 PreviewKeyDown(터널)이라 편집기보다 먼저 받음", "✓ (코드 확인)");
             }
             finally
             {
-                ui.Run(() => { baseline.Close(); poc.Close(); main.Close(); });
+                ui.Run(() => { baseline.Close(); main.Close(); });
             }
             Assert.Empty(ui.TakeErrors());
         }
@@ -569,10 +582,10 @@ namespace MyPlugin.UiTests
         {
             var ui = UiThread.Instance;
             var plugin = PluginUnderTest.Load(ui);
-            var (main, poc, editor) = await OpenPoc(ui, plugin);
+            var (main, editor) = await OpenSqlTab(ui, plugin);
             try
             {
-                var d1 = PocD1(plugin);
+                var d1 = SqlSamples.D1;
                 ui.Run(() => SetEditorText(editor, d1));
                 await Idle(ui);
                 var rows = new List<string>();
@@ -619,7 +632,7 @@ namespace MyPlugin.UiTests
                             selectionPixels
                         };
                     });
-                    _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, "poc-theme-" + theme)));
+                    _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(main, plugin.ShotFolder, "sqltab-theme-" + theme)));
                     low += measured.Take(6).Count(v => v < 4.5);
                     rows.Add("| " + theme + " | " + Ratio(measured[0]) + " | " + Ratio(measured[1]) + " | " + Ratio(measured[2]) + " | " + Ratio(measured[3]) + " | "
                         + Ratio(measured[4]) + " | " + Ratio(measured[5]) + " | " + measured[6].ToString("F1", CultureInfo.InvariantCulture) + (measured[6] < 2 ? " ✗" : "") + " | "
@@ -640,18 +653,17 @@ namespace MyPlugin.UiTests
                 });
                 await Idle(ui);
                 var at16 = ui.Run(() => { dynamic ed = editor; var h = (double)ed.TextArea.TextView.DefaultLineHeight; ed.FontSize = 13.0; return h; });
-                var textBoxLine = (double)plugin.Assembly.GetType("MyPlugin.SqlWorkspace", true).GetField("EditorLineHeight", BindingFlags.NonPublic | BindingFlags.Static).GetRawConstantValue();
 
                 Report(plugin, "E 테마 7종 명암비·선택·즉시 반영 (표: shots/poc-themes.md, 캡처 poc-theme-*.png)",
                     "4.5:1 미만 칸 " + low + "개(글자·주석·문자열·키워드·줄 번호·선택 위 글자). 테마만 바꿨을 때 강조색이 바로 안 바뀌는 테마 " + stale.Count + "개"
                     + (stale.Count == 0 ? "" : "(" + string.Join("·", stale) + ")"),
                     Judge(low == 0 && stale.Count == 0));
-                Report(plugin, "E 줄 간격·글꼴 크기", "AvalonEdit 기본 줄 높이 글꼴 13: " + Px(lineHeight) + " · 16: " + Px(at16) + " / TextBox 지금 19px 고정(" + Px(textBoxLine) + ")",
-                    "3단계에서 맞출지 결정");
+                Report(plugin, "E 줄 간격·글꼴 크기", "AvalonEdit 기본 줄 높이 글꼴 13: " + Px(lineHeight) + " · 16: " + Px(at16) + " / 옛 TextBox 19px 고정 — 설정 '줄 간격'에서 19px를 고르면 같음",
+                    "결정대로(설정)");
             }
             finally
             {
-                ui.Run(() => { UiThread.ApplyTheme("Black"); poc.Close(); main.Close(); });
+                ui.Run(() => { UiThread.ApplyTheme("Black"); main.Close(); });
             }
             Assert.Empty(ui.TakeErrors());
         }
@@ -668,7 +680,7 @@ namespace MyPlugin.UiTests
             var ui = UiThread.Instance;
             var plugin = PluginUnderTest.Load(ui);
             var page = plugin.Manager.SettingsPages.Single(p => p.Title == "SQL 편집기");
-            var (main, poc, editor) = await OpenPoc(ui, plugin);
+            var (main, editor) = await OpenSqlTab(ui, plugin);
             var longLine = "SELECT " + string.Join(", ", Enumerable.Range(1, 900).Select(i => "c" + i)) + " FROM t;";
             var text = "-- 주석 줄\nSELECT NVL(a, 1), b FROM t WHERE d > DATE '2026-01-01';\n" + longLine + "\n";
             var host = ui.Run(() =>
@@ -733,7 +745,7 @@ namespace MyPlugin.UiTests
                 Assert.Contains("\"maxColoredLine\":5000", plugin.Manager.GetSetting("sqlEditor.settings"));
                 await Idle(ui);
 
-                // 열린 PoC 창이 바로 따른다
+                // 열린 SQL 탭이 바로 따른다
                 var magenta = System.Windows.Media.Color.FromRgb(0xFF, 0x00, 0xFF);
                 var after = ui.Run(() =>
                 {
@@ -741,13 +753,10 @@ namespace MyPlugin.UiTests
                     var plain = ColorOf(((Control)editor).Foreground);
                     return ((double)ed.TextArea.TextView.DefaultLineHeight, ForegroundAt(editor, 0) == plain, ForegroundAt(editor, at("SELECT")) == magenta,
                         WeightAt(editor, at("SELECT")) == FontWeights.Bold, ForegroundAt(editor, at("NVL")) == magenta, ForegroundAt(editor, at("DATE")) == plain,
-                        ForegroundAt(editor, text.IndexOf(longLine, StringComparison.Ordinal)) == plain, MeasureText(poc));
+                        ForegroundAt(editor, text.IndexOf(longLine, StringComparison.Ordinal)) == plain);
                 });
-                _out.WriteLine(after.Item8);
-                Assert.Equal((19.0, true, true, true, true, true, true), (after.Item1, after.Item2, after.Item3, after.Item4, after.Item5, after.Item6, after.Item7));
-                Assert.Contains("줄 간격 19px", after.Item8);
-                Assert.Contains("5,000자 넘는 줄은 칠하지 않음", after.Item8);
-                _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, "settings-3-poc-after-save")));
+                Assert.Equal((19.0, true, true, true, true, true, true), after);
+                _out.WriteLine("캡처: " + ui.Run(() => Ui.Snap(main, plugin.ShotFolder, "settings-3-sqltab-after-save")));
 
                 // 기본값으로 되돌리기 → 저장 → 처음 모습
                 ui.Run(() =>
@@ -771,7 +780,7 @@ namespace MyPlugin.UiTests
                 Assert.Equal((15.0, true, true), reset);
                 Assert.True(ui.Run(() => SqlSettingsIsDefault(plugin)));
                 Report(plugin, "설정 \"SQL 편집기\" 탭",
-                    "줄 간격 15→19px, 키워드 색·굵게, 주석 끔, 더 칠할 NVL·칠하지 않을 DATE, 긴 줄 기준 5,000자 — 미리 보기는 바로, [저장]하면 열린 PoC 창이 바로 따름. 범위 밖 값은 저장 실패, 기본값으로 되돌리기",
+                    "줄 간격 15→19px, 키워드 색·굵게, 주석 끔, 더 칠할 NVL·칠하지 않을 DATE, 긴 줄 기준 5,000자 — 미리 보기는 바로, [저장]하면 열린 SQL 탭이 바로 따름. 범위 밖 값은 저장 실패, 기본값으로 되돌리기",
                     "✓");
             }
             finally
@@ -781,7 +790,6 @@ namespace MyPlugin.UiTests
                     // 다른 시험이 기본 설정을 보도록
                     plugin.Manager.SetSetting("sqlEditor.settings", null);
                     host.Close();
-                    poc.Close();
                     main.Close();
                 });
             }
@@ -815,33 +823,35 @@ namespace MyPlugin.UiTests
         // ================= 기능 둘러보기 캡처 (보고서용) =================
 
         /// <summary>
-        /// 플러그인 단독 호스트에서 사람이 쓰는 순서대로 화면을 띄워 캡처한다(shots/tour-*.png, 보고서용): DB Helper 창 → 도구 메뉴 →
-        /// AvalonEdit PoC 창의 데이터·DBMS 규칙·강조 방식·테마별 모습. 각 장면에서 그려진 색이 기대대로인지도 몇 군데 확인한다.
+        /// 플러그인 단독 호스트에서 사람이 쓰는 순서대로 SQL 탭을 띄워 캡처한다(shots/tour-*.png, 보고서용): DB Helper 창, 도구 메뉴,
+        /// 같은 글을 세 DBMS 대상으로, 실무형 스크립트를 테마 7종으로, 찾기, 탭 여러 개, 설정 "SQL 편집기" 탭(기본·고친 미리 보기·저장 뒤 SQL 탭).
         /// </summary>
         [UiFact]
         public async Task T_FeatureTour_Captures()
         {
             var ui = UiThread.Instance;
             var plugin = PluginUnderTest.Load(ui);
-            var main = ui.Run(() => plugin.OpenView());
-            Window poc = null;
+            var (main, editor) = await OpenSqlTab(ui, plugin, ThreeDbms());
             var shots = new List<string>();
-            Action<string> snap = name => shots.Add(ui.Run(() => Ui.Snap(poc, plugin.ShotFolder, name)));
+            Action<string> snap = name => shots.Add(ui.Run(() => Ui.Snap(main, plugin.ShotFolder, name)));
+            var page = plugin.Manager.SettingsPages.Single(p => p.Title == "SQL 편집기");
+            Window settingsWindow = null;
             try
             {
+                ui.Run(() => SetEditorText(editor, SqlSamples.D2(200)));
                 await Idle(ui);
-                shots.Add(ui.Run(() => Ui.Snap(main, plugin.ShotFolder, "tour-01-main")));
-                // 도구 메뉴를 펼친 모습(팝업은 창 밖이라 팝업 내용만 따로)
-                var menuShot = ui.Run(() =>
+                snap("tour-01-main");
+                // 도구 메뉴를 펼친 모습(팝업은 창 밖이라 팝업 내용만 따로) — 시험판 PoC 항목은 없다
+                var tools = ui.Run(() =>
                 {
-                    var tools = Ui.Find<Menu>(main).Items.OfType<MenuItem>().First(m => Ui.HeaderText(m).StartsWith("도구", StringComparison.Ordinal));
-                    tools.IsSubmenuOpen = true;
-                    return tools;
+                    var item = Ui.Find<Menu>(main).Items.OfType<MenuItem>().First(m => Ui.HeaderText(m).StartsWith("도구", StringComparison.Ordinal));
+                    item.IsSubmenuOpen = true;
+                    return item;
                 });
                 await Idle(ui);
                 var menuPath = ui.Run(() =>
                 {
-                    var popup = menuShot.Template.FindName("PART_Popup", menuShot) as System.Windows.Controls.Primitives.Popup;
+                    var popup = tools.Template.FindName("PART_Popup", tools) as System.Windows.Controls.Primitives.Popup;
                     var child = popup == null ? null : popup.Child as FrameworkElement;
                     // 숨은 데스크톱에서는 팝업 창이 배치되지 않을 수 있어 직접 잰다
                     if (child != null && child.ActualWidth < 1)
@@ -849,36 +859,27 @@ namespace MyPlugin.UiTests
                         child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
                         child.Arrange(new Rect(child.DesiredSize));
                     }
-                    var path = child == null || child.DesiredSize.Width < 1 ? null : Ui.SnapElement(child, (Brush)Application.Current.FindResource("SurfaceBackground"), plugin.ShotFolder, "tour-02-tools-menu");
-                    menuShot.IsSubmenuOpen = false;
+                    var path = child == null || child.DesiredSize.Width < 1 ? null
+                        : Ui.SnapElement(child, (Brush)Application.Current.FindResource("SurfaceBackground"), plugin.ShotFolder, "tour-02-tools-menu");
+                    tools.IsSubmenuOpen = false;
                     return path;
                 });
                 if (menuPath != null)
                     shots.Add(menuPath);
 
-                ui.Run(() => Ui.Menu(main, "도구", "AvalonEdit PoC"));
-                poc = await ui.WaitFor(() => Ui.Window("AvalonEdit PoC"), Wait, "AvalonEdit PoC 창");
-                var editor = await ui.WaitFor(() => Ui.Find<FrameworkElement>(poc, e => e.GetType().FullName == EditorType), Wait, "AvalonEdit 편집기");
-                await Idle(ui);
-
-                // D1 경계 사례: 규칙 셋으로 같은 글이 다르게 칠해진다
-                ui.Run(() => Ui.Click(Ui.Button(poc, "D1 경계 사례")));
-                await ui.WaitUntil(() => MeasureText(poc).StartsWith("D1:", StringComparison.Ordinal), Wait, "D1");
-                await Idle(ui);
-                snap("tour-03-d1-oracle");
-                foreach (var rules in new[] { "PostgreSQL", "SQL Server" })
+                // D1 경계 사례: 탭 대상 DB를 바꾸면 같은 글이 그 DB 규칙으로 다시 칠해진다
+                ui.Run(() => SetEditorText(editor, SqlSamples.D1));
+                foreach (var (target, rules) in new[] { ("ORA 시험", "oracle"), ("PG 시험", "postgresql"), ("MS 시험", "sqlserver") })
                 {
-                    ui.Run(() => Ui.Choose(Ui.ById<ComboBox>(poc, "PocRules"), rules));
+                    ui.Run(() => ChooseTarget(main, target));
                     await Idle(ui);
-                    snap("tour-04-d1-" + rules.Replace(" ", "").ToLowerInvariant());
+                    snap("tour-03-d1-" + rules);
                 }
+                ui.Run(() => ChooseTarget(main, "ORA 시험"));
 
-                // D2 실무형(조회·조건·조인·집계, 테이블 정의, DML, PL/SQL 배치) — Oracle, 어두운·밝은 테마
-                ui.Run(() => Ui.Choose(Ui.ById<ComboBox>(poc, "PocRules"), "Oracle"));
-                ui.Run(() => Ui.Click(Ui.Button(poc, "D2 실무형 1천 줄")));
-                await ui.WaitUntil(() => MeasureText(poc).StartsWith("D2", StringComparison.Ordinal), Wait, "D2");
+                // D2 실무형 — 테마 7종
+                ui.Run(() => SetEditorText(editor, SqlSamples.D2(200)));
                 await Idle(ui);
-                snap("tour-05-d2-black");
                 var d2Ok = ui.Run(() =>
                 {
                     var palette = Palette(plugin);
@@ -889,6 +890,7 @@ namespace MyPlugin.UiTests
                         && ForegroundAt(editor, text.IndexOf("'PAID'", StringComparison.Ordinal)) == palette.String;
                 });
                 Assert.True(d2Ok, "D2 첫 화면의 키워드·주석·문자열 색이 기대와 다릅니다.");
+                snap("tour-05-d2-black");
                 foreach (var theme in AllThemes.Where(t => t != "Black"))
                 {
                     ui.Run(() => UiThread.ApplyTheme(theme));
@@ -898,40 +900,24 @@ namespace MyPlugin.UiTests
                 ui.Run(() => UiThread.ApplyTheme("Black"));
                 await Idle(ui);
 
-                // 10만 줄에서 가운데에 몇 글자 쳐 본 뒤 창 아래 측정 글: 증분 / 전체 다시 계산
-                ui.Run(() => Ui.Click(Ui.Button(poc, "D3-3 10만 줄")));
-                await ui.WaitUntil(() => MeasureText(poc).StartsWith("D3-3", StringComparison.Ordinal), Wait, "D3-3");
-                foreach (var mode in new[] { "증분 강조", "전체 다시 계산(비교용)" })
-                {
-                    ui.Run(() =>
-                    {
-                        Ui.Choose(Ui.ById<ComboBox>(poc, "PocMode"), mode);
-                        dynamic ed = editor;
-                        var line = ed.Document.GetLineByNumber((int)ed.Document.LineCount / 2);
-                        ed.TextArea.Caret.Offset = (int)line.Offset;
-                        ed.ScrollToLine((int)line.LineNumber);
-                    });
-                    await Idle(ui);
-                    foreach (var word in new[] { "SELECT", " ", "x", " ", "FROM", " ", "t", ";", "\n" })
-                    {
-                        await TimeUntilIdle(ui, () => { dynamic ed = editor; TypeText((UIElement)ed.TextArea, word); });
-                    }
-                    snap(mode.StartsWith("증분", StringComparison.Ordinal) ? "tour-07-incremental" : "tour-08-full");
-                }
-                ui.Run(() => Ui.Choose(Ui.ById<ComboBox>(poc, "PocMode"), "증분 강조"));
+                // 찾기(Ctrl+F) — 찾은 글자를 고르고 보이게 스크롤
+                ui.Run(() => { dynamic ed = editor; Press((UIElement)ed.TextArea, Key.F, ModifierKeys.Control); });
+                await Idle(ui);
+                ui.Run(() => FindBox(main).Text = "t_order_hist");
+                await Idle(ui);
+                snap("tour-07-find");
+                ui.Run(() => Press(FindBox(main), Key.Escape, ModifierKeys.None));
 
-                // D4-2: 맨 앞에 /* 를 넣으면 첫 */까지 주석이 된다
-                ui.Run(() => Ui.Click(Ui.Button(poc, "D4-2 맨 앞 /* 넣기·빼기")));
+                // 탭 여러 개(Ctrl+N) — 탭마다 편집기 하나
+                ui.Run(() => { dynamic ed = editor; Press((UIElement)ed.TextArea, Key.N, ModifierKeys.Control); });
                 await Idle(ui);
-                ui.Run(() => { dynamic ed = editor; ed.ScrollToHome(); });
+                var second = await ui.WaitFor(() => { var e = ActiveEditor(main); return e != editor ? e : null; }, Wait, "새 탭 편집기");
+                ui.Run(() => SetEditorText(second, "-- 두 번째 탭\nSELECT SYSDATE, USER FROM DUAL;\n"));
                 await Idle(ui);
-                snap("tour-09-d42-leading-comment");
-                ui.Run(() => Ui.Click(Ui.Button(poc, "D4-2 맨 앞 /* 넣기·빼기")));
-                await Idle(ui);
+                snap("tour-08-tabs");
 
-                // 설정 "SQL 편집기" 탭: 기본 모습, 고친 모습(미리 보기만 — 저장하지 않음)
-                var page = plugin.Manager.SettingsPages.Single(p => p.Title == "SQL 편집기");
-                var settingsWindow = ui.Run(() =>
+                // 설정 "SQL 편집기" 탭: 기본 모습, 고친 모습(미리 보기), 저장하면 SQL 탭이 바로 따른다
+                settingsWindow = ui.Run(() =>
                 {
                     var window = new Window { Title = "설정", Content = page.CreateView(), Width = 820, Height = 1150, ShowActivated = false, ShowInTaskbar = false };
                     window.SetResourceReference(Window.BackgroundProperty, "WindowBackground");
@@ -950,7 +936,12 @@ namespace MyPlugin.UiTests
                 });
                 await Idle(ui);
                 shots.Add(ui.Run(() => Ui.Snap(settingsWindow, plugin.ShotFolder, "tour-11-settings-custom")));
-                ui.Run(() => settingsWindow.Close());
+                ui.Run(() => page.Save());
+                await Idle(ui);
+                // 저장 뒤: 첫 탭으로 돌아가 실무형 스크립트를 본다(줄 간격 19px, 키워드 굵게, 자료형 보라, 주석 기울임)
+                ui.Run(() => Ui.Click(Ui.Find<ButtonBase>(main, b => AutomationProperties.GetName(b) == "SQL 1")));
+                await Idle(ui);
+                snap("tour-12-sqltab-after-settings");
 
                 File.WriteAllLines(Path.Combine(plugin.ShotFolder, "tour-shots.txt"), shots.Select(Path.GetFileName));
                 foreach (var shot in shots)
@@ -961,8 +952,14 @@ namespace MyPlugin.UiTests
                 ui.Run(() =>
                 {
                     UiThread.ApplyTheme("Black");
-                    if (poc != null)
-                        poc.Close();
+                    if (settingsWindow != null)
+                    {
+                        // 다음 시험이 기본 설정을 보도록(열린 편집기에도 알린다)
+                        Ui.Click(Ui.ById<Button>(settingsWindow, "sqleditor-reset"));
+                        page.Save();
+                        settingsWindow.Close();
+                    }
+                    plugin.Manager.SetSetting("sqlEditor.settings", null);
                     main.Close();
                 });
             }
@@ -1113,20 +1110,73 @@ namespace MyPlugin.UiTests
 
         // ================= 창·편집기 =================
 
-        private async Task<(Window main, Window poc, FrameworkElement editor)> OpenPoc(UiThread ui, PluginUnderTest plugin)
+        /// <summary>
+        /// DB Helper 창을 열어 지금 SQL 탭의 편집기(SqlEditor가 품은 AvalonEdit TextEditor)를 찾는다. 앞 시험이 남긴 임시 저장은 지워 탭 하나로 시작한다
+        /// (keepDrafts면 그대로 — 되살리기 시험). connections로 접속을 넣는다(없으면 접속 없음 — 대상 없는 탭).
+        /// </summary>
+        private async Task<(Window main, FrameworkElement editor)> OpenSqlTab(UiThread ui, PluginUnderTest plugin, params SeedConnection[] connections)
         {
-            var main = ui.Run(() => plugin.OpenView());
-            ui.Run(() => Ui.Menu(main, "도구", "AvalonEdit PoC"));
-            var poc = await ui.WaitFor(() => Ui.Window("AvalonEdit PoC"), Wait, "AvalonEdit PoC 창");
-            var editor = await ui.WaitFor(() => Ui.Find<FrameworkElement>(poc, e => e.GetType().FullName == EditorType), Wait, "AvalonEdit 편집기");
-            await Idle(ui);
-            return (main, poc, editor);
+            return await OpenSqlTab(ui, plugin, false, connections);
         }
 
-        /// <summary>창 아래 실측 글(넣기→첫 화면 · 구간 계산 · 안내).</summary>
-        private static string MeasureText(Window poc)
+        private async Task<(Window main, FrameworkElement editor)> OpenSqlTab(UiThread ui, PluginUnderTest plugin, bool keepDrafts, params SeedConnection[] connections)
         {
-            return Ui.Texts(poc).FirstOrDefault(t => t.Contains("16ms를 넘으면")) ?? "";
+            // 앞 시험이 닫은 창의 Unloaded(마지막 임시 저장)는 나중에 온다 — 다 지나간 뒤에 지워야 이 창이 넘겨받지 않는다
+            await Idle(ui);
+            if (!keepDrafts)
+                ClearDrafts(plugin);
+            plugin.Manager.SeedConnections(connections);
+            var main = ui.Run(() => plugin.OpenView());
+            var editor = await ui.WaitFor(() => ActiveEditor(main), Wait, "SQL 탭 편집기");
+            await Idle(ui);
+            return (main, editor);
+        }
+
+        /// <summary>지금 보이는 SQL 탭 편집기(AvalonEdit TextEditor). 탭마다 하나이고 지금 탭 것만 보인다.</summary>
+        private static FrameworkElement ActiveEditor(Window main)
+        {
+            return Ui.Find<FrameworkElement>(main, e => e.GetType().FullName == EditorType && e.IsVisible);
+        }
+
+        private static void ClearDrafts(PluginUnderTest plugin)
+        {
+            var folder = Path.Combine(plugin.Manager.DataDirectory, "sql-drafts");
+            if (Directory.Exists(folder))
+                Directory.Delete(folder, true);
+        }
+
+        /// <summary>지금 탭의 대상 DB를 접속 이름으로 고른다(편집기 바의 대상 콤보 — 사람이 고르는 것과 같은 경로).</summary>
+        private static void ChooseTarget(Window main, string name)
+        {
+            var combo = Ui.Find<ComboBox>(main, c => AutomationProperties.GetName(c) == "이 탭의 대상 DB");
+            for (var i = 0; i < combo.Items.Count; i++)
+            {
+                var item = combo.Items[i] as ComboBoxItem;
+                if (item != null && (Ui.ContentText(item.Content) ?? "").StartsWith(name, StringComparison.Ordinal))
+                {
+                    combo.SelectedIndex = i;
+                    return;
+                }
+            }
+            throw new InvalidOperationException("대상 콤보에 '" + name + "'가 없습니다.");
+        }
+
+        /// <summary>SQL 탭 찾기 막대의 입력 칸.</summary>
+        private static TextBox FindBox(Window main)
+        {
+            return Ui.Find<TextBox>(main, b => AutomationProperties.GetName(b) == "SQL에서 찾기");
+        }
+
+        /// <summary>SQL 탭 작업 영역(내부 형식 — 같은 동작을 부르는 시험만 리플렉션으로).</summary>
+        private static FrameworkElement Workspace(Window main)
+        {
+            return Ui.Find<FrameworkElement>(main, e => e.GetType().FullName == "MyPlugin.SqlWorkspace");
+        }
+
+        /// <summary>편집기 바의 위치 표시("줄 n, 열 m · 선택 k자").</summary>
+        private static string CursorText(Window main)
+        {
+            return Ui.Texts(main).FirstOrDefault(t => t.StartsWith("줄 ", StringComparison.Ordinal) && t.Contains(", 열 ")) ?? "";
         }
 
         private static void SetEditorText(FrameworkElement editor, string text)
@@ -1320,30 +1370,6 @@ namespace MyPlugin.UiTests
         }
 
         // ================= 플러그인 안 (리플렉션) =================
-
-        private static Type PocData(PluginUnderTest plugin)
-        {
-            return plugin.Assembly.GetType("MyPlugin.AvalonEditPocWindow+PocData", true);
-        }
-
-        private static string PocData(PluginUnderTest plugin, string method, int value)
-        {
-            return (string)PocData(plugin).GetMethod(method).Invoke(null, new object[] { value });
-        }
-
-        /// <summary>PoC 창의 시험 데이터 생성기(계획서 5절 구성 — 버튼과 같은 글): D2 실무형, D3 크기별, D4-1 한 줄, D4-3 전부 주석.</summary>
-        private static string PocD2(PluginUnderTest plugin, int lines) { return PocData(plugin, "D2", lines); }
-
-        private static string PocD3(PluginUnderTest plugin, int lines) { return PocData(plugin, "D3", lines); }
-
-        private static string PocD41(PluginUnderTest plugin, int chars) { return PocData(plugin, "D41", chars); }
-
-        private static string PocD43(PluginUnderTest plugin, int lines) { return PocData(plugin, "D43", lines); }
-
-        private static string PocD1(PluginUnderTest plugin)
-        {
-            return (string)PocData(plugin).GetField("D1").GetValue(null);
-        }
 
         /// <summary>SqlScript.EditorSpans(text, Oracle 규칙) — 구간 수를 돌려준다.</summary>
         private static Func<string, int> EditorSpans(PluginUnderTest plugin)

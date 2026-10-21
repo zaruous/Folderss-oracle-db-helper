@@ -25,8 +25,9 @@ features:
       (앞에서 뒤로 닫음, 실행 중인 탭은 건너뜀, 저장 묻기에서 [취소]하면 남은 탭은 그대로, 끝나면 메뉴를 연 탭으로).
   - name: 편집기
     description: >-
-      고정폭 글꼴, 줄 높이를 고정한 줄 번호 칸. 파일을 끌어다 놓으면 그 파일 탭으로 연다.
-      줄 주석 토글, 대·소문자 바꾸기, 커서 위치 이름의 테이블 정보(F4).
+      탭마다 SqlEditor(AvalonEdit — 내장 줄 번호, 구문 강조, 설정 "SQL 편집기" 탭 반영). 탭 대상 DB를 바꾸면 그 DB 규칙으로 다시 칠한다.
+      파일을 끌어다 놓으면 그 파일 탭으로 연다. 줄 주석 토글, 대·소문자 바꾸기, 맨 위 넣기는 되돌리기 한 번(Replace).
+      커서 위치 이름의 테이블 정보(F4). 설정 창에서 SQL 편집기 설정을 저장하면 열린 탭 모두 바로 따른다(창이 붙어 있는 동안 SqlEditorSettings.Changed).
   - name: 실행
     description: >-
       커서가 있는 문장 또는 선택 영역을 실행한다. 선택 영역에 문장이 여럿이거나 스크립트 실행이면 차례로 실행하고
@@ -98,4 +99,4 @@ tests:
   - tests/MyPlugin.Tests/SqlFileLogicTests.cs
   - tests/MyPlugin.Tests/SqlDraftLogicTests.cs
   - tests/MyPlugin.Tests/SqlScriptTests.cs
-related: [find-bar, result-grid, result-edit-bar, result-message-list, result-history-list, dialogs]
+related: [sql-editor, find-bar, result-grid, result-edit-bar, result-message-list, result-history-list, dialogs]

@@ -1,10 +1,9 @@
 # SQL 편집기 AvalonEdit 전환 — 진행·실측 계획
 
-작성일 2026-10-14. 상태: **1단계 실측 중** — 헤드리스로 A·B·D·E를 쟀고(2026-10-21, 7·8절) 막는 문제는 없었다.
-키워드 강조와 증분 강조(2-2단계)를 PoC에 넣고 데이터를 바꿔 가며 다시 쟀다 — 키 입력 3~12ms(16ms 안), 테마 7종 대비 4.5:1 이상(8절).
-기능 보고서(단독 호스트 캡처·측정 표·설정 탭): [docs/reports/2026-10-21-sql-editor-highlight/index.html](reports/2026-10-21-sql-editor-highlight/index.html)(측정 원본은 같은 폴더 data/), 게시본 https://claude.ai/artifact/PLzmZy2DH7ia5vLKXfzzWS (비공개).
-2026-10-21 8절 결정을 반영했다(키 동작, 줄 간격·강조 모양·키워드 대상·긴 줄 기준은 설정 "SQL 편집기" 탭 — 2-3단계).
-남은 것: C(한글 IME, 사람이 확인). 실측 결과가 나오기 전에는 본 교체를 시작하지 않는다.
+작성일 2026-10-14. 상태: **3단계(교체) 완료 2026-10-22** — SQL 탭 편집기는 `SqlEditor`(AvalonEdit)이고 4단계(강조 연결)도 함께 끝났다.
+직접 그린 줄 번호 칸과 PoC 창(도구 메뉴 항목)은 지웠다. 6절 회귀 확인표는 헤드리스 시험으로 확인했다(Oracle 실행 포함).
+C(한글 IME): 사용자가 Folderss에서 써 보고 특별한 문제 없다고 함(2026-10-22) — 아래 항목은 하나씩 따로 보지 않았고, 쓰면서 문제가 보이면 따로 고친다. 1·2·2-2·2-3단계의 실측·결정은 7·8절.
+기능 보고서(2-3단계까지): [docs/reports/2026-10-21-sql-editor-highlight/index.html](reports/2026-10-21-sql-editor-highlight/index.html).
 
 ## 0. 목표와 범위
 
@@ -61,12 +60,12 @@
 | 2. 구간 계산 (완료 2026-10-20: `SqlScript.HighlightSpans`, `tests/MyPlugin.Tests/SqlHighlightTests.cs`) | `SqlScript`에서 주석·문자열 구간을 내는 공개 함수 추가 | 5절 D1의 기대 구간을 단위 테스트로 먼저 작성 → 통과. 기존 `SqlScriptTests` 전부 통과 |
 | 2-2. 키워드·증분 강조 (완료 2026-10-21: `SqlScript.EditorSpans`·`SqlKeywords`·`SqlHighlighter`·`SqlEditorHighlighting`·`SqlHighlightLogic`) | DBMS별 키워드 색, 바뀐 곳 근처만 다시 계산, 테마별 색 | 키워드 단위 테스트(`SqlKeywordTests`), 무작위 고치기에서 증분 = 전체(`SqlHighlighterTests`), 테마 7종 대비(`SqlHighlightLogicTests`), 헤드리스 키워드 색·성능(`EditorPocHeadlessTests`) |
 | 2-3. 편집기 설정·키 결정 (완료 2026-10-21: `SqlEditorSettingsPage`·`SqlEditorSettings`·`SqlEditorSetup`) | 설정 "SQL 편집기" 탭(줄 간격, 긴 줄 기준, 대상별 칠함·색·굵게·기울임, 더 칠할·칠하지 않을 낱말, 미리 보기), 자료형을 키워드와 따로, 키 동작 결정 적용 | `SqlEditorSettingsTests`, 헤드리스 `S_SettingsPage_AppliesToEditor`(미리 보기·저장 뒤 열린 편집기 반영), 키 비교에서 Ctrl+D·Insert가 TextBox와 같음 |
-| 3. 교체 | `SqlEditor` 도입, `SqlTabState.Editor`·호출부 교체, 직접 그린 줄 번호 삭제 | 빌드 통과, 6절 회귀 확인표 전부 ✓, `docs/controls/sql-workspace.yml`(+ 새 컨트롤이면 `sql-editor.yml`) 갱신, `python3 scripts/check_controls_docs.py` 통과 |
-| 4. 강조 연결 | `SqlEditor`에 `SqlEditorHighlighting`을 붙이고 탭 대상 DB가 바뀌면 `Rules`를 바꾼다(색·증분은 2-2에서 끝남) | 실측 B·C 다시 측정해 PoC 대비 악화 없음 |
+| 3. 교체 (완료 2026-10-22: `Ui/SqlEditor.cs`, 직접 그린 줄 번호·PoC 창 삭제) | `SqlEditor` 도입, `SqlTabState.Editor`·호출부 교체, 직접 그린 줄 번호 삭제 | 빌드 통과, 6절 회귀 확인표 전부 ✓, `docs/controls/sql-workspace.yml`(+ 새 컨트롤이면 `sql-editor.yml`) 갱신, `python3 scripts/check_controls_docs.py` 통과 |
+| 4. 강조 연결 (완료 2026-10-22 — 3단계와 함께) | `SqlEditor`에 `SqlEditorHighlighting`을 붙이고 탭 대상 DB가 바뀌면 `Rules`를 바꾼다(색·증분은 2-2에서 끝남) | 실측 B·C 다시 측정해 PoC 대비 악화 없음 |
 
 ## 4. 실측 항목 (Windows, 1단계 PoC에서)
 
-### PoC 시험판 쓰는 법 (main에 들어 있음 — PR #24. 3단계 교체 뒤 지운다)
+### PoC 시험판 쓰는 법 (2026-10-22 3단계 교체와 함께 PoC 창을 지웠다 — 아래는 기록. 지금은 SQL 탭 편집기에서 잰다)
 1. main 빌드 zip(Actions 산출물, 또는 `dotnet publish src/MyPlugin -c Release`가 만든 `MyPlugin.zip`)을 Folderss에 설치한다(플러그인 교체).
 2. DB Helper 창 **도구 > AvalonEdit PoC (시험판)…** — 지금 SQL 탭의 글과 대상 DB 규칙으로 창이 열린다(본 SQL 탭은 그대로).
 3. 창 위 버튼으로 시험 데이터(D1·D3-1~3·D4-2)를 넣고, 규칙 콤보로 Oracle·PostgreSQL·SQL Server를 바꿔 본다.
@@ -74,9 +73,9 @@
 5. 한글 IME(C)·테마 7종(E)은 눈으로 확인한다(Folderss 테마를 바꾸며). [결과 복사] → 아래 7절 기록란에 붙이고 판단을 적는다.
 - 창이 아예 안 뜨거나 오류가 나면(A 플러그인 로드 실패) 오류 메시지·`plugin-log.txt`를 기록한다.
 
-### 헤드리스 자동 실측 (`tests/MyPlugin.UiTests/EditorPocHeadlessTests.cs`)
+### 헤드리스 자동 실측 (`tests/MyPlugin.UiTests/SqlEditorHeadlessTests.cs` — 3단계 전에는 PoC 창으로 쟀던 `EditorPocHeadlessTests`)
 ```powershell
-pwsh scripts/ui-test.ps1 -Filter "FullyQualifiedName~EditorPocHeadlessTests"
+pwsh scripts/ui-test.ps1 -Filter "FullyQualifiedName~SqlEditorHeadlessTests"
 ```
 - 숨은 데스크톱에서 도구 > AvalonEdit PoC 창을 열어 A·B·D·E를 재고, 실행 폴더 `shots/`에 `poc-measure.md`(7절 표 줄)·`poc-keys.md`(D 키 비교)·`poc-themes.md`(E 명암비)·캡처를 남긴다.
   막는 문제(A 로드·그리기·색칠 실패)만 시험 실패로 보고, 기준을 넘는 수치는 표에 ✗로 적는다.
@@ -110,6 +109,8 @@ pwsh scripts/ui-test.ps1 -Filter "FullyQualifiedName~EditorPocHeadlessTests"
 "바뀐 위치 이후만 다시 계산" 같은 증분 방식으로 바꾼다 — 그 판단을 이 측정으로 한다.
 
 ### C. 한글 입력(IME) — 가장 큰 실사용 위험 (사람이 확인 — 헤드리스로 못 봄)
+사용자가 Folderss에서 써 보고 특별한 문제 없다고 함(2026-10-22) — 아래 항목은 하나씩 따로 보지 않았고, 쓰면서 문제가 보이면 따로 고친다.
+
 - [ ] 조합 중인 글자가 캐럿 위치에 바로 보인다(밑줄 표시, 엉뚱한 위치에 뜨지 않음).
 - [ ] 한자 변환(한자 키) 후보 창이 캐럿 근처에 뜬다.
 - [ ] 조합 중 Backspace가 자모 단위로 지운다.
@@ -198,14 +199,16 @@ SELECT '닫히지 않은 문자열 → 끝까지 문자열
 
 ## 6. 회귀 확인표 (3단계 교체 후, Windows)
 
-- [ ] 탭별 글·캐럿·선택·스크롤·되돌리기 기록이 탭 전환 후에도 유지
-- [ ] Ctrl+Enter(캐럿 위치 문장)·F4·스크립트 실행·선택 영역 실행
-- [ ] 트리에서 SELECT 문 넣기(맨 위 삽입), 대·소문자 바꾸기, 주석 전환 — 각각 되돌리기 한 번으로 원복
-- [ ] 찾기(Ctrl+F, F3/Shift+F3, 찾은 글자로 스크롤 — 세로·가로)
-- [ ] SQL 파일 열기·저장·다른 이름 저장, 수정 표시, 줄 끝(CRLF·LF) 파일을 열고 저장했을 때 지금과 같은 결과
-- [ ] 임시 저장(`SqlDraftLogic`) 복원
-- [ ] 줄 번호가 스크롤·글꼴 크기 변경에 맞음
-- [ ] 4절 C·D·E 재확인
+2026-10-22 헤드리스(`tests/MyPlugin.UiTests/SqlEditorRegressionTests.cs`, 키는 편집기 입력 칸에 내서 SQL 탭·DB Helper 창 처리기를 그대로 지남):
+- [x] 탭별 글·캐럿·선택·스크롤·되돌리기 기록이 탭 전환 후에도 유지 — R1(두 탭을 오가도 글·선택·세로 스크롤 그대로, Ctrl+Z는 그 탭 것만)
+- [x] Ctrl+Enter(캐럿 위치 문장)·F4·스크립트 실행·선택 영역 실행 — R7(Oracle XE 11.2: 캐럿 문장·선택 영역·F5 결과 2개·F4 테이블 정보 창). 연결 안 된 대상은 지금처럼 상태줄 [연결]
+- [x] 트리에서 SELECT 문 넣기(맨 위 삽입), 대·소문자 바꾸기, 주석 전환 — 각각 되돌리기 한 번으로 원복 — R2(맨 위 넣기는 트리·기록이 부르는 같은 메서드)
+- [x] 찾기(Ctrl+F, F3/Shift+F3, 찾은 글자로 스크롤 — 세로·가로) — R3(찾기 칸 Enter·Shift+Enter, 편집기 F3·Shift+F3, Esc)
+- [x] SQL 파일 열기·저장, 수정 표시, 줄 끝(CRLF·LF) 파일을 열고 저장했을 때 지금과 같은 결과 — R4(LF·BOM 없음, CRLF·BOM 둘 다 그대로, 탭 *). 다른 이름 저장은 대화상자라 헤드리스로 안 봄
+- [x] 임시 저장(`SqlDraftLogic`) 복원 — R5(창을 닫고 다시 열면 글·캐럿)
+- [x] 줄 번호가 스크롤·글꼴 크기 변경에 맞음 — AvalonEdit 내장 줄 번호(A, 둘러보기 캡처)
+- [x] 편집 메뉴(모두 선택·실행 취소)와 위치 표시 — R6
+- [x] 4절 C·D·E 재확인 — D(키, SQL 탭 처리기가 먼저)·E(테마 7종) ✓, C(한글 IME)는 사용자가 Folderss에서 써 보고 특별한 문제 없다고 함(2026-10-22) — 아래 항목은 하나씩 따로 보지 않았고, 쓰면서 문제가 보이면 따로 고친다
 
 ## 7. 실측 결과 기록란
 
@@ -231,6 +234,9 @@ SELECT '닫히지 않은 문자열 → 끝까지 문자열
 | 2026-10-21 | Claude (헤드리스) | 〃 | 2-2 색이 뒤집히는 고치기 (D3-3) | 증분: 맨 앞 /* 13.9ms · 가운데 ' 0.8ms(약 4천 자만 읽음) / 전체: 57.4 · 53.3ms(290만 자) | ✓ |
 | 2026-10-21 | Claude (헤드리스) | 〃 | 2-2 스크롤 D3-3 한 화면 (30회 중앙값) | 증분 7.5~16.8ms · 강조 없음 6.8~14.4ms · TextBox 4.8~7.2ms (실행마다 흔들림) | 강조로 1~2ms 더함 |
 | 2026-10-21 | Claude (헤드리스) | 〃 | 2-2 테마 7종 (SqlHighlightLogic.Palette) | 주석 4.6~7.5 · 문자열 5.1~7.7 · 키워드 4.6~7.6:1, 주석:본문 2.3:1 이상, 테마 바꾸면 바로 다시 칠함 | ✓ |
+| 2026-10-22 | Claude (헤드리스) | 〃 | 3단계 B 넣기→첫 화면, SQL 탭 편집기(SqlEditor, 3회 중앙값) | D2 실무형 31 · D3-1 30 · D3-2 62 · D3-3 80 · D4-3 전부 주석 62ms / 옛 TextBox 0.6 · 0.7 · 3.6 · 4.6 · 5.0초 | ✓ |
+| 2026-10-22 | Claude (헤드리스) | 〃 | 3단계 B 키 입력, SQL 탭 편집기(SQL 탭 처리기 — 위치 표시·임시 저장 타이머 포함, 10회 중앙값 가운데·끝) | D2 9.3·7.6 · D3-1 7.8·6.6 · D3-2 6.3·5.4 · D3-3 5.7·8.7 · D4-3 6.3·8.5ms (최대 8~35ms, 한두 번 튐) / 같은 실행의 강조만 붙인 편집기 3.5~8.4ms · 옛 TextBox 3.5~25.4ms | ✓ 16ms 안 — SQL 탭 처리기가 1~4ms 더함 |
+| 2026-10-22 | Claude (헤드리스) | 〃 | 3단계 회귀 확인표(6절) R1~R7 · A·K·D·E·S·T | 모두 통과(R7은 Oracle XE 11.2 실행·F4) | ✓ — C(IME)는 사용자 확인(특별한 문제 없음) |
 | | | | | | |
 
 ## 8. 1단계 중간 판단 (2026-10-21, 헤드리스 A·B·D·E)

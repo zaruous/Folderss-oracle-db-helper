@@ -52,6 +52,7 @@ namespace MyPlugin
             "Ctrl+/ — 줄 주석 토글",
             "Ctrl+Shift+U / Ctrl+Shift+L — 선택 영역 대문자 / 소문자",
             "F4 — 커서가 있는 테이블 이름(또는 선택한 스키마.이름)의 정보: 열 · 인덱스 · 제약 조건",
+            "Tab / Shift+Tab — 들여쓰기 / 내어쓰기 (여러 줄을 고르면 그 줄들 모두)",
             "Ctrl+Z / Ctrl+Y — 실행 취소 / 다시 실행",
             "Ctrl+F — 찾기 (F3 / Shift+F3 다음 / 이전, Esc 닫기)",
             "",

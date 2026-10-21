@@ -12,14 +12,14 @@ namespace MyPlugin
     internal enum WorkspacePane { Grid, Messages, History }
 
     /// <summary>
-    /// SQL 탭 하나의 상태. 편집기(TextBox)는 탭마다 따로 두어 텍스트·캐럿·선택·스크롤·되돌리기 기록이 탭별로 유지된다.
+    /// SQL 탭 하나의 상태. 편집기(SqlEditor)는 탭마다 따로 두어 텍스트·캐럿·선택·스크롤·되돌리기 기록이 탭별로 유지된다.
     /// UI 스레드에서만 읽고 쓴다.
     /// </summary>
     internal sealed class SqlTabState
     {
         private readonly string _baseTitle;
 
-        public SqlTabState(string title, string dbId, TextBox editor)
+        public SqlTabState(string title, string dbId, SqlEditor editor)
         {
             _baseTitle = title;
             DbId = dbId;
@@ -58,13 +58,10 @@ namespace MyPlugin
         /// <summary>대상 DB(접속 Id). 없으면 null.</summary>
         public string DbId { get; set; }
 
-        public TextBox Editor { get; }
+        public SqlEditor Editor { get; }
 
         /// <summary>탭을 만들 때의 글(첫 탭 안내문·새 탭 머리말). 이것과 같으면 임시 저장하지 않는다. 되살린 탭은 "".</summary>
         public string InitialText { get; set; } = "";
-
-        /// <summary>편집기 첫 줄의 위쪽 위치(스크롤 0 기준). 줄 번호 칸을 맞추려고 처음 배치 뒤에 잰다. 아직 모르면 NaN.</summary>
-        public double FirstLineTop { get; set; } = double.NaN;
 
         // ---- 조회 결과 ----
         // 문장 하나를 실행하면 결과 하나, 여러 문장(선택 영역·스크립트)을 실행하면 조회마다 결과 하나(결과 하위 탭).

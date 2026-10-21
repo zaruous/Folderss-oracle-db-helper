@@ -113,11 +113,13 @@ dotnet test tests/MyPlugin.OracleIT
 
 ### 화면 시험 (헤드리스)
 
-`tests/MyPlugin.UiTests`는 Folderss 없이 **플러그인만** 띄워 실제 화면을 조작합니다. publish한 zip을 풀어 Folderss와 같은 로드 컨텍스트(`.deps.json`으로 DLL·네이티브 DLL을 찾음)로 불러, 시험용 `IPluginManager`(설정은 데이터 폴더의 settings.json, 접속은 DPAPI로 넣음)를 주고 `CreateView()`를 창에 담습니다. WPF는 STA 스레드 하나에 Folderss 테마(색 사전 + AvalonDock을 뺀 `Controls.xaml` 사본)를 입히고 소프트웨어 렌더링으로 그립니다.
+`tests/MyPlugin.UiTests`는 Folderss 없이 **플러그인만** 띄워 실제 화면을 조작합니다. publish한 zip을 풀어 Folderss와 같은 로드 컨텍스트(`.deps.json`으로 DLL·네이티브 DLL을 찾음)로 불러, 시험용 `IPluginManager`(설정은 데이터 폴더의 settings.json, 접속은 DPAPI로 넣음)를 주고 `CreateView()`를 창에 담습니다. WPF는 STA 스레드 하나에 Folderss 테마(색 사전 7종 + AvalonDock을 뺀 `Controls.xaml` 사본, 기본 Black)를 입히고 소프트웨어 렌더링으로 그립니다.
 
 - `scripts/ui-test.ps1`이 **숨은 데스크톱**(CreateDesktop — 화면 전환 없음)에서 `dotnet test`를 돌립니다. 사용자의 마우스·키보드·포커스·창을 건드리지 않고, 도는 동안 사용자 데스크톱에 시험 창이 하나라도 뜨면 실패로 알립니다. 숨은 데스크톱이 아니면 시험은 건너뜁니다.
 - 화면은 자동화 피어(Invoke)·WPF 트리·AutomationId로 찾고 누릅니다. 모달 창을 여는 버튼은 `UiThread.Post`로 누르고, Windows 파일 대화상자는 Win32(UI 스레드의 #32770 창, WM_SETTEXT·IDOK)로 채웁니다. 캡처는 `RenderTargetBitmap`(실행 폴더의 shots).
 - 실제 Oracle이 필요한 시험은 `FMON_UI_ORACLE`(host:port/service)이 있을 때만 — 계정은 `FMON_UI_ORACLE_USER`·`FMON_UI_ORACLE_PW`(SELECT_CATALOG_ROLE).
+- SQL 편집기 AvalonEdit PoC 실측(`EditorPocHeadlessTests`): 플러그인 로드·성능(지금 TextBox와 비교)·키·테마 7종을 재서 shots에 `poc-measure.md`·`poc-keys.md`·`poc-themes.md`를 남깁니다.
+  Ctrl·Shift는 UI 스레드의 키 상태(`SetKeyboardState`)로 흉내 냅니다 — 키 입력을 보내지 않으므로 다른 창에는 영향이 없습니다. 결과와 판단은 [`docs/sql-editor-avalonedit-plan.md`](docs/sql-editor-avalonedit-plan.md) 7·8절.
 
 ```powershell
 $env:FMON_UI_ORACLE = "localhost:1521/xe"

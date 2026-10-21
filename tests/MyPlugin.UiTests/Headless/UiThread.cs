@@ -121,6 +121,15 @@ namespace MyPlugin.UiTests.Headless
             return found;
         }
 
+        /// <summary>
+        /// 테마 색 사전을 바꾼다 — Folderss ThemeManager.ApplyTheme처럼 맨 앞 사전(색)을 갈아 끼운다. DynamicResource로 묶인 색은 바로 따라온다.
+        /// UI 스레드에서 부른다. 다른 시험이 같은 UI 스레드를 쓰므로 바꾼 시험은 끝에 "Black"으로 되돌린다.
+        /// </summary>
+        public static void ApplyTheme(string name)
+        {
+            Application.Current.Resources.MergedDictionaries[0] = LoadTheme(name);
+        }
+
         private static ResourceDictionary LoadTheme(string name)
         {
             var assembly = Assembly.GetExecutingAssembly();

@@ -36,6 +36,8 @@
 계획·실측 항목·테스트 데이터: [`docs/sql-editor-avalonedit-plan.md`](../sql-editor-avalonedit-plan.md). 범위는 SQL 작업 영역 편집기만.
 
 - [ ] 1. PoC 실측(Windows) — 플러그인 로드, 성능, 한글 IME, 단축키 충돌, 테마 7종. 막는 문제가 있으면 여기서 중단.
+      → 시험판 창은 main에 들어감(PR #24). 헤드리스 A·B·D·E 실측(2026-10-21, `EditorPocHeadlessTests`): 막는 문제 없음.
+      남은 것: C 한글 IME(사람), 키·줄 간격 결정(계획서 8절). 4단계는 증분 강조로 설계 변경(전체 다시 칠하기는 키 입력 14~41ms).
 - [x] 2. 주석·문자열 구간 계산 — `SqlScript.HighlightSpans`(문장 나누기와 같은 토큰 규칙), D1 경계 사례 테스트 `SqlHighlightTests`.
       단독 시간(Linux 참고값): 1만 줄 6.6ms · 5만 줄 37ms · 10만 줄 53ms → 1만 줄 넘으면 4단계에서 지연·증분 계산 필요.
 - [x] 2-1. DBMS별 구문 규칙 `SqlLexRules`(문장 나누기·강조 공통) — Oracle(그대로), PostgreSQL($$·E''·중첩 주석, 블록 없음),

@@ -7,7 +7,7 @@ source:
 base: System.Windows.Window
 used_by: [sql-workspace, shell-menu]
 summary: >-
-  [시험판 전용 — poc/avalonedit-editor 브랜치] 도구 > AvalonEdit PoC로 여는 편집기 실측 창.
+  [시험판 전용 — main에 들어 있음(PR #24), 3단계 교체 뒤 지운다] 도구 > AvalonEdit PoC로 여는 편집기 실측 창.
   지금 SQL 탭의 글과 대상 DB 규칙을 가져와 AvalonEdit으로 보이고 주석·문자열을 칠한다. 본 SQL 탭은 바꾸지 않는다.
 features:
   - name: 편집기
@@ -26,8 +26,10 @@ theme:
   - part: 주석 / 문자열
     keys: [SecondaryText, Theme.Warning]
 limits:
-  - 시험판 전용이다. main에 머지하지 않는다(3단계에서 SQL 탭 편집기 교체로 대신한다).
+  - 시험판 전용이다. 3단계(SQL 탭 편집기 교체)가 끝나면 창과 도구 메뉴 항목을 지운다.
   - 저장·실행·찾기·SQL 탭 단축키는 없다(키가 편집기에서 처리되는지만 본다).
+  - 주석색은 다시 계산할 때만 테마에서 읽는다(테마를 바꾸면 다음 입력·넣기까지 옛 색). 문자열색은 테마와 무관한 고정색(Theme.Warning).
 verification:
-  - Linux에서 빌드·publish zip에 ICSharpCode.AvalonEdit.dll·.deps.json 등록까지 확인. 화면·IME·키는 Windows에서 확인해야 한다.
+  - Linux에서 빌드·publish zip에 ICSharpCode.AvalonEdit.dll·.deps.json 등록까지 확인.
+  - 2026-10-21 Windows 헤드리스(tests/MyPlugin.UiTests/EditorPocHeadlessTests.cs)로 계획서 4절 A·B·D·E 실측 — 도구 메뉴로 열기, 플러그인 로드 컨텍스트, 그리기·색칠, 시험 데이터 버튼, 창 아래 실측 글, 테마 7종 캡처. 한글 IME(C)는 사람이 확인해야 한다.
 related: [sql-workspace, shell-menu]

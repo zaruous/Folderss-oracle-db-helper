@@ -113,6 +113,18 @@ dotnet test tests/MyPlugin.OracleIT
 
 측정값(연결·조회 시간, 사용자에게 보이는 오류 문장 등)은 `tests/MyPlugin.OracleIT/bin/Debug/net8.0/oracle-it-report.txt`에 남습니다.
 
+### 미리보기 (플러그인만 띄우기)
+
+Folderss에 설치하지 않고 플러그인 창만 띄워 직접 써 봅니다(`tools/PluginPreview`). publish한 zip을 Folderss와 같은 로드 컨텍스트로 불러 `CreateView()`를 창에 담고, Folderss 설정 창의 플러그인 탭(SQL 편집기 등)은 창 위 **[플러그인 설정…]**에서 엽니다.
+설정·접속·임시 저장은 작업 폴더(기본 `%TEMP%\folderss-preview`)의 `plugin-data`에 남아 다시 띄워도 이어지고, 사용 중인 Folderss의 데이터는 건드리지 않습니다. 테마를 주지 않으면 Folderss에서 쓰는 테마를 따릅니다.
+
+```powershell
+pwsh scripts/preview.ps1                  # publish → 빌드 → 미리보기 창
+pwsh scripts/preview.ps1 -Theme Light     # 테마: Black·Light·GitHub·Nord·Solarized·Dracula·Catppuccin
+pwsh scripts/preview.ps1 -NoPublish       # 이미 publish한 zip으로
+pwsh scripts/preview.ps1 -Fresh           # 설정·접속·임시 저장을 지우고 처음 상태로
+```
+
 ### 화면 시험 (헤드리스)
 
 `tests/MyPlugin.UiTests`는 Folderss 없이 **플러그인만** 띄워 실제 화면을 조작합니다. publish한 zip을 풀어 Folderss와 같은 로드 컨텍스트(`.deps.json`으로 DLL·네이티브 DLL을 찾음)로 불러, 시험용 `IPluginManager`(설정은 데이터 폴더의 settings.json, 접속은 DPAPI로 넣음)를 주고 `CreateView()`를 창에 담습니다. WPF는 STA 스레드 하나에 Folderss 테마(색 사전 7종 + AvalonDock을 뺀 `Controls.xaml` 사본, 기본 Black)를 입히고 소프트웨어 렌더링으로 그립니다.

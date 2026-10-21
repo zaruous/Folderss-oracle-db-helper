@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    미리보기: Folderss 없이 플러그인만 사용자 화면에 띄운다(scripts/preview.ps1). 헤드리스 UI 시험과 같은 방식으로 publish한 zip을
+    Folderss와 같은 PluginLoadContext로 불러 CreateView()를 창에 담는다. 시험이 아니라 사람이 써 보는 용도라 하드웨어 렌더링 그대로.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Folderss 테마(색 사전 7종 + 컨트롤 스타일) — 헤드리스 UI 시험의 사본을 같이 쓴다 -->
+    <EmbeddedResource Include="..\..\tests\MyPlugin.UiTests\Themes\*.xaml" Link="Themes\%(Filename)%(Extension)" LogicalName="Themes.%(Filename).xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 계약은 기본 로드 컨텍스트에 둔다(Folderss와 같음 — 플러그인 쪽 PluginLoadContext가 계약은 넘겨받는다) -->
+    <ProjectReference Include="..\..\contract\Folderss.PluginContract\Folderss.PluginContract.csproj" />
+  </ItemGroup>
+
+</Project>
